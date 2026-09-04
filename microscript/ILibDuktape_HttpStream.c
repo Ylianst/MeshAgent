@@ -4099,7 +4099,7 @@ duk_ret_t ILibDuktape_httpStream_parseUri(duk_context *ctx)
 ILibTransport_DoneState ILibDuktape_httpStream_webSocket_WriteWebSocketPacket(ILibDuktape_WebSocket_State *state, int opcode, char *_buffer, int _bufferLen, ILibWebClient_WebSocket_FragmentFlags _bufferFragment)
 {
 	char header[10];
-	int maskKeyInt;
+	uint32_t maskKeyInt;
 	int headerLen = 0;
 	unsigned short flags = state->noMasking == 0 ? WEBSOCKET_MASK : 0;
 
@@ -4198,13 +4198,13 @@ ILibTransport_DoneState ILibDuktape_httpStream_webSocket_WriteWebSocketPacket(IL
 
 		// Mask the payload
 		util_random(4, maskKey);
-		maskKeyInt = ((int*)(maskKey))[0];
-		if (bufferLen > 0) 
+		maskKeyInt = ILibUnaligned_Read32(maskKey);
+		if (bufferLen > 0)
 		{
 			int x;
-			// Note that the line below will cause a SegFault on Linux when compiled with GCC -O3, the fault happens at the XOR (^) operation.
-			// Compiling with -O2 works also, doing the masking operating byte-by-byte also works with -O3.
-			for (x = 0; x < (bufferLen >> 2); ++x) { ((int*)(dataFrame+headerLen+4))[x] = ((int*)buffer)[x] ^ (int)maskKeyInt; } // Mask 4 bytes at a time (SegFaults with -O3).
+			// maskKey/dataFrame/buffer all sit at runtime offsets, so the 4-byte-at-a-time masking below
+			// must not be done through pointer casts (it faulted with GCC -O3, and traps on MIPS/ARMv5).
+			for (x = 0; x < (bufferLen >> 2); ++x) { ILibUnaligned_Write32(dataFrame + headerLen + 4 + (x << 2), ILibUnaligned_Read32(buffer + (x << 2)) ^ maskKeyInt); } // Mask 4 bytes at a time
 			for (x = (x << 2); x < bufferLen; ++x) { dataFrame[x + headerLen + 4] = buffer[x] ^ maskKey[x % 4]; } // Mask the reminder
 		}
 		retVal = ILibDuktape_DuplexStream_WriteData(state->encodedStream, dataFrame, headerLen + 4 + bufferLen) == 0 ? ILibTransport_DoneState_COMPLETE : ILibTransport_DoneState_INCOMPLETE;
@@ -4342,7 +4342,7 @@ ILibTransport_DoneState ILibDuktape_httpStream_webSocket_EncodedWriteSink(ILibDu
 		return(ILibDuktape_httpStream_webSocket_EncodedWriteSink_DispatchUnshift(stream, buffer, bufferLen));
 	} 
 
-	hdr = ntohs(((unsigned short*)(buffer))[0]);
+	hdr = ntohs(ILibUnaligned_Read16(buffer));
 	FIN = (hdr & WEBSOCKET_FIN) != 0;
 	OPCODE = (hdr & WEBSOCKET_OPCODE) >> 8;
 	RSV = (hdr & WEBSOCKET_RSV) >> 8;
@@ -4359,7 +4359,7 @@ ILibTransport_DoneState ILibDuktape_httpStream_webSocket_EncodedWriteSink(ILibDu
 	if (plen == 126)
 	{
 		if (bufferLen < 4) { return(ILibDuktape_httpStream_webSocket_EncodedWriteSink_DispatchUnshift(stream, buffer, bufferLen)); } // We need at least 4 bytes to read enough of the headers
-		plen = (unsigned short)ntohs(((unsigned short*)(buffer))[1]);
+		plen = (unsigned short)ntohs(ILibUnaligned_Read16(buffer + 2));
 		i += 2;
 	}
 	else if (plen == 127)
@@ -4370,7 +4370,7 @@ ILibTransport_DoneState ILibDuktape_httpStream_webSocket_EncodedWriteSink(ILibDu
 		}
 		else
 		{
-			unsigned long long v = ILibNTOHLL(((unsigned long long*)(buffer + 2))[0]);
+			unsigned long long v = ILibNTOHLL(ILibUnaligned_Read64(buffer + 2));
 			if (v > 0x7FFFFFFFUL)
 			{
 				// this value is too big to store in a 32 bit signed variable, so disconnect the websocket.
@@ -4396,10 +4396,10 @@ ILibTransport_DoneState ILibDuktape_httpStream_webSocket_EncodedWriteSink(ILibDu
 		// Unmask the data
 		i += 4;	// Move ptr to start of data
 
-		int maskKeyInt = ((int*)(maskingKey))[0];
+		uint32_t maskKeyInt = ILibUnaligned_Read32(maskingKey);
 		if (plen > 0)
 		{
-			for (x = 0; x < (plen >> 2); ++x) { ((int*)(buffer+i))[x] = ((int*)(buffer+i))[x] ^ (int)maskKeyInt; } // Mask 4 bytes at a time
+			for (x = 0; x < (plen >> 2); ++x) { ILibUnaligned_Write32(buffer + i + (x << 2), ILibUnaligned_Read32(buffer + i + (x << 2)) ^ maskKeyInt); } // Mask 4 bytes at a time
 			for (x = (x << 2); x < plen; ++x) { buffer[x + i] = buffer[x + i] ^ maskingKey[x % 4]; } // Mask the reminder
 		}
 	}

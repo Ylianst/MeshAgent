@@ -69,7 +69,8 @@ Variable	- Key
 Variable	- Value
 ------------------------------------------ */
 
-#define ILibSimpleDataStore_RecordHeader_ValueOffset(h) (((uint64_t*)(((char*)h) - sizeof(uint64_t)))[0])
+#define ILibSimpleDataStore_RecordHeader_ValueOffset(h) ILibUnaligned_Read64(((char*)(h)) - sizeof(uint64_t))
+#define ILibSimpleDataStore_RecordHeader_SetValueOffset(h, v) ILibUnaligned_Write64(((char*)(h)) - sizeof(uint64_t), (v))
 
 #pragma pack(push, 1)
 typedef struct ILibSimpleDataStore_RecordHeader_NG
@@ -132,7 +133,7 @@ void ILibSimpleDataStore_CachedEx(ILibSimpleDataStore dataStore, char* key, size
 		// This is a compresed entry
 		char *tmpkey = (char*)ILibMemory_SmartAllocate(keyLen + sizeof(uint32_t));
 		memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
-		((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)key, (uint32_t)keyLen);
+		ILibUnaligned_Write32(tmpkey + keyLen, crc32c(0, (unsigned char*)key, (uint32_t)keyLen));
 		key = tmpkey;
 		keyLen = (int)ILibMemory_Size(key);
 	}
@@ -192,7 +193,7 @@ void ILibSimpleDataStore_Cached_GetValues_sink(ILibHashtable sender, void *Key1,
 	// check if this is a compressed record
 	if (Key2Len > sizeof(uint32_t))
 	{
-		if (((uint32_t*)(Key2 + Key2Len - sizeof(uint32_t)))[0] == crc32c(0, (unsigned char*)Key2, Key2Len - sizeof(uint32_t)))
+		if (ILibUnaligned_Read32(Key2 + Key2Len - sizeof(uint32_t)) == crc32c(0, (unsigned char*)Key2, Key2Len - sizeof(uint32_t)))
 		{
 			Key2Len -= sizeof(uint32_t);
 			ILibInflate(entry->value, entry->valueLength, NULL, &tmpbufferLen, 0);
@@ -308,7 +309,7 @@ ILibSimpleDataStore_RecordHeader_NG* ILibSimpleDataStore_ReadNextRecord(ILibSimp
 	node->nodeSize = (int)ntohl(node->nodeSize);
 	node->keyLen = (int)ntohl(node->keyLen);
 	node->valueLength = (int)ntohl(node->valueLength);
-	ILibSimpleDataStore_RecordHeader_ValueOffset(node) = (uint64_t)((uint64_t)ILibSimpleDataStore_GetPosition(root->dataFile) + (uint64_t)node->keyLen);
+	ILibSimpleDataStore_RecordHeader_SetValueOffset(node, (uint64_t)((uint64_t)ILibSimpleDataStore_GetPosition(root->dataFile) + (uint64_t)node->keyLen));
 
 	if (node->keyLen > (int)((sizeof(ILibScratchPad) - nodeSize - sizeof(uint64_t))))
 	{
@@ -345,7 +346,7 @@ ILibSimpleDataStore_RecordHeader_NG* ILibSimpleDataStore_ReadNextRecord(ILibSimp
 		// Before we assume this is a bad hash check, we need to verify it's not a compressed node
 		if (node->keyLen > sizeof(uint32_t))
 		{
-			if (crc32c(0, (unsigned char*)node->key, node->keyLen - sizeof(uint32_t)) == ((uint32_t*)(node->key + node->keyLen - sizeof(uint32_t)))[0])
+			if (crc32c(0, (unsigned char*)node->key, node->keyLen - sizeof(uint32_t)) == ILibUnaligned_Read32(node->key + node->keyLen - sizeof(uint32_t)))
 			{
 				return(node);
 			}
@@ -676,7 +677,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_PutEx2(ILibSimpleDataStore dataStore, char
 		char *tmpkey = (char*)ILibMemory_SmartAllocate(keyLen + sizeof(int));
 		keyAllocated = 1;
 		memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
-		((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)tmpkey, (uint32_t)keyLen); // No dataloss, capped to INT32_MAX
+		ILibUnaligned_Write32(tmpkey + keyLen, crc32c(0, (unsigned char*)tmpkey, (uint32_t)keyLen)); // No dataloss, capped to INT32_MAX
 		key = tmpkey;
 		keyLen = (int)ILibMemory_Size(key);
 		memcpy_s(hash, sizeof(hash), vhash, SHA384HASHSIZE);
@@ -778,7 +779,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char*
 			size_t tmplen = 0;
 			char *tmpkey = (char*)ILibMemory_SmartAllocate(keyLen + sizeof(uint32_t));
 			memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
-			((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)key, (uint32_t)keyLen); // No dataloss, capped to INT32_MAX
+			ILibUnaligned_Write32(tmpkey + keyLen, crc32c(0, (unsigned char*)key, (uint32_t)keyLen)); // No dataloss, capped to INT32_MAX
 			centry = (ILibSimpleDataStore_CacheEntry*)ILibHashtable_Get(root->cacheTable, NULL, tmpkey, (int)ILibMemory_Size(tmpkey));
 			if (centry != NULL)
 			{
@@ -817,7 +818,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char*
 		// Before returning an error, check if this is a compressed record
 		char *tmpkey = (char*)ILibMemory_SmartAllocate(keyLen + sizeof(uint32_t));
 		memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
-		((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)tmpkey, (uint32_t)keyLen); // no dataloss, capped to INT32_MAX
+		ILibUnaligned_Write32(tmpkey + keyLen, crc32c(0, (unsigned char*)tmpkey, (uint32_t)keyLen)); // no dataloss, capped to INT32_MAX
 		entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, tmpkey, (int)ILibMemory_Size(tmpkey));
 		ILibMemory_Free(tmpkey);
 		if (entry != NULL) { isCompressed = 1; }
@@ -881,7 +882,7 @@ __EXPORT_TYPE char* ILibSimpleDataStore_GetHashEx(ILibSimpleDataStore dataStore,
 			// Let's check if this is a compressed record entry
 			char *tmpkey = (char*)ILibMemory_SmartAllocate(keyLen + sizeof(uint32_t));
 			memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
-			((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)key, (uint32_t)keyLen); // no dataloss, capped to INT32_MAX
+			ILibUnaligned_Write32(tmpkey + keyLen, crc32c(0, (unsigned char*)key, (uint32_t)keyLen)); // no dataloss, capped to INT32_MAX
 			centry = (ILibSimpleDataStore_CacheEntry*)ILibHashtable_Get(root->cacheTable, NULL, tmpkey, (int)ILibMemory_Size(tmpkey));
 			ILibMemory_Free(tmpkey);
 			if (centry != NULL)
@@ -901,7 +902,7 @@ __EXPORT_TYPE char* ILibSimpleDataStore_GetHashEx(ILibSimpleDataStore dataStore,
 		// Before we return an error, let's check if this is a compressed record
 		char* tmpkey = (char*)ILibMemory_SmartAllocate(keyLen + sizeof(uint32_t));
 		memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
-		((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)key, (uint32_t)keyLen);
+		ILibUnaligned_Write32(tmpkey + keyLen, crc32c(0, (unsigned char*)key, (uint32_t)keyLen));
 		entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, tmpkey, (int)ILibMemory_Size(tmpkey));
 		ILibMemory_Free(tmpkey);
 	}
@@ -928,7 +929,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_DeleteEx(ILibSimpleDataStore dataStore, ch
 		// Check to see if this is a compressed record, before we return an error
 		char *tmpkey = (char*)ILibMemory_SmartAllocate(keyLen + sizeof(uint32_t));
 		memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
-		((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)key, (uint32_t)keyLen); // no dataloss, capped to INT32_MAX
+		ILibUnaligned_Write32(tmpkey + keyLen, crc32c(0, (unsigned char*)key, (uint32_t)keyLen)); // no dataloss, capped to INT32_MAX
 		entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Remove(root->keyTable, NULL, tmpkey, (int)ILibMemory_Size(tmpkey));
 		if (entry != NULL)
 		{
@@ -1036,7 +1037,7 @@ void ILibSimpleDataStore_EnumerateKeysSink(ILibHashtable sender, void *Key1, cha
 	if (Key2Len > sizeof(uint32_t))
 	{
 		// Check if this is a compressed entry
-		if (crc32c(0, (unsigned char*)Key2, Key2Len - sizeof(uint32_t)) == ((uint32_t*)(Key2 + Key2Len - sizeof(uint32_t)))[0])
+		if (crc32c(0, (unsigned char*)Key2, Key2Len - sizeof(uint32_t)) == ILibUnaligned_Read32(Key2 + Key2Len - sizeof(uint32_t)))
 		{
 			Key2Len -= sizeof(uint32_t);
 		}

@@ -897,8 +897,8 @@ int kvm_server_inputdata(char* block, int blocklen)
 
 	// Decode the block header
 	if (blocklen < 4) return 0;
-	type = ntohs(((unsigned short*)(block))[0]);
-	size = ntohs(((unsigned short*)(block))[1]);
+	type = ntohs(ILibUnaligned_Read16(block));
+	size = ntohs(ILibUnaligned_Read16(block + 2));
 	if (size > blocklen) return 0;
 
 	switch (type)
@@ -927,9 +927,9 @@ int kvm_server_inputdata(char* block, int blocklen)
 			if (size == 10 || size == 12)
 			{
 				// Client sends coords relative to the captured region; translate to absolute screen coords
-				x = ((int)ntohs(((unsigned short*)(block))[3])) + CAPTURE_X;
-				y = ((int)ntohs(((unsigned short*)(block))[4])) + CAPTURE_Y;
-				if (size == 12) w = ((short)ntohs(((short*)(block))[5]));
+				x = ((int)ntohs(ILibUnaligned_Read16(block + 6))) + CAPTURE_X;
+				y = ((int)ntohs(ILibUnaligned_Read16(block + 8))) + CAPTURE_Y;
+				if (size == 12) w = ((short)ntohs(ILibUnaligned_Read16(block + 10)));
 				if (logFile) { fprintf(logFile, "RemoteMouseMove: (%d, %d)\n", x, y); }
 				// printf("x:%d, y:%d, b:%d, w:%d\n", x, y, block[5], w);
 				if (g_enableEvents)
@@ -942,8 +942,8 @@ int kvm_server_inputdata(char* block, int blocklen)
 		}
 	case MNG_KVM_COMPRESSION: // Compression
 		{
-			if (size >= 10) { int fr = ((int)ntohs(((unsigned short*)(block + 8))[0])); if (fr >= 20 && fr <= 5000) FRAME_RATE_TIMER = fr; }
-			if (size >= 8) { int ns = ((int)ntohs(((unsigned short*)(block + 6))[0])); if (ns >= 64 && ns <= 4096) SCALING_FACTOR_NEW = ns; }
+			if (size >= 10) { int fr = ((int)ntohs(ILibUnaligned_Read16(block + 8))); if (fr >= 20 && fr <= 5000) FRAME_RATE_TIMER = fr; }
+			if (size >= 8) { int ns = ((int)ntohs(ILibUnaligned_Read16(block + 6))); if (ns >= 64 && ns <= 4096) SCALING_FACTOR_NEW = ns; }
 			if (size >= 6) { set_tile_compression((int)block[4], (int)block[5]); }
 			COMPRESSION_RATIO = 100;
 			break;
@@ -976,7 +976,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 		}
 	case MNG_KVM_FRAME_RATE_TIMER:
 		{
-			int fr = ((int)ntohs(((unsigned short*)(block))[2]));
+			int fr = ((int)ntohs(ILibUnaligned_Read16(block + 4)));
 			if (fr >= 20 && fr <= 5000) FRAME_RATE_TIMER = fr;
 			break;
 		}
@@ -987,7 +987,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 		}
 	case MNG_KVM_SET_DISPLAY:
 		{
-			unsigned short newval = ntohs(((unsigned short*)(block))[2]);
+			unsigned short newval = ntohs(ILibUnaligned_Read16(block + 4));
 			if (g_monitor_count > 0)
 			{
 				// XRandR mode: 65535 = all monitors, 1..N = specific physical monitor
@@ -1639,13 +1639,13 @@ void kvm_relay_readSink(ILibProcessPipe_Pipe sender, char *buffer, size_t buffer
 
 	if (bufferLen > 4)
 	{
-		if (ntohs(((unsigned short*)(buffer))[0]) == (unsigned short)MNG_JUMBO)
+		if (ntohs(ILibUnaligned_Read16(buffer)) == (unsigned short)MNG_JUMBO)
 		{
 			if (bufferLen > 8)
 			{
-				if (bufferLen >= (8 + (int)ntohl(((unsigned int*)(buffer))[1])))
+				if (bufferLen >= (8 + (int)ntohl(ILibUnaligned_Read32(buffer + 4))))
 				{
-					*bytesConsumed = 8 + (int)ntohl(((unsigned int*)(buffer))[1]);
+					*bytesConsumed = 8 + (int)ntohl(ILibUnaligned_Read32(buffer + 4));
 					writeHandler(buffer, *bytesConsumed, reserved);
 					return;
 				}
@@ -1653,7 +1653,7 @@ void kvm_relay_readSink(ILibProcessPipe_Pipe sender, char *buffer, size_t buffer
 		}
 		else
 		{
-			size = ntohs(((unsigned short*)(buffer))[1]);
+			size = ntohs(ILibUnaligned_Read16(buffer + 2));
 			if (size <= bufferLen)
 			{
 				*bytesConsumed = size;

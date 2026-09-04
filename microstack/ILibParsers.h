@@ -173,6 +173,16 @@ void ILibDispatchSemaphore_post(sem_t* s);
 #include<stdint.h>
 static inline void ignore_result(uintptr_t result) { (void)result; }
 
+// Alignment-safe scalar access. Strict-alignment CPUs (MIPS, ARMv5/v6, RISC-V, SPARC) raise
+// SIGBUS when a 16/32/64 bit load or store is issued against an unaligned address, so any wide
+// access into a byte buffer at a runtime offset must go through these instead of a pointer cast.
+static inline uint16_t ILibUnaligned_Read16(const void *src) { uint16_t v; memcpy(&v, src, sizeof(v)); return(v); }
+static inline uint32_t ILibUnaligned_Read32(const void *src) { uint32_t v; memcpy(&v, src, sizeof(v)); return(v); }
+static inline uint64_t ILibUnaligned_Read64(const void *src) { uint64_t v; memcpy(&v, src, sizeof(v)); return(v); }
+static inline void ILibUnaligned_Write16(void *dst, uint16_t v) { memcpy(dst, &v, sizeof(v)); }
+static inline void ILibUnaligned_Write32(void *dst, uint32_t v) { memcpy(dst, &v, sizeof(v)); }
+static inline void ILibUnaligned_Write64(void *dst, uint64_t v) { memcpy(dst, &v, sizeof(v)); }
+
 #if defined(_DEBUG)
 #define PRINTERROR() printf("ERROR in %s, line %d\r\n", __FILE__, __LINE__);
 #else
@@ -463,13 +473,16 @@ int ILibIsRunningOnChainThread(void* chain);
 
 	#define ILibChain_Link_SetMetadata(chainLink, value) if((chainLink)!=NULL) { ILibMemory_Free(((ILibChain_Link*)chainLink)->MetaData); ((ILibChain_Link*)chainLink)->MetaData = value; }
 	#define ILibChain_Link_GetMetadata(chainLink) ((chainLink)==NULL?"":(((ILibChain_Link*)chainLink)->MetaData))
-	#define ILibMemory_Canary (((int*)((char*)(const char*)"broe"))[0])
+	#define ILibMemory_Canary ((int)ILibUnaligned_Read32("broe"))
 	#define ILibMemory_RawPtr(ptr) ((char*)(ptr) - sizeof(ILibMemory_Header))
 	#define ILibMemory_RawSize(ptr) (ILibMemory_Size((ptr)) + ILibMemory_ExtraSize((ptr)) + sizeof(ILibMemory_Header))
 	#define ILibMemory_MemType(ptr) (((ILibMemory_Header*)ILibMemory_RawPtr((ptr)))->memoryType)
 	#define ILibMemory_Size(ptr) (((ILibMemory_Header*)ILibMemory_RawPtr((ptr)))->size)
 	#define ILibMemory_ExtraSize(ptr) (((ILibMemory_Header*)ILibMemory_RawPtr((ptr)))->extraSize)
-	#define ILibMemory_Ex_CanaryOK(ptr) ((ptr)==NULL?0:((((ILibMemory_Header*)ILibMemory_RawPtr((ptr)))->CANARY) == ILibMemory_Canary))
+	// The canary is probed against pointers that may not be ILibMemory blocks at all (duktape
+	// buffers, list nodes). Every real one is malloc/alloca + sizeof(ILibMemory_Header), so a
+	// misaligned candidate can be rejected outright rather than faulted on (SIGBUS on MIPS).
+	#define ILibMemory_Ex_CanaryOK(ptr) (((ptr)==NULL || ((((uintptr_t)(ptr)) & (sizeof(void*) - 1)) != 0))?0:((((ILibMemory_Header*)ILibMemory_RawPtr((ptr)))->CANARY) == ILibMemory_Canary))
 #ifdef WIN32
 	int ILibMemory_CanaryOK(void *ptr);
 #else

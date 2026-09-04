@@ -285,7 +285,7 @@ duk_ret_t ILibDuktape_Polyfills_Buffer_readInt32BE(duk_context *ctx)
 	duk_push_this(ctx);
 	buffer = Duktape_GetBuffer(ctx, -1, &bufferLen);
 
-	duk_push_int(ctx, ntohl(((int*)(buffer + offset))[0]));
+	duk_push_int(ctx, ntohl((int)ILibUnaligned_Read32(buffer + offset)));
 	return(1);
 }
 duk_ret_t ILibDuktape_Polyfills_Buffer_alloc(duk_context *ctx)
@@ -1072,7 +1072,7 @@ duk_ret_t ILibDuktape_ntohl(duk_context *ctx)
 	int offset = duk_require_int(ctx, 1);
 
 	if ((int)bufferLen < (4 + offset)) { return(ILibDuktape_Error(ctx, "buffer too small")); }
-	duk_push_int(ctx, ntohl(((unsigned int*)(buffer + offset))[0]));
+	duk_push_int(ctx, ntohl(ILibUnaligned_Read32(buffer + offset)));
 	return 1;
 }
 duk_ret_t ILibDuktape_ntohs(duk_context *ctx)
@@ -1082,7 +1082,7 @@ duk_ret_t ILibDuktape_ntohs(duk_context *ctx)
 	int offset = duk_require_int(ctx, 1);
 
 	if ((int)bufferLen < 2 + offset) { return(ILibDuktape_Error(ctx, "buffer too small")); }
-	duk_push_int(ctx, ntohs(((unsigned short*)(buffer + offset))[0]));
+	duk_push_int(ctx, ntohs(ILibUnaligned_Read16(buffer + offset)));
 	return 1;
 }
 duk_ret_t ILibDuktape_htonl(duk_context *ctx)
@@ -1093,7 +1093,7 @@ duk_ret_t ILibDuktape_htonl(duk_context *ctx)
 	unsigned int val = (unsigned int)duk_require_int(ctx, 2);
 
 	if ((int)bufferLen < (4 + offset)) { return(ILibDuktape_Error(ctx, "buffer too small")); }
-	((unsigned int*)(buffer + offset))[0] = htonl(val);
+	ILibUnaligned_Write32(buffer + offset, htonl(val));
 	return 0;
 }
 duk_ret_t ILibDuktape_htons(duk_context *ctx)
@@ -1104,7 +1104,7 @@ duk_ret_t ILibDuktape_htons(duk_context *ctx)
 	unsigned int val = (unsigned int)duk_require_int(ctx, 2);
 
 	if ((int)bufferLen < (2 + offset)) { return(ILibDuktape_Error(ctx, "buffer too small")); }
-	((unsigned short*)(buffer + offset))[0] = htons(val);
+	ILibUnaligned_Write16(buffer + offset, htons((unsigned short)val));
 	return 0;
 }
 void ILibDuktape_Polyfills_byte_ordering(duk_context *ctx)

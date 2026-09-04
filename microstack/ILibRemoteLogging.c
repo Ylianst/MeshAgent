@@ -635,8 +635,8 @@ void ILibRemoteLogging_FileTransport_CommandSink(ILibRemoteLogging sender, ILibR
 			{
 				if (dataLen == 4 && ft->logFile != NULL)
 				{
-					unsigned short newModules = ntohs(((unsigned short*)data)[0]);
-					unsigned short newFlags = ntohs(((unsigned short*)data)[1]);
+					unsigned short newModules = ntohs(ILibUnaligned_Read16(data));
+					unsigned short newFlags = ntohs(ILibUnaligned_Read16((char*)data + 2));
 					obj->Sessions[i].Flags = (newFlags & 0x3F) << 16;
 					obj->Sessions[i].Flags |= (unsigned int)newModules;
 

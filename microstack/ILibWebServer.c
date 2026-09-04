@@ -572,7 +572,7 @@ int ILibWebServer_ProcessWebSocketData(struct ILibWebServer_Session *ws, char* b
 
 	if (length < 2) { return(offset); } // We need at least 2 bytes to read enough of the headers to know how long the frame is
 
-	hdr = ntohs(((unsigned short*)(buffer + offset))[0]);
+	hdr = ntohs(ILibUnaligned_Read16(buffer + offset));
 	FIN = (hdr & WEBSOCKET_FIN) != 0;
 	OPCODE = (hdr & WEBSOCKET_OPCODE) >> 8;
 
@@ -580,7 +580,7 @@ int ILibWebServer_ProcessWebSocketData(struct ILibWebServer_Session *ws, char* b
 	if (plen == 126)
 	{
 		if (length < 4) { return(offset); } // We need at least 4 bytes to read enough of the headers
-		plen = (unsigned short)ntohs(((unsigned short*)(buffer + offset))[1]);
+		plen = (unsigned short)ntohs(ILibUnaligned_Read16(buffer + offset + 2));
 		i += 2;
 	}
 	else if (plen == 127)
@@ -591,7 +591,7 @@ int ILibWebServer_ProcessWebSocketData(struct ILibWebServer_Session *ws, char* b
 		} 
 		else
 		{
-			unsigned long long v = ILibNTOHLL(((unsigned long long*)(buffer + offset + 2))[0]);
+			unsigned long long v = ILibNTOHLL(ILibUnaligned_Read64(buffer + offset + 2));
 			if(v > 0x7FFFFFFFUL)
 			{
 				// this value is too big to store in a 32 bit signed variable, so disconnect the websocket.
@@ -1470,21 +1470,21 @@ int ILibWebServer_WebSocket_CreateHeader(char* header, unsigned short FLAGS, uns
 	{
 		retVal = 2;
 		header1 |= payloadLength;
-		((unsigned short*)header)[0] = htons(header1);
+		ILibUnaligned_Write16(header, htons(header1));
 	}
 	else if (payloadLength <= 0xFFFF)
 	{
 		retVal = 4;
 		header1 |= 126;
-		((unsigned short*)header)[0] = htons(header1);
-		((unsigned short*)header)[1] = htons((unsigned short)payloadLength);
+		ILibUnaligned_Write16(header, htons(header1));
+		ILibUnaligned_Write16(header + 2, htons((unsigned short)payloadLength));
 	}
 	else
 	{
 		retVal = 10;
 		header1 |= 127;
-		((unsigned short*)header)[0] = htons(header1);
-		((unsigned long long*)(header + 2))[0] = ILibHTONLL((uint64_t)payloadLength);
+		ILibUnaligned_Write16(header, htons(header1));
+		ILibUnaligned_Write64(header + 2, ILibHTONLL((uint64_t)payloadLength));
 	}
 
 	return retVal;

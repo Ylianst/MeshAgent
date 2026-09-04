@@ -896,7 +896,7 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(char *
 	}
 #endif
 
-	if ((buffer != NULL) && (bufferLen > 4) && (ntohs(((unsigned short*)buffer)[0]) == MNG_DEBUG))
+	if ((buffer != NULL) && (bufferLen > 4) && (ntohs(ILibUnaligned_Read16(buffer)) == MNG_DEBUG))
 	{
 		Duktape_Console_LogEx(ptrs->ctx, ILibDuktape_LogType_Info1, "%s", buffer + 4);
 	}
@@ -1130,7 +1130,7 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop_DomainIPC_DataSink(duk_context 
 	// We need to properly frame the data before we propagate it up
 	if (bufferLen > 4)
 	{
-		size = ntohs(((unsigned short*)(buffer))[1]);
+		size = ntohs(ILibUnaligned_Read16(buffer + 2));
 		if (size <= bufferLen)
 		{
 			// We have all the data, to be able to frame it
@@ -2656,13 +2656,13 @@ int GenerateSHA384FileHash(char *filePath, char *fileHash)
 	if (checkSumIndex != 0)
 	{
 		bytesRead = fread(ILibScratchPad, 1, checkSumIndex + 4, tmpFile);
-		((unsigned int*)(ILibScratchPad + checkSumIndex))[0] = 0;
+		ILibUnaligned_Write32(ILibScratchPad + checkSumIndex, 0);
 		SHA384_Update(&ctx, ILibScratchPad, bytesRead);
 		if (endIndex > 0) { bytesLeft -= (unsigned int)bytesRead; }
 
 		bytesRead = fread(ILibScratchPad, 1, tableIndex + 8 - (checkSumIndex + 4), tmpFile);
-		((unsigned int*)(ILibScratchPad + bytesRead - 8))[0] = 0;
-		((unsigned int*)(ILibScratchPad + bytesRead - 8))[1] = 0;
+		ILibUnaligned_Write32(ILibScratchPad + bytesRead - 8, 0);
+		ILibUnaligned_Write32(ILibScratchPad + bytesRead - 4, 0);
 		SHA384_Update(&ctx, ILibScratchPad, bytesRead);
 		if (endIndex > 0) { bytesLeft -= (unsigned int)bytesRead; }
 	}
@@ -2941,7 +2941,7 @@ static const char* MeshCommand_Name(unsigned short command)
 // Process MeshCentral server commands.
 void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAgentHostContainer *agent, char *cmd, int cmdLen)
 {
-	unsigned short command = ntohs(((unsigned short*)cmd)[0]);
+	unsigned short command = ntohs(ILibUnaligned_Read16(cmd));
 	unsigned short requestid;
 
 	if (agent->controlChannelDebug != 0)
@@ -3205,7 +3205,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 
 	// All these commands must have both a commandid and a requestid
 	if (cmdLen < 4) return;
-	requestid = ntohs(((unsigned short*)cmd)[1]);
+	requestid = ntohs(ILibUnaligned_Read16(cmd + 2));
 
 	if (agent->controlChannelDebug != 0) 
 	{
@@ -4567,7 +4567,7 @@ int importSettings(MeshAgentHostContainer *agent, char* fileName)
 					}
 					else
 					{
-						if (valLen > 2 && ntohs(((unsigned short*)val)[0]) == HEX_IDENTIFIER)
+						if (valLen > 2 && ntohs(ILibUnaligned_Read16(val)) == HEX_IDENTIFIER)
 						{
 							// HEX value
 							ILibSimpleDataStore_PutEx(agent->masterDb, key, keyLen, ILibScratchPad2, util_hexToBuf(val + 2, valLen - 2, ILibScratchPad2));
@@ -5981,7 +5981,7 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 			else if (strncmp(argv[i], "--script-flags", 14) == 0 && ((i + 1) < argc))
 			{
 				// JS Permissions (see .h for values)
-				if (ntohs(((unsigned short*)argv[i + 1])[0]) == HEX_IDENTIFIER)
+				if (ntohs(ILibUnaligned_Read16(argv[i + 1])) == HEX_IDENTIFIER)
 				{
 					int xlen = (int)strnlen_s(argv[i + 1], 32);
 					if (xlen <= 10)
@@ -6187,7 +6187,9 @@ int MeshAgent_System(char *cmd)
 int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **param)
 {
 	char *startParms = NULL;
-	char _exedata[ILibMemory_Init_Size(1024, sizeof(void*))];
+	// void* element type guarantees the pointer alignment ILibMemory blocks require (a plain
+	// char array only guarantees alignment 1, and ILibMemory_CanaryOK rejects misaligned blocks)
+	void *_exedata[(ILibMemory_Init_Size(1024, sizeof(void*)) + sizeof(void*) - 1) / sizeof(void*)];
 	char *exePath = ILibMemory_Init(_exedata, 1024, sizeof(void*), ILibMemory_Types_STACK);
 	((void**)ILibMemory_Extra(exePath))[0] = agentHost;
 
