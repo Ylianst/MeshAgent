@@ -143,40 +143,49 @@ char exeJavaScriptGuid[] = "B996015880544A19B7F7E9BE44914C18";
 	};
 #endif
 
-	char *SIGTABLE[] =
+	// Map signalname to number through the target's headerfile <signal.h> so it's correct on every architecture
+	// The old static sigtable was based on generic linux, e.g. SPARC/MIPS use SunOS layout, where the old table mapped SIGCHLD onto the uncatchable SIGSTOP.
+	typedef struct ILib_SigMapEntry { const char *name; int num; } ILib_SigMapEntry;
+#ifdef WIN32
+	// Windows never delivers POSIX signals. The names only exist so scripts can register the events
+	static const ILib_SigMapEntry ILib_SigMap[] =
 	{
-		"INVALID"   ,
-		"SIGHUP"    ,
-		"SIGINT"    ,
-		"SIGQUIT"   ,
-		"SIGILL"    ,
-		"SIGTRAP"   ,
-		"SIGIOT"    ,
-		"SIGBUS"    ,
-		"SIGFPE"    ,
-		"SIGKILL"   ,
-		"SIGUSR1"   ,
-		"SIGSEGV"   ,
-		"SIGUSR2"   ,
-		"SIGPIPE"   ,
-		"SIGALRM"   ,
-		"SIGTERM"   ,
-		"SIGSTKFLT" ,
-		"SIGCHLD" 	,
-		"SIGCONTv"  ,
-		"SIGSTOP" 	,
-		"SIGTSTP" 	,
-		"SIGTTIN" 	,
-		"SIGTTOU" 	,
-		"SIGURG"    ,
-		"SIGXCPU" 	,
-		"SIGXFSZ" 	,
-		"SIGVTALRM" ,
-		"SIGPROF"   ,
-		"SIGWINCH"  ,
-		"SIGIO"	    ,
-		"SIGPWR"
+		{ "SIGHUP", 1 }, { "SIGINT", 2 }, { "SIGQUIT", 3 }, { "SIGILL", 4 }, { "SIGTRAP", 5 },
+		{ "SIGABRT", 6 }, { "SIGBUS", 7 }, { "SIGFPE", 8 }, { "SIGKILL", 9 }, { "SIGUSR1", 10 },
+		{ "SIGSEGV", 11 }, { "SIGUSR2", 12 }, { "SIGPIPE", 13 }, { "SIGALRM", 14 }, { "SIGTERM", 15 },
+		{ "SIGSTKFLT", 16 }, { "SIGCHLD", 17 }, { "SIGCONT", 18 }, { "SIGSTOP", 19 }, { "SIGTSTP", 20 },
+		{ "SIGTTIN", 21 }, { "SIGTTOU", 22 }, { "SIGURG", 23 }, { "SIGXCPU", 24 }, { "SIGXFSZ", 25 },
+		{ "SIGVTALRM", 26 }, { "SIGPROF", 27 }, { "SIGWINCH", 28 }, { "SIGIO", 29 }, { "SIGPWR", 30 },
+		{ "SIGSYS", 31 }
 	};
+#else
+	static const ILib_SigMapEntry ILib_SigMap[] =
+	{
+		{ "SIGHUP", SIGHUP }, { "SIGINT", SIGINT }, { "SIGQUIT", SIGQUIT }, { "SIGILL", SIGILL }, { "SIGTRAP", SIGTRAP },
+		{ "SIGABRT", SIGABRT },
+#ifdef SIGIOT
+		{ "SIGIOT", SIGIOT },
+#endif
+		{ "SIGBUS", SIGBUS }, { "SIGFPE", SIGFPE }, { "SIGKILL", SIGKILL }, { "SIGUSR1", SIGUSR1 },
+		{ "SIGSEGV", SIGSEGV }, { "SIGUSR2", SIGUSR2 }, { "SIGPIPE", SIGPIPE }, { "SIGALRM", SIGALRM }, { "SIGTERM", SIGTERM },
+#ifdef SIGSTKFLT
+		{ "SIGSTKFLT", SIGSTKFLT },
+#endif
+		{ "SIGCHLD", SIGCHLD }, { "SIGCONT", SIGCONT }, { "SIGSTOP", SIGSTOP }, { "SIGTSTP", SIGTSTP },
+		{ "SIGTTIN", SIGTTIN }, { "SIGTTOU", SIGTTOU }, { "SIGURG", SIGURG }, { "SIGXCPU", SIGXCPU }, { "SIGXFSZ", SIGXFSZ },
+		{ "SIGVTALRM", SIGVTALRM }, { "SIGPROF", SIGPROF }, { "SIGWINCH", SIGWINCH }, { "SIGIO", SIGIO },
+#ifdef SIGPOLL
+		{ "SIGPOLL", SIGPOLL },
+#endif
+#ifdef SIGPWR
+		{ "SIGPWR", SIGPWR },
+#endif
+		{ "SIGSYS", SIGSYS }
+	};
+#endif
+#define ILib_SigMapLen (sizeof(ILib_SigMap) / sizeof(ILib_SigMap[0]))
+	// number to name. Returns "SIG<num>" if not found (e.g. "SIG34")
+	static const char* ILib_SigName(int num, char *scratch, size_t scratchLen) { size_t i; for (i = 0; i < ILib_SigMapLen; ++i) { if (ILib_SigMap[i].num == num) { return(ILib_SigMap[i].name); } } sprintf_s(scratch, scratchLen, "SIG%d", num); return((const char*)scratch); }
 
 extern void ILibDuktape_MemoryStream_Init(duk_context *ctx);
 extern void ILibDuktape_NetworkMonitor_Init(duk_context *ctx);
@@ -960,6 +969,8 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_SignalListener_Immediate(duk_conte
 	char *sigbuffer = Duktape_GetBuffer(ctx, 0, &bufferLen);
 	void *h = ILibDuktape_GetProcessObject(ctx);
 	int s = 0;
+	char signame_scratch[16];
+	const char *signame = ILib_SigName(((int*)sigbuffer)[1], signame_scratch, sizeof(signame_scratch));
 
 	switch (((int*)sigbuffer)[1])
 	{
@@ -967,7 +978,7 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_SignalListener_Immediate(duk_conte
 		s = 0;
 		waitpid(((pid_t*)sigbuffer)[2], &s, 0);
 		ILibDuktape_EventEmitter_SetupEmit(ctx, h, "SIGCHLD");	// [emit][this][SIGCHLD]
-		duk_push_string(ctx, SIGTABLE[((int*)sigbuffer)[1]]);	// [emit][this][SIGTERM][name]
+		duk_push_string(ctx, signame);	// [emit][this][SIGTERM][name]
 		duk_push_int(ctx, s);									// [emit][this][SIGCHLD][name][code]
 		duk_push_int(ctx, ((pid_t*)sigbuffer)[2]);				// [emit][this][SIGCHLD][name][code][pid]
 		duk_push_uint(ctx, ((uid_t*)sigbuffer)[3]);				// [emit][this][SIGCHLD][name][code][pid][uid]
@@ -975,9 +986,9 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_SignalListener_Immediate(duk_conte
 		duk_pop(ctx);
 		break;
 	default:
-		ILibDuktape_EventEmitter_SetupEmit(ctx, h, SIGTABLE[((int*)sigbuffer)[1]]);	// [emit][this][SIGTERM]
-		duk_push_string(ctx, SIGTABLE[((int*)sigbuffer)[1]]);						// [emit][this][SIGTERM][name]
-		if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "Error Emitting %s: ", SIGTABLE[((int*)sigbuffer)[1]]); }
+		ILibDuktape_EventEmitter_SetupEmit(ctx, h, signame);	// [emit][this][SIGTERM]
+		duk_push_string(ctx, signame);						// [emit][this][SIGTERM][name]
+		if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "Error Emitting %s: ", signame); }
 		duk_pop(ctx);
 		break;
 	}
@@ -1154,18 +1165,18 @@ duk_ret_t ILibDuktape_ScriptContainer_removeListenerSink(duk_context *ctx)
 	char *name = (char*)duk_require_string(ctx, 0);
 	duk_push_this(ctx);							// [process]
 
-	for (i = 1; i < (sizeof(SIGTABLE) / sizeof(char*)); ++i)
+	for (i = 0; i < (int)ILib_SigMapLen; ++i)
 	{
-		if (strcmp(name, SIGTABLE[i]) == 0)
+		if (strcmp(name, ILib_SigMap[i].name) == 0)
 		{
-			if (ILibDuktape_EventEmitter_HasListenersEx(ctx, -1, SIGTABLE[i]) == 0)
+			if (ILibDuktape_EventEmitter_HasListenersEx(ctx, -1, (char*)ILib_SigMap[i].name) == 0)
 			{
 				// No more listeners, so we can unhook the sighandler
 				memset(&action, 0, sizeof(action));
 				sigemptyset(&action.sa_mask);
 				action.sa_flags = 0;
 				action.sa_handler = SIG_DFL;
-				if (sigaction(i, &action, NULL) == 0) {}
+				if (sigaction(ILib_SigMap[i].num, &action, NULL) == 0) {}
 			}
 		}
 	}
@@ -1229,9 +1240,9 @@ duk_ret_t ILibDuktape_Process_SignalHooks(duk_context *ctx)
 	char *eventname = (char*)duk_require_string(ctx, 0);
 	ILibDuktape_EventEmitter *emitter = ILibDuktape_EventEmitter_GetEmitter_fromThis(ctx);
 
-	for (i = 1; i < (sizeof(SIGTABLE) / sizeof(char*)); ++i)
+	for (i = 0; i < (int)ILib_SigMapLen; ++i)
 	{
-		if (strcmp(eventname, SIGTABLE[i]) == 0)
+		if (strcmp(eventname, ILib_SigMap[i].name) == 0)
 		{
 			if (ILibDuktape_EventEmitter_HasListeners2(emitter, eventname, 0) == 0)
 			{
@@ -1241,7 +1252,7 @@ duk_ret_t ILibDuktape_Process_SignalHooks(duk_context *ctx)
 				action.sa_sigaction = ILibDuktape_ScriptContainer_Process_SignalListener;
 				sigemptyset(&action.sa_mask);
 				action.sa_flags = SA_SIGINFO;
-				if (sigaction(i, &action, NULL) == 0) {}
+				if (sigaction(ILib_SigMap[i].num, &action, NULL) == 0) {}
 			}
 			break;
 		}
@@ -1286,39 +1297,12 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	duk_put_prop_string(ctx, -2, "RLIMITS");
 #endif
 	duk_push_object(ctx);
-	duk_push_int(ctx, 0);	duk_put_prop_string(ctx, -2, "UNKNOWN"	);
-	duk_push_int(ctx, 1);	duk_put_prop_string(ctx, -2, "SIGHUP"	);
-	duk_push_int(ctx, 2);	duk_put_prop_string(ctx, -2, "SIGINT"	);
-	duk_push_int(ctx, 3);	duk_put_prop_string(ctx, -2, "SIGQUIT"	);
-	duk_push_int(ctx, 4);	duk_put_prop_string(ctx, -2, "SIGILL"	);
-	duk_push_int(ctx, 5);	duk_put_prop_string(ctx, -2, "SIGTRAP"	);
-	duk_push_int(ctx, 6);	duk_put_prop_string(ctx, -2, "SIGABRT"	);
-	duk_push_int(ctx, 7);	duk_put_prop_string(ctx, -2, "SIGBUS"	);
-	duk_push_int(ctx, 8);	duk_put_prop_string(ctx, -2, "SIGFPE"	);
-	duk_push_int(ctx, 9);	duk_put_prop_string(ctx, -2, "SIGKILL"	);
-	duk_push_int(ctx, 10);  duk_put_prop_string(ctx, -2, "SIGUSR1"	);
-	duk_push_int(ctx, 11);  duk_put_prop_string(ctx, -2, "SIGEGV"	);
-	duk_push_int(ctx, 12);  duk_put_prop_string(ctx, -2, "SIGUSR2"	);
-	duk_push_int(ctx, 13);  duk_put_prop_string(ctx, -2, "SIGPIPE"	);
-	duk_push_int(ctx, 14);  duk_put_prop_string(ctx, -2, "SIGALRM"	);
-	duk_push_int(ctx, 15);  duk_put_prop_string(ctx, -2, "SIGTERM"	);
-	duk_push_int(ctx, 16);  duk_put_prop_string(ctx, -2, "SIGSTKFLT");
-	duk_push_int(ctx, 17);  duk_put_prop_string(ctx, -2, "SIGCHLD"	);
-	duk_push_int(ctx, 18);  duk_put_prop_string(ctx, -2, "SIGCONT"	);
-	duk_push_int(ctx, 19);  duk_put_prop_string(ctx, -2, "SIGSTOP"	);
-	duk_push_int(ctx, 20);  duk_put_prop_string(ctx, -2, "SIGTSTP"	);
-	duk_push_int(ctx, 21);  duk_put_prop_string(ctx, -2, "SIGTTIN"	);
-	duk_push_int(ctx, 22);  duk_put_prop_string(ctx, -2, "SIGTTOU"	);
-	duk_push_int(ctx, 23);  duk_put_prop_string(ctx, -2, "SIGURG"	);
-	duk_push_int(ctx, 24);  duk_put_prop_string(ctx, -2, "SIGXCPU"	);
-	duk_push_int(ctx, 25);  duk_put_prop_string(ctx, -2, "SIGXFSZ"	);
-	duk_push_int(ctx, 26);  duk_put_prop_string(ctx, -2, "SIGVTALRM");
-	duk_push_int(ctx, 27);  duk_put_prop_string(ctx, -2, "SIGPROF"	);
-	duk_push_int(ctx, 28);  duk_put_prop_string(ctx, -2, "SIGWINCH"	);
-	duk_push_int(ctx, 29);  duk_put_prop_string(ctx, -2, "SIGIO"	);
-	duk_push_int(ctx, 29);  duk_put_prop_string(ctx, -2, "SIGPOLL"	);
-	duk_push_int(ctx, 30);  duk_put_prop_string(ctx, -2, "SIGPWR"	);
-	duk_push_int(ctx, 31);  duk_put_prop_string(ctx, -2, "SIGSYS"	);
+	duk_push_int(ctx, 0);	duk_put_prop_string(ctx, -2, "UNKNOWN");
+	{
+		// Use the generated signal map
+		size_t sigi;
+		for (sigi = 0; sigi < ILib_SigMapLen; ++sigi) { duk_push_int(ctx, ILib_SigMap[sigi].num); duk_put_prop_string(ctx, -2, ILib_SigMap[sigi].name); }
+	}
 	duk_put_prop_string(ctx, -2, "SIGTABLE");
 
 	duk_push_object(ctx);
@@ -1433,9 +1417,9 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	ILibDuktape_CreateProperty_InstanceMethod(ctx, "_exit", ILibDuktape_ScriptContainer_Process_ExitEx, DUK_VARARGS);
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "uncaughtException");
 
-	for (i = 1; i < 31; ++i)
+	for (i = 0; i < (int)ILib_SigMapLen; ++i)
 	{
-		ILibDuktape_EventEmitter_CreateEventEx(emitter, SIGTABLE[i]);
+		ILibDuktape_EventEmitter_CreateEventEx(emitter, (char*)ILib_SigMap[i].name);
 	}
 	ILibDuktape_EventEmitter_AddOnEx(ctx, -1, "newListener", ILibDuktape_Process_SignalHooks);
 	ILibDuktape_EventEmitter_AddOnEx(ctx, -1, "removeListener", ILibDuktape_ScriptContainer_removeListenerSink);
