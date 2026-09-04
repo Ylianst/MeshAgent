@@ -41,12 +41,12 @@ limitations under the License.
 	#if defined(__APPLE__)
 		#include <util.h>
 	#else
+		// open/freebsd
 		#include <termios.h>
-#ifdef _OPENBSD
-		#include <util.h>
-#else
-		#include <libutil.h>
-#endif
+		// added for ILibProcessPipe_ForkPTY_BSD()
+		#include <sys/ioctl.h>
+		#include <stdlib.h>
+		#include <errno.h>
 	#endif
 #endif
 #endif
@@ -594,6 +594,65 @@ void ILibProcessPipe_Process_HardKill(ILibProcessPipe_Process p)
 }
 
 
+
+#if defined(_FREEBSD)
+// Local replacement for libutil's forkpty()
+// Same interface as the real forkpty(): opens a pty pair, forks, and in the child makes the slave
+// side its controlling terminal on fd 0/1/2. Returns the child's pid to the parent
+// (with *amaster set to the master fd, matching forkpty()'s out-param), 0 to the
+// child, or -1 with errno set on failure.
+static pid_t ILibProcessPipe_ForkPTY_BSD(int *amaster, struct termios *termp, struct winsize *winp)
+{
+	int master, slave;
+	char slaveName[128];
+	pid_t pid;
+
+	if ((master = posix_openpt(O_RDWR | O_NOCTTY)) < 0) { return(-1); }
+	if (grantpt(master) != 0 || unlockpt(master) != 0) { close(master); return(-1); }
+#ifdef _OPENBSD
+	// OpenBSD has no ptsname_r() -- libc exports only ptsname(), and <stdlib.h>
+	// declares just "char *ptsname(int)". It returns a pointer to static storage,
+	// which is safe here only because the name is copied out immediately below,
+	// before anything else can call ptsname() on this thread.
+	{
+		char *nm = ptsname(master);
+		if (nm == NULL) { close(master); return(-1); }
+		if (strnlen_s(nm, sizeof(slaveName)) >= sizeof(slaveName)) { close(master); errno = ENAMETOOLONG; return(-1); }
+		strcpy_s(slaveName, sizeof(slaveName), nm);
+	}
+#else
+	if (ptsname_r(master, slaveName, sizeof(slaveName)) != 0) { close(master); return(-1); }
+#endif
+	if ((slave = open(slaveName, O_RDWR | O_NOCTTY)) < 0) { close(master); return(-1); }
+
+	if ((pid = fork()) < 0)
+	{
+		int e = errno;
+		close(slave); close(master);
+		errno = e;
+		return(-1);
+	}
+	if (pid == 0)
+	{
+		// Child: master is of no use here, only the slave side is inherited.
+		close(master);
+		if (setsid() < 0) { _exit(1); }
+		if (ioctl(slave, TIOCSCTTY, (char*)NULL) < 0) { _exit(1); }
+		if (termp != NULL) { tcsetattr(slave, TCSANOW, termp); }
+		if (winp != NULL) { ioctl(slave, TIOCSWINSZ, winp); }
+		dup2(slave, STDIN_FILENO);
+		dup2(slave, STDOUT_FILENO);
+		dup2(slave, STDERR_FILENO);
+		if (slave > STDERR_FILENO) { close(slave); }
+		return(0);
+	}
+	// Parent: the slave is only needed by the child.
+	close(slave);
+	*amaster = master;
+	return(pid);
+}
+#define forkpty(amaster, name, termp, winp) ILibProcessPipe_ForkPTY_BSD(amaster, termp, winp)
+#endif
 
 ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_Manager pipeManager, char* target, char* const* parameters, ILibProcessPipe_SpawnTypes spawnType, void *sid, void *envvars, int extraMemorySize)
 {
