@@ -963,6 +963,7 @@ int ILibIsRunningOnChainThread(void* chain);
 		struct ILibXMLAttribute *Next;	// Next Attribute
 	};
 
+	FILE* ILibFile_Open(char *path, char *mode);
 	char *ILibReadFileFromDisk(char *FileName);
 	int ILibReadFileFromDiskEx(char **Target, char *FileName);
 	void ILibWriteStringToDisk(char *FileName, char *data);

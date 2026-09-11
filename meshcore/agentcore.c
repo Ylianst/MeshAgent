@@ -428,7 +428,7 @@ size_t MeshAgent_Linux_ReadMemFile(char *path, char **buffer)
 {
 	size_t i = 0, r, sz = 4096;
 	*buffer = NULL;
-	FILE *f = fopen(path, "rb");
+	FILE *f = ILibFile_Open(path, "rb");
 	if (f != NULL)
 	{
 		if ((*buffer = malloc(sz)) == NULL) { ILIBCRITICALEXIT(254); }
@@ -2598,10 +2598,8 @@ int GenerateSHA384FileHash(char *filePath, char *fileHash)
 
 #ifdef WIN32
 	int retVal = 1;
-	_wfopen_s(&tmpFile, ILibUTF8ToWide(filePath, -1), L"rb");
-#else
-	tmpFile = fopen(filePath, "rb");
 #endif
+	tmpFile = ILibFile_Open(filePath, "rb");
 	if (tmpFile == NULL) { return(1); }
 
 #ifdef WIN32
@@ -4512,11 +4510,7 @@ void checkForEmbeddedMSH_ex(MeshAgentHostContainer *agent, char **eMSH)
 
 	if (eMSH != NULL) { *eMSH = NULL; }
 
-#ifdef WIN32
-	_wfopen_s(&tmpFile, ILibUTF8ToWide(agent->exePath, -1), L"rb");
-#else
-	tmpFile = fopen(agent->exePath, "rb");
-#endif
+	tmpFile = ILibFile_Open(agent->exePath, "rb");
 	if (tmpFile == NULL) { return; }
 
 	fseek(tmpFile, -16, SEEK_END);
@@ -4537,11 +4531,7 @@ void checkForEmbeddedMSH_ex(MeshAgentHostContainer *agent, char **eMSH)
 				if (eMSH == NULL)
 				{
 					FILE *msh = NULL;
-#ifdef WIN32
-					_wfopen_s(&msh, ILibUTF8ToWide(MeshAgent_MakeAbsolutePath(agent->exePath, ".msh"), -1), L"wb");
-#else
-					msh = fopen(MeshAgent_MakeAbsolutePath(agent->exePath, ".msh"), "wb");
-#endif
+					msh = ILibFile_Open(MeshAgent_MakeAbsolutePath(agent->exePath, ".msh"), "wb");
 					if (msh != NULL)
 					{
 						ignore_result(fwrite(data, 1, mshLen, msh));
@@ -4908,8 +4898,8 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			pid_t pid = 0;
 			size_t len;
 
-			fd = fopen("/var/run/meshagent.pid", "r");
-			if (fd == NULL) fd = fopen(".meshagent.pid", "r");
+			fd = ILibFile_Open("/var/run/meshagent.pid", "r");
+			if (fd == NULL) fd = ILibFile_Open(".meshagent.pid", "r");
 			if (fd != NULL)
 			{
 				len = fread(str, sizeof(char), 15, fd);
@@ -5528,8 +5518,8 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		{
 			len = sprintf_s(str, 15, "%d\r\n", pid);
 
-			fd = fopen("/var/run/meshagent.pid", "w");
-			if (fd == NULL) fd = fopen(".meshagent.pid", "w");
+			fd = ILibFile_Open("/var/run/meshagent.pid", "w");
+			if (fd == NULL) fd = ILibFile_Open(".meshagent.pid", "w");
 			if (fd != NULL)
 			{
 				if (fwrite(str, sizeof(char), len, fd)) {}

@@ -307,9 +307,6 @@ int ILibDuktape_fs_openSyncEx(duk_context *ctx, char *path, char *flags, char *m
 	int retVal;
 	FILE *f;
 	char *key = ILibScratchPad;
-#ifdef WIN32
-	char binFlags[8];
-#endif
 
 	duk_push_this(ctx);													// [fs]
 	duk_get_prop_string(ctx, -1, FS_NextFD);							// [fs][fd]
@@ -317,17 +314,7 @@ int ILibDuktape_fs_openSyncEx(duk_context *ctx, char *path, char *flags, char *m
 	duk_pop(ctx);														// [fs]
 
 	sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%d", retVal);
-#ifdef WIN32
-	// node has no text mode, so force binary on Windows, as it's default mode is text.
-	if (strchr(flags, 'b') == NULL && strchr(flags, 't') == NULL)
-	{
-		sprintf_s(binFlags, sizeof(binFlags), "%.6sb", flags);
-		flags = binFlags;
-	}
-	_wfopen_s(&f, (const wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, path), (const wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, flags));
-#else
-	f = fopen(path, flags);
-#endif
+	f = ILibFile_Open(path, flags);
 	if (f != NULL)
 	{
 		// MAP FILE* to FD
@@ -394,7 +381,8 @@ duk_ret_t ILibDuktape_fs_openSync(duk_context *ctx)
 	{
 		dwCreationMode = OPEN_EXISTING;
 	}
-	fd = CreateFileW((wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, path), dwDesiredAccess, 0, NULL, dwCreationMode, FILE_FLAG_OVERLAPPED, NULL);
+	// Share mode 0 blocked every later open, this process included.
+	fd = CreateFileW((wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, path), dwDesiredAccess, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, dwCreationMode, FILE_FLAG_OVERLAPPED, NULL);
 	if (fd == INVALID_HANDLE_VALUE)
 	{
 		DWORD err = GetLastError();
@@ -2457,32 +2445,14 @@ duk_ret_t ILibDuktape_fs_readFileSync(duk_context *ctx)
 	char *filePath = (char*)duk_require_string(ctx, 0);
 	FILE *f;
 	long fileLen;
-#ifdef WIN32
-	char binFlags[8];
-#endif
-
-#ifdef WIN32
-	char *flags = "rbN";
-#else
 	char *flags = "rb";
-#endif
 
 	if (duk_is_object(ctx, 1))
 	{
 		flags = Duktape_GetStringPropertyValue(ctx, 1, "flags", flags);
 	}
 
-#ifdef WIN32
-	// An options object can replace the "rbN" default above, force binary
-	if (strchr(flags, 'b') == NULL && strchr(flags, 't') == NULL)
-	{
-		sprintf_s(binFlags, sizeof(binFlags), "%.6sb", flags);
-		flags = binFlags;
-	}
-	_wfopen_s(&f, (const wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, filePath), (const wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, flags));
-#else
-	f = fopen(filePath, flags);
-#endif
+	f = ILibFile_Open(filePath, flags);
 
 	if (f == NULL) { return(ILibDuktape_Error(ctx, "fs.readFileSync(): File [%s] not found", filePath)); }
 
