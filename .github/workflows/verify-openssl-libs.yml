@@ -1,0 +1,19 @@
+name: Verify OpenSSL static libs
+run-name: Audit committed libcrypto.a/libssl.a archives
+on:
+  push:
+    paths:
+      - 'openssl/libstatic/**'
+  pull_request:
+    paths:
+      - 'openssl/libstatic/**'
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit every archive - version, object count, glibc-only symbols
+        run: |
+          chmod +x openssl/libstatic/verify
+          openssl/libstatic/verify
