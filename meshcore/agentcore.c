@@ -3901,8 +3901,8 @@ void MeshServer_ConnectEx_NetworkError(void *j)
 
 	printf("Network Timeout occurred...\n");
 
+	// OnResponse schedules the retry; a second attempt can reenter proxy discovery.
 	ILibWebClient_CancelRequest(request);
-	MeshServer_ConnectEx(agent);
 }
 void MeshServer_ConnectEx_NetworkError_Cleanup(void *j)
 {
