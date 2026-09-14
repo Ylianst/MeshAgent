@@ -22,11 +22,14 @@ limitations under the License.
 // format (an inline duk_peval_string_noresult(), or an allocate/memcpy_s/AddCompressedModuleEx/free
 // block chunked by LEGACY_CHUNK bytes for large ones). Once stripped, the generated file is the target.
 //
-// Run through tools/update-modules.sh or tools/update-modules.ps1, which define these globals:
+// Run through tools/update-modules.sh or tools/update-modules.ps1, which pass these environment variables:
 //
+//   UPDATE_UPDATE=1            update every entry whose modules/<name>.js changed. Without it, an add or remove
+//                              touches only the names given
 //   UPDATE_ADD, UPDATE_REMOVE  comma-separated module names to add (or update) and to remove
-//   UPDATE_SYNC=1              also add every modules/*.js with no entry yet, and drop entries whose file is gone
+//   UPDATE_SYNC=1              update, and also add every modules/*.js with no entry yet and drop entries whose file is gone
 //   UPDATE_DRYRUN=1            only report what would change
+//   UPDATE_CHECK=1             dry run that exits 1 when anything would change, for CI
 //   UPDATE_EXPORT=dir          save the embedded scripts, decompressed, into dir
 //   UPDATE_LIST=1              print the embedded module names and sizes
 //   UPDATE_STRIP_LEGACY=1      write this run's result to ILibDuktape_EmbeddedModules.c, cut the
@@ -36,10 +39,18 @@ limitations under the License.
 // With none of those, every entry whose modules/<name>.js changed is updated in place. The table is
 // re-rendered as a whole, so an unchanged entry produces no diff.
 //
+// An entry's stamp is the date of the commit that last touched its modules/<name>.js, from one 'git log' over
+// modules/. A file git does not know, or one with uncommitted changes, gets its mtime instead, as does everything
+// when git is not available.
+//
+// Module content is embedded with LF line endings whatever the checkout has, so the bytes do not depend on
+// which machine regenerated an entry. The C files are read as LF and written back with the line ending they had.
+//
 // The agent's compressed-stream and Node's zlib speak the same zlib-deflate format, so either runtime works.
 //
 
 var fs = require('fs');
+var UPDATE_EXIT_CODE = 0;
 var CFILE = 'microscript/ILibDuktape_EmbeddedModules.c';
 var LEGACY = 'microscript/ILibDuktape_Polyfills.c';
 var LEGACYHEADER = 'microscript/ILibDuktape_Polyfills.h';
@@ -58,52 +69,186 @@ function pump(stream, data)
     stream.end(data);
     return (out);
 }
+// Node's zlib is Chromium's fork (a different match finder since Node 12.17/14.0), so its deflate stream is valid but not
+// byte-equal to the agent's stock zlib, and an entry would change bytes with the engine that regenerated it. pako is a port
+// of stock zlib and reproduced all 100 of the agent's entries exactly, so under node it is used whenever it is installed.
+var pako;
+function loadPako()
+{
+    if (pako !== undefined) { return (pako); }
+    pako = null;
+    var paths = ['pako', process.cwd() + '/tools/update-modules/node_modules/pako'], i;
+    for (i = 0; i < paths.length && pako == null; ++i) { try { pako = require(paths[i]); } catch (e) { } }
+    if (pako == null) { console.log('pako not found (npm install in tools/update-modules/), node\'s own zlib is used: its bytes differ from the agent\'s.'); }
+    return (pako);
+}
 function compress(data)
 {
-    return (isNode ? require('zlib').deflateSync(data) : pump(require('compressed-stream').createCompressor(), data));
+    if (!isNode) { return (pump(require('compressed-stream').createCompressor(), data)); }
+    return (loadPako() != null ? Buffer.from(pako.deflate(data)) : require('zlib').deflateSync(data));
 }
 function decompress(data)
 {
     return (isNode ? require('zlib').inflateSync(data) : pump(require('compressed-stream').createDecompressor(), data));
 }
 
-// Upstream entries were compressed from CRLF sources while a Linux checkout has LF files, so comparisons ignore that.
+// Upstream entries were compressed from CRLF sources and a checkout may have either, so everything embedded or compared goes through lf().
 function lf(buf)
 {
     return (buf.toString().split('\r\n').join('\n'));
+}
+// With core.autocrlf a Windows checkout has CRLF C files and a Linux one LF, so a rewritten file keeps what it had.
+function eolOf(text)
+{
+    return (text.indexOf('\r\n') >= 0 ? '\r\n' : '\n');
 }
 function readOrNull(path)
 {
     try { return (fs.readFileSync(path)); } catch (e) { return (null); }
 }
+function readModule(path)
+{
+    var buf = readOrNull(path);
+    return (buf == null ? null : Buffer.from(lf(buf)));
+}
 function modulePath(name)
 {
     return (MODULEDIR + '/' + name + '.js');
+}
+// The Windows agent's fs.readdirSync() is a JS wrapper that calls require('os').arch(), and on an agent without
+// the alloca fix, loading 'os' takes the whole process down with a native STATUS_BREAKPOINT that no try/catch sees.
+// The native _readdirSync() underneath it is fine. It wants a wildcard, takes forward slashes, and drops '.' and '..'.
+function readdir(dir)
+{
+    return (typeof fs._readdirSync == 'function' ? fs._readdirSync(dir + '/*') : fs.readdirSync(dir));
 }
 function byName(a, b)
 {
     return (a.name < b.name ? -1 : (a.name > b.name ? 1 : 0));
 }
 
-// Builds the timestamp string the same way clipboard.js/nativeAddCompressedModule() does, from the module file's mtime.
-function mtimeStamp(path)
+function pad(n, width)
 {
-    var v = (new Date(fs.statSync(path).mtime)).getTime() / 1000;
-    if (!(v > 0)) { return (null); }
-    return ((new Date(v * 1000)).toString().split(' ').join('T'));
+    var s = String(n);
+    while (s.length < (width || 2)) { s = '0' + s; }
+    return (s);
+}
+// The stamp is local time as '2026-09-02T15:36:17.000+02:00', which is what clipboard.js's toString().split(' ').join('T') gives on Duktape.
+// Node's toString() is 'Wed Sep 02 2026 15:36:17 GMT+0200 (...)' instead, and new Date() of that with T's for spaces is NaN,
+// so a node-written stamp left the agent's ModuleFileDate unusable. Rendered by hand here so both engines agree, to the second like the agent.
+function isoStamp(seconds)
+{
+    var d = new Date(seconds * 1000);
+    if (!(d.getTime() > 0)) { return (null); }
+    var off = -d.getTimezoneOffset(), sign = (off < 0 ? '-' : '+');
+    off = Math.abs(off);
+    return (d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) + '.000' + sign + pad(Math.floor(off / 60)) + ':' + pad(off % 60));
+}
+function envStr(name)
+{
+    var v = process.env[name];
+    return (v == null ? '' : String(v));
+}
+function findOnPath(exe)
+{
+    var win = (process.platform == 'win32'), dirs = (envStr('PATH') || envStr('Path')).split(win ? ';' : ':'), i;
+    for (i = 0; i < dirs.length; ++i)
+    {
+        if (dirs[i] != '' && fs.existsSync(dirs[i] + '/' + exe + (win ? '.exe' : ''))) { return (dirs[i] + '/' + exe + (win ? '.exe' : '')); }
+    }
+    return (null);
+}
+// Runs git and returns its stdout, or null when git is missing or fails. The agent's execFile does not search PATH
+// on Windows and takes argv[0] as its first argument, so the path is looked up by hand and the name repeated.
+function runGit(args)
+{
+    try
+    {
+        if (isNode) { return (require('child_process').execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })); }
+        var git = findOnPath('git');
+        if (git == null) { return (null); }
+        var child = require('child_process').execFile(git, ['git'].concat(args)), out = '';
+        child.stdout.on('data', function (c) { out += c.toString(); });
+        child.stderr.on('data', function (c) { });
+        child.waitExit();
+        return (out);
+    }
+    catch (e) { return (null); }
+}
+// Commit dates for every file under modules/ from one 'git log', and the set of files whose working copy differs
+// from HEAD, so an edited file is stamped with its mtime rather than with the commit it no longer matches.
+var gitDates = null, gitDirty = null, gitMissing = false;
+function gitDate(path)
+{
+    var lines, i, ts = null;
+    if (gitDates == null)
+    {
+        gitDates = {}; gitDirty = {};
+        var log = runGit(['log', '--format=%ct', '--name-only', '--', MODULEDIR]);
+        var status = (log != null ? runGit(['status', '--porcelain', '--', MODULEDIR]) : null);
+        if (log == null || status == null) { gitMissing = true; return (null); }
+        lines = log.split(/\r?\n/);
+        for (i = 0; i < lines.length; ++i)
+        {
+            if (/^[0-9]+$/.test(lines[i])) { ts = parseInt(lines[i], 10); }
+            else if (lines[i] != '' && ts != null && gitDates[lines[i]] == null) { gitDates[lines[i]] = ts; }
+        }
+        lines = status.split(/\r?\n/);
+        for (i = 0; i < lines.length; ++i) { if (lines[i].length > 3) { gitDirty[lines[i].substring(3)] = true; } }
+    }
+    return (gitDirty[path] || gitDates[path] == null ? null : gitDates[path]);
+}
+// The POSIX agent's fs.statSync() formats the mtime with localtime() but still appends 'Z', so east of UTC it reads 1 to 2 hours late.
+// A file written just now shows whether the running agent does that, so a fixed agent or a machine on UTC gets no correction.
+var mtimeIsLocal = null;
+function agentMtimeIsLocal()
+{
+    if (mtimeIsLocal != null) { return (mtimeIsLocal); }
+    var off = -(new Date()).getTimezoneOffset(), probe = 'tools/update-modules/.mtime-probe.tmp';
+    mtimeIsLocal = false;
+    if (isNode || off == 0) { return (mtimeIsLocal); }
+    try
+    {
+        fs.writeFileSync(probe, 'x');
+        mtimeIsLocal = (Math.abs((new Date(fs.statSync(probe).mtime)).getTime() - Date.now() - off * 60000) < 60000);
+    }
+    catch (e) { }
+    try { fs.unlinkSync(probe); } catch (e) { }
+    return (mtimeIsLocal);
+}
+function mtimeSeconds(path)
+{
+    var m = fs.statSync(path).mtime, p;
+    if (typeof m == 'string' && (p = /^(\d+)-(\d+)-(\d+)T(\d+):(\d+):(\d+)Z$/.exec(m)) != null && agentMtimeIsLocal())
+    {
+        // Read back as local wall-clock time, so the offset is the one in force on the file's own date, not today's.
+        return (Math.floor((new Date(+p[1], p[2] - 1, +p[3], +p[4], +p[5], +p[6])).getTime() / 1000));
+    }
+    return (Math.floor((new Date(m)).getTime() / 1000));
+}
+function moduleStamp(path)
+{
+    var seconds = gitDate(path);
+    if (seconds == null) { seconds = mtimeSeconds(path); }
+    return (isoStamp(seconds));
+}
+// mkdir -p, without the recursive option node has and the agent does not.
+function mkdirp(dir)
+{
+    var parts = dir.split(/[\\\/]/), p = '', i;
+    for (i = 0; i < parts.length; ++i)
+    {
+        p += (i > 0 ? '/' : '') + parts[i];
+        if (parts[i] == '' || /^[A-Za-z]:$/.test(parts[i])) { continue; }
+        try { fs.mkdirSync(p); } catch (e) { }
+    }
 }
 
 // C identifier for a module name. The generated file turns every other character into '_', the legacy
 // blocks drop it, matching their existing names ("notifybar-desktop" becomes "_notifybardesktop").
 function identifier(name, prefix, replacement)
 {
-    var s = prefix, i, c;
-    for (i = 0; i < name.length; ++i)
-    {
-        c = name.charAt(i);
-        s += (/[A-Za-z0-9_]/.test(c) ? c : replacement);
-    }
-    return (s);
+    return (prefix + name.replace(/[^A-Za-z0-9_]/g, replacement));
 }
 function symbolName(name) { return (identifier(name, '_embedded_', '_')); }
 function legacySymbolName(name) { return (identifier(name, '_', '')); }
@@ -111,7 +256,7 @@ function legacySymbolName(name) { return (identifier(name, '_', '')); }
 // Reads the entries of ILibDuktape_EmbeddedModules.c: the byte arrays by symbol, then the table rows, in table order.
 function parseGenerated(text)
 {
-    var lines = text.split('\n');
+    var lines = text.split(/\r?\n/);
     var arrays = {}, entries = [], i, m, sym = null, hex = '';
 
     for (i = 0; i < lines.length; ++i)
@@ -139,7 +284,7 @@ function parseGenerated(text)
 // occupies and the BEGIN/END AUTO-GENERATED BODY marker lines, so they can be rewritten or cut out.
 function parseLegacy(text)
 {
-    var lines = text.split('\n');
+    var lines = text.split(/\r?\n/);
     var initStart = -1, initEnd = -1, beginMarker = -1, endMarker = -1, i, t, q, g = null, entries = [], ranges = [];
 
     for (i = 0; i < lines.length; ++i)
@@ -208,7 +353,7 @@ function insertAfterInitBrace(out, lines)
 // ILibDuktape_Polyfills_EmbeddedModules(ctx) where the BEGIN marker was.
 function stripLegacyModules(text, legacy)
 {
-    var lines = text.split('\n');
+    var lines = text.split(/\r?\n/);
     var remove = legacyLineSet(lines, legacy, false);
     var n = legacy.ranges.length;
     var first = (n > 0 ? legacy.ranges[0][0] : -1), last = (n > 0 ? legacy.ranges[n - 1][1] : -1);
@@ -225,7 +370,7 @@ function stripLegacyModules(text, legacy)
         if (i >= zoneStart && i <= zoneEnd && lines[i].trim() == '' && out.length > 0 && out[out.length - 1].trim() == '') { continue; }
         out.push(lines[i]);
     }
-    return ((legacy.beginMarker >= 0 ? out : insertAfterInitBrace(out, call)).join('\n'));
+    return ((legacy.beginMarker >= 0 ? out : insertAfterInitBrace(out, call)).join(eolOf(text)));
 }
 
 // Renders one entry in ILibDuktape_Polyfills.c's own format. Large blocks get a blank line on each side, like the existing ones.
@@ -257,7 +402,7 @@ function legacyEntryLines(entry)
 // Rewrites the whole legacy region of ILibDuktape_Polyfills.c from result, keeping the markers in place so a later strip still finds them.
 function writeLegacyBody(text, legacy, result)
 {
-    var lines = text.split('\n');
+    var lines = text.split(/\r?\n/);
     var remove = legacyLineSet(lines, legacy, true);
     var fresh = [], out = [], i;
 
@@ -273,22 +418,22 @@ function writeLegacyBody(text, legacy, result)
         if (i == legacy.beginMarker) { out.push(lines[i]); out = out.concat(fresh); continue; }
         if (!remove[i]) { out.push(lines[i]); }
     }
-    return ((legacy.beginMarker >= 0 ? out : insertAfterInitBrace(out, fresh)).join('\n'));
+    return ((legacy.beginMarker >= 0 ? out : insertAfterInitBrace(out, fresh)).join(eolOf(text)));
 }
 
 // The generated file is #included from ILibDuktape_Polyfills.c, never compiled on its own, so no project or makefile lists it.
 function ensureLegacyInclude(text)
 {
     var inc = '#include "' + CFILE.split('/').pop() + '"';
-    return (text.indexOf(inc) >= 0 ? text : text.replace('#include "duktape.h"', '#include "duktape.h"\n' + inc));
+    return (text.indexOf(inc) >= 0 ? text : text.replace('#include "duktape.h"', '#include "duktape.h"' + eolOf(text) + inc));
 }
 function ensureLegacyPrototype(text)
 {
     var marker = 'void ILibDuktape_Polyfills_JS_Init(duk_context *ctx);';
-    return (text.indexOf('ILibDuktape_Polyfills_EmbeddedModules') >= 0 ? text : text.split(marker).join(marker + '\nvoid ILibDuktape_Polyfills_EmbeddedModules(duk_context *ctx);'));
+    return (text.indexOf('ILibDuktape_Polyfills_EmbeddedModules') >= 0 ? text : text.split(marker).join(marker + eolOf(text) + 'void ILibDuktape_Polyfills_EmbeddedModules(duk_context *ctx);'));
 }
 
-function writeGenerated(entries)
+function writeGenerated(entries, eol)
 {
     var out = [], i, j, e, hex;
 
@@ -320,7 +465,8 @@ function writeGenerated(entries)
         out.push('');
         out.push('// ' + e.name + (e.stamp != null ? (' (' + e.stamp + ')') : ''));
         out.push('static const unsigned char ' + symbolName(e.name) + '[] = {');
-        hex = e.data.toString('hex');
+        // The agent's Buffer.toString('hex') is upper case, node's lower case, so the file would otherwise depend on the engine.
+        hex = e.data.toString('hex').toLowerCase();
         for (j = 0; j < hex.length; j += 64)
         {
             out.push('0x' + hex.substring(j, j + 64).match(/../g).join(',0x') + ',');
@@ -356,7 +502,7 @@ function writeGenerated(entries)
     out.push('\t}');
     out.push('}');
     out.push('');
-    return (out.join('\n'));
+    return (out.join(eol));
 }
 
 function listModules(entries)
@@ -374,7 +520,7 @@ function listModules(entries)
 function exportModules(entries, dir, names)
 {
     var i, e, saved = 0, savedNames = {}, notEmbedded;
-    try { fs.mkdirSync(dir); } catch (e) { }
+    mkdirp(dir);
     for (i = 0; i < entries.length; ++i)
     {
         e = entries[i];
@@ -393,19 +539,20 @@ function updateModules(entries, legacy, legacyText, opt)
 {
     var updated = [], missing = [], removed = [], removedReason = {}, added = [], discovered = [], unchanged = 0;
     var result = [], addFound = {}, i, g, src, srcPath;
-    var restrictedToAdd = (opt.add.length > 0);
-    var restrictedToRemove = (opt.remove.length > 0 && !restrictedToAdd && !opt.sync);
+    // Without update or sync, an add or remove leaves every other entry alone.
+    var restrictedToAdd = (opt.add.length > 0 && !opt.update);
+    var restrictedToRemove = (opt.remove.length > 0 && !opt.update && !restrictedToAdd);
 
     for (i = 0; i < entries.length; ++i)
     {
         g = entries[i];
         if (opt.remove.indexOf(g.name) >= 0) { removed.push(g.name); removedReason[g.name] = 'explicit'; continue; }
-        if (restrictedToAdd && opt.add.indexOf(g.name) < 0) { result.push(g); continue; }
+        if (restrictedToAdd && opt.add.indexOf(g.name) < 0) { result.push(g); ++unchanged; continue; }
         if (restrictedToRemove) { result.push(g); ++unchanged; continue; }
         addFound[g.name] = true;
 
         srcPath = modulePath(g.name);
-        src = readOrNull(srcPath);
+        src = readModule(srcPath);
         if (src == null)
         {
             // No source file left for this entry. Only dropped when sync was explicitly requested.
@@ -414,8 +561,8 @@ function updateModules(entries, legacy, legacyText, opt)
             result.push(g);
             continue;
         }
-        if (lf(decompress(g.data)) == lf(src)) { ++unchanged; result.push(g); continue; }
-        result.push({ name: g.name, stamp: mtimeStamp(srcPath), data: compress(src) });
+        if (lf(decompress(g.data)) == src.toString()) { ++unchanged; result.push(g); continue; }
+        result.push({ name: g.name, stamp: moduleStamp(srcPath), data: compress(src) });
         updated.push(g.name);
     }
 
@@ -424,25 +571,25 @@ function updateModules(entries, legacy, legacyText, opt)
     {
         if (addFound[opt.add[i]]) { continue; }
         srcPath = modulePath(opt.add[i]);
-        src = readOrNull(srcPath);
+        src = readModule(srcPath);
         if (src == null) { throw ('module ' + opt.add[i] + ' is not embedded and ' + srcPath + ' does not exist'); }
-        result.push({ name: opt.add[i], stamp: mtimeStamp(srcPath), data: compress(src) });
+        result.push({ name: opt.add[i], stamp: moduleStamp(srcPath), data: compress(src) });
         added.push(opt.add[i]);
     }
 
     // sync also picks up every modules/*.js with no entry yet.
-    if (opt.sync && !restrictedToAdd)
+    if (opt.sync)
     {
         var known = {}, files, name;
-        for (i = 0; i < entries.length; ++i) { known[entries[i].name] = true; }
-        try { files = fs.readdirSync(MODULEDIR); } catch (e) { files = []; }
+        for (i = 0; i < result.length; ++i) { known[result[i].name] = true; }
+        files = readdir(MODULEDIR);
         for (i = 0; i < files.length; ++i)
         {
             if (files[i].substring(files[i].length - 3) != '.js') { continue; }
             name = files[i].substring(0, files[i].length - 3);
-            if (known[name]) { continue; }
+            if (known[name] || opt.remove.indexOf(name) >= 0) { continue; }
             srcPath = modulePath(name);
-            result.push({ name: name, stamp: mtimeStamp(srcPath), data: compress(fs.readFileSync(srcPath)) });
+            result.push({ name: name, stamp: moduleStamp(srcPath), data: compress(readModule(srcPath)) });
             discovered.push(name);
         }
     }
@@ -453,9 +600,11 @@ function updateModules(entries, legacy, legacyText, opt)
     var notStripped = (legacy != null);
     var writeToLegacy = notStripped && !opt.stripLegacy;
     var targetFile = writeToLegacy ? LEGACY : CFILE;
-    var output = writeToLegacy ? writeLegacyBody(legacyText, legacy, result) : writeGenerated(result);
     var current = readOrNull(targetFile);
-    if (!opt.dry && (current == null || output != current.toString())) { fs.writeFileSync(targetFile, output); }
+    // The generated file keeps its own line ending. Only when it does not exist yet does it follow ILibDuktape_Polyfills.c from the same checkout.
+    var output = writeToLegacy ? writeLegacyBody(legacyText, legacy, result) : writeGenerated(result, eolOf(current != null ? current.toString() : legacyText));
+    var wouldWrite = (current == null || output != current.toString());
+    if (!opt.dry && wouldWrite) { fs.writeFileSync(targetFile, output); }
 
     var would = opt.dry ? 'would ' : '';
     if (notStripped) { console.log(LEGACY + ' still holds ' + entries.length + ' legacy addCompressedModule entries (not migrated to ' + CFILE + ' yet).'); }
@@ -473,23 +622,33 @@ function updateModules(entries, legacy, legacyText, opt)
     for (i = 0; i < discovered.length; ++i) { console.log(would + 'add:      ' + discovered[i] + ' (new ' + modulePath(discovered[i]) + ', not embedded yet)'); }
     for (i = 0; i < added.length; ++i) { console.log(would + 'add:      ' + added[i]); }
     for (i = 0; i < opt.remove.length; ++i) { if (removed.indexOf(opt.remove[i]) < 0) { console.log(opt.remove[i] + ' is not embedded, nothing to remove.'); } }
-    if (opt.dry) { console.log('dry run, ' + targetFile + ' not written.'); }
+    if (gitMissing && (updated.length + added.length + discovered.length) > 0) { console.log('stamps: git not available, file mtimes used.'); }
+    if (opt.dry && !opt.check) { console.log('dry run, ' + targetFile + ' not written.'); }
     console.log((entries.length - removed.length + added.length + discovered.length) + ' embedded modules: ' + updated.length + ' updated, ' + unchanged + ' unchanged, ' + removed.length + ' removed, ' + missing.length + ' kept without source file, ' + (added.length + discovered.length) + ' newly added.');
+    if (opt.check)
+    {
+        var pending = wouldWrite || (opt.stripLegacy && notStripped);
+        console.log(pending ? 'check: ' + targetFile + ' is out of date.' : 'check: ' + targetFile + ' is up to date.');
+        // The launcher exits with this, because the agent's own process.exit() unwinds through the launcher's catch and logs itself.
+        if (pending) { UPDATE_EXIT_CODE = 1; }
+    }
 }
 
-// The launcher scripts define the UPDATE_* globals. Each one is optional.
+// The launcher scripts pass the UPDATE_* settings as environment variables. Each one is optional.
 function nameList(v)
 {
-    return (typeof v == 'string' && v != '' ? v.split(',').filter(function (n) { return (n != ''); }) : []);
+    return (v != '' ? v.split(',').filter(function (n) { return (n != ''); }) : []);
 }
 var opt = {
-    add: nameList(typeof UPDATE_ADD != 'undefined' ? UPDATE_ADD : ''),
-    remove: nameList(typeof UPDATE_REMOVE != 'undefined' ? UPDATE_REMOVE : ''),
-    sync: (typeof UPDATE_SYNC != 'undefined' && UPDATE_SYNC == '1'),
-    dry: (typeof UPDATE_DRYRUN != 'undefined' && UPDATE_DRYRUN == '1'),
-    list: (typeof UPDATE_LIST != 'undefined' && UPDATE_LIST == '1'),
-    stripLegacy: (typeof UPDATE_STRIP_LEGACY != 'undefined' && UPDATE_STRIP_LEGACY == '1'),
-    exportDir: (typeof UPDATE_EXPORT == 'string' ? UPDATE_EXPORT : '')
+    update: (envStr('UPDATE_UPDATE') == '1' || envStr('UPDATE_SYNC') == '1'),
+    add: nameList(envStr('UPDATE_ADD')),
+    remove: nameList(envStr('UPDATE_REMOVE')),
+    sync: (envStr('UPDATE_SYNC') == '1'),
+    dry: (envStr('UPDATE_DRYRUN') == '1' || envStr('UPDATE_CHECK') == '1'),
+    check: (envStr('UPDATE_CHECK') == '1'),
+    list: (envStr('UPDATE_LIST') == '1'),
+    stripLegacy: (envStr('UPDATE_STRIP_LEGACY') == '1'),
+    exportDir: envStr('UPDATE_EXPORT')
 };
 
 // Whatever ILibDuktape_EmbeddedModules.c holds, ILibDuktape_Polyfills.c is the live source as long as
