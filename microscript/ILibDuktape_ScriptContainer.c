@@ -1591,47 +1591,26 @@ duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx2(SCRIPT_EN
 size_t ILibDuktape_ScriptContainer_TotalAllocations = 0;
 void *ILibDuktape_ScriptContainer_Engine_malloc(void *udata, duk_size_t size)
 {
-	ILibDuktape_ScriptContainer_TotalAllocations += size;
 	void *ptr = ILibMemory_SmartAllocateEx(size, sizeof(void*));
+	ILibDuktape_ScriptContainer_TotalAllocations += ILibMemory_Size(ptr);
 	((void**)ILibMemory_Extra(ptr))[0] = udata;
 	return(ptr);
 }
 void *ILibDuktape_ScriptContainer_Engine_realloc(void *udata, void *ptr, duk_size_t size)
 {
-	size_t difference = 0;
+	size_t oldSize = ptr == NULL ? 0 : ILibMemory_Size(ptr);
 	if (ptr != NULL) 
 	{ 
-		if (ILibMemory_Size(ptr) > size)
-		{
-			// Memory Shrink
-			difference = ILibMemory_Size(ptr) - size;
-			ILibDuktape_ScriptContainer_TotalAllocations -= difference;
-		}
-		else
-		{
-			difference = size - ILibMemory_Size(ptr);
-			ILibDuktape_ScriptContainer_TotalAllocations += difference;
-		}
-		//if (size == 0)
-		//{
-		//	ILibMemory_Free(ptr);
-		//	ptr = NULL;
-		//}
-		//else
-		{
-			ptr = ILibMemory_SmartReAllocate(ptr, size);
-		}
+		ptr = ILibMemory_SmartReAllocate(ptr, size);
 	}
 	else
 	{
-		//if (size > 0)
-		{
-			ptr = ILibMemory_SmartAllocateEx(size, sizeof(void*));
-			((void**)ILibMemory_Extra(ptr))[0] = udata;
-			ILibDuktape_ScriptContainer_TotalAllocations += size;
-		}
+		ptr = ILibMemory_SmartAllocateEx(size, sizeof(void*));
+		((void**)ILibMemory_Extra(ptr))[0] = udata;
 	}
-
+	// The allocator rounds sizes up for alignment; frees use those rounded sizes.
+	ILibDuktape_ScriptContainer_TotalAllocations -= oldSize;
+	ILibDuktape_ScriptContainer_TotalAllocations += ILibMemory_Size(ptr);
 	return(ptr);
 }
 void ILibDuktape_ScriptContainer_Engine_free(void *udata, void *ptr)
