@@ -146,6 +146,8 @@ typedef struct ILibProcessPipe_Manager_Object
 {
 	ILibChain_Link ChainLink;
 	ILibLinkedList ActivePipes;
+	// Bumped on every removal from ActivePipes, so OnPostSelect can tell that a read handler changed the list under it.
+	int ActivePipesGeneration;
 
 #ifdef WIN32
 	int abort;
@@ -300,16 +302,11 @@ void ILibProcessPipe_Manager_OnPreSelect(void* object, fd_set *readset, fd_set *
 	void *node, *nextnode;
 	ILibProcessPipe_PipeObject *j;
 
+	// A broken pipe leaves ActivePipes the moment it breaks, in ILibProcessPipe_Process_ReadHandler, so every listed pipe here is live.
 	node = ILibLinkedList_GetNode_Head(man->ActivePipes);
 	while(node != NULL && (j = (ILibProcessPipe_PipeObject*)ILibLinkedList_GetDataFromNode(node)) != NULL)
 	{
 		nextnode = ILibLinkedList_GetNextNode(node);
-		if (((int*)ILibLinkedList_GetExtendedMemory(node))[0] != 0 || (j = (ILibProcessPipe_PipeObject*)ILibLinkedList_GetDataFromNode(node)) == NULL)
-		{
-			ILibLinkedList_Remove(node);
-			node = nextnode;
-			continue;
-		}
 		if (ILibMemory_CanaryOK(j) && j->mPipe_ReadEnd != -1)
 		{
 			FD_SET(j->mPipe_ReadEnd, readset);
@@ -328,6 +325,7 @@ void ILibProcessPipe_Manager_OnPostSelect(void* object, int slct, fd_set *readse
 	//	printf("ILibProcessPipe_Manager_PostSelect(%s)\n", ((ILibChain_Link*)object)->MetaData);
 	//}
 
+	// Every pipe is served on every pass, also when a continuation ends during the walk, because other nested waits still need their pipes.
 	node = ILibLinkedList_GetNode_Head(man->ActivePipes);
 	while(node != NULL && (j = (ILibProcessPipe_PipeObject*)ILibLinkedList_GetDataFromNode(node)) != NULL)
 	{
@@ -336,10 +334,14 @@ void ILibProcessPipe_Manager_OnPostSelect(void* object, int slct, fd_set *readse
 		{
 			if (j->mPipe_ReadEnd != -1 && FD_ISSET(j->mPipe_ReadEnd, readset) != 0)
 			{
+				// The read handler can free any node in this list, nextNode included, when a broken pipe destroys the process and its other pipe.
+				// Clear this fd first, so the pipe is not dispatched twice, and start over from the head when the list changed while the handler ran.
+				int generation = man->ActivePipesGeneration;
+				FD_CLR(j->mPipe_ReadEnd, readset);
 				ILibProcessPipe_Process_ReadHandler(j);
+				if (generation != man->ActivePipesGeneration) { node = ILibLinkedList_GetNode_Head(man->ActivePipes); continue; }
 			}
 		}
-		if (ILibChain_GetContinuationState(man->ChainLink.ParentChain) == ILibChain_ContinuationState_END_CONTINUE) { break; }
 		node = nextNode;
 	}
 }
@@ -363,7 +365,7 @@ ILibProcessPipe_Manager ILibProcessPipe_Manager_Create(void *chain)
 	memset(retVal, 0, sizeof(ILibProcessPipe_Manager_Object));
 	retVal->ChainLink.MetaData = ILibMemory_SmartAllocate_FromString("ILibProcessPipe_Manager");
 	retVal->ChainLink.ParentChain = chain;
-	retVal->ActivePipes = ILibLinkedList_CreateEx(sizeof(int));
+	retVal->ActivePipes = ILibLinkedList_Create();
 
 #ifndef WIN32
 	retVal->ChainLink.PreSelectHandler = &ILibProcessPipe_Manager_OnPreSelect;
@@ -419,6 +421,7 @@ void ILibProcessPipe_FreePipe(ILibProcessPipe_PipeObject *pipeObject)
 		if (node != NULL)
 		{
 			ILibLinkedList_Remove(node);
+			pipeObject->manager->ActivePipesGeneration++;
 		}
 	}
 	if (pipeObject->mPipe_ReadEnd != -1) { close(pipeObject->mPipe_ReadEnd); }
@@ -557,15 +560,20 @@ void ILibProcessPipe_Process_BrokenPipeSink_DestroyHandler(void *object)
 void ILibProcessPipe_Process_BrokenPipeSink(ILibProcessPipe_Pipe sender)
 {
 	ILibProcessPipe_Process_Object *p = ((ILibProcessPipe_PipeObject*)sender)->mProcess;
-	int status;
+	int status = 0;
 	if (ILibIsRunningOnChainThread(((ILibProcessPipe_PipeObject*)sender)->manager->ChainLink.ParentChain) != 0)
 	{
-		// This was called from the Reader
+		// This was called from the Reader. With both stdout and stderr piped this runs twice, once per pipe. Clear exitHandler first so the
+		// second call does not waitpid() again. By then the pid may already be reused by a new child and a blocking wait would hang on it.
 		if (p->exitHandler != NULL)
 		{
+			ILibProcessPipe_Process_ExitHandler handler = p->exitHandler;
+			p->exitHandler = NULL;
 
-			waitpid((pid_t)p->PID, &status, 0);
-			p->exitHandler(p, WEXITSTATUS(status), p->userObject);
+			// Retried on EINTR because the pipes can close before the child is a zombie, and its own SIGCHLD then interrupts this wait (no SA_RESTART).
+			// FreeBSD and OpenBSD then return -1 with EINTR instead of waiting on.
+			while (waitpid((pid_t)p->PID, &status, 0) < 0 && errno == EINTR) { }
+			handler(p, WEXITSTATUS(status), p->userObject);
 		}
 
 		// Unwind the stack, and destroy the process object
@@ -584,7 +592,9 @@ void ILibProcessPipe_Process_SoftKill(ILibProcessPipe_Process p)
 #else
 	int code;
 	kill((pid_t)j->PID, SIGKILL);
-	waitpid((pid_t)j->PID, &code, 0);
+	// WNOHANG because this is only a best effort reap. The real reap happens in ILibProcessPipe_Process_BrokenPipeSink once the pipes
+	// close. If that reap came first and the pid number was reused by a new child, a blocking wait here would hang on that child.
+	waitpid((pid_t)j->PID, &code, WNOHANG);
 #endif
 }
 
@@ -1158,8 +1168,9 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 		void *pipenode = ILibLinkedList_GetNode_Search(pipeObject->manager->ActivePipes, NULL, pipeObject);
 		if (pipenode != NULL)
 		{
-			// Flag this node for removal
-			((int*)ILibLinkedList_GetExtendedMemory(pipenode))[0] = 1;
+			// Removed at once, so a new child's pipe that reuses this fd number is never matched against this stale entry.
+			ILibLinkedList_Remove(pipenode);
+			pipeObject->manager->ActivePipesGeneration++;
 		}
 #endif
 		if (pipeObject->brokenPipeHandler != NULL) 
@@ -1272,6 +1283,7 @@ void ILibProcessPipe_Pipe_Pause(ILibProcessPipe_Pipe pipeObject)
 	}
 #else
 	ILibLinkedList_Remove(ILibLinkedList_GetNode_Search(p->manager->ActivePipes, NULL, pipeObject));
+	p->manager->ActivePipesGeneration++;
 #endif
 }
 

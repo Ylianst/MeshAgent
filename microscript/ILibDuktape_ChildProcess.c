@@ -28,10 +28,14 @@ limitations under the License.
 
 #ifdef WIN32
 #include <process.h>
+#else
+#include <sys/wait.h>
 #endif
 
 #define ILibDuktape_ChildProcess_Process	"\xFF_ChildProcess_Process"
 #define ILibDuktape_ChildProcess_MemBuf		"\xFF_ChildProcess_MemBuf"
+// Used when waitExit() is called without a timeout. When it expires, waitExit() throws.
+#define ILibDuktape_ChildProcess_DefaultWaitExitTimeout	60000
 extern int g_displayFinalizerMessages;
 
 typedef struct ILibDuktape_ChildProcess_SubProcess
@@ -154,10 +158,8 @@ void ILibDuktape_ChildProcess_SubProcess_ExitHandler(ILibProcessPipe_Process sen
 	}
 #endif
 
-	if (Duktape_GetIntPropertyValue(p->ctx, -1, "\xFF_WaitExit", 0) != 0)
-	{
-		ILibChain_EndContinue(Duktape_GetChain(p->ctx));
-	}
+	// Ends every waitExit() pending on this child. p is the tag they passed to ILibChain_Continue(). A child nobody waits on matches nothing.
+	ILibChain_EndContinue_ByTag(Duktape_GetChain(p->ctx), p);
 
 	duk_get_prop_string(p->ctx, -1, "emit");		// [childProcess][emit]
 	duk_swap_top(p->ctx, -2);						// [emit][this]
@@ -217,11 +219,14 @@ duk_ret_t ILibDuktape_ChildProcess_Kill(duk_context *ctx)
 	}
 	return(0);
 }
+// child.waitExit([ms]) blocks the script until this child exits, by running a nested event loop through ILibChain_Continue() with the child as the tag.
 duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 {
 	ILibChain_Continue_Result continueResult;
+	ILibDuktape_ChildProcess_SubProcess *sp;
 	int ret = 0;
-	int timeout = duk_is_number(ctx, 0) ? duk_require_int(ctx, 0) : -1;
+	// Without a timeout argument the default applies and throws when it expires. An explicit -1 or 0 waits forever.
+	int timeout = duk_is_number(ctx, 0) ? duk_require_int(ctx, 0) : ILibDuktape_ChildProcess_DefaultWaitExitTimeout;
 	void *chain = Duktape_GetChain(ctx);
 	if (ILibIsChainBeingDestroyed(chain))
 	{
@@ -231,36 +236,48 @@ duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 	duk_push_this(ctx);									// [spawnedProcess]
 	//char *_target = Duktape_GetStringPropertyValue(ctx, -1, "_target", NULL);
 
+	// The exit handler clears childProcess, so NULL here means the child already exited and there is nothing to wait for.
+	sp = (ILibDuktape_ChildProcess_SubProcess*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_ChildProcess_MemBuf);
+	if (sp == NULL || sp->childProcess == NULL) { return(0); }
+
 	if (!ILibChain_IsLinkAlive(Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Manager)))
 	{
 		return(ILibDuktape_Error(ctx, "Cannot waitExit() because JS Engine is exiting"));
 	}
 
-	if (ILibChain_GetContinuationState(chain) != ILibChain_ContinuationState_CONTINUE)
-	{
-		duk_push_int(ctx, 1);								// [spawnedProcess][flag]
-		duk_put_prop_string(ctx, -2, "\xFF_WaitExit");		// [spawnedProcess]
-	}
-
+	// sp is the tag of this wait. The exit handler ends every wait tagged with it, so several waitExit() calls may be pending on one child.
 	void *mods[] = { ILibGetBaseTimer(Duktape_GetChain(ctx)), Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Manager), ILibDuktape_Process_GetSignalListener(ctx) };
 #ifdef WIN32
 	HANDLE handles[] = { NULL, NULL, NULL, NULL, NULL };
 	ILibProcessPipe_Process p = Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Process);
 	ILibProcessPipe_Process_GetWaitHandles(p, &(handles[0]), &(handles[1]), &(handles[2]), &(handles[3]));
-	continueResult = ILibChain_Continue(chain, (ILibChain_Link**)mods, 2, timeout, (HANDLE**)handles);
+	continueResult = ILibChain_Continue(chain, (ILibChain_Link**)mods, 2, timeout, sp, (HANDLE**)handles);
 #else
-	continueResult = ILibChain_Continue(chain, (ILibChain_Link**)mods, 3, timeout);
+	continueResult = ILibChain_Continue(chain, (ILibChain_Link**)mods, 3, timeout, sp);
 #endif
 	switch (continueResult)
 	{
-		case ILibChain_Continue_Result_ERROR_INVALID_STATE:
-			ret = ILibDuktape_Error(ctx, "waitExit() already in progress");
+		case ILibChain_Continue_Result_ERROR_DEPTH_LIMIT:
+			ret = ILibDuktape_Error(ctx, "waitExit() nesting depth limit reached");
 			break;
 		case ILibChain_Continue_Result_ERROR_CHAIN_EXITING:
 			ret = ILibDuktape_Error(ctx, "waitExit() aborted because thread is exiting");
 			break;
 		case ILibChain_Continue_Result_ERROR_EMPTY_SET:
 			ret = ILibDuktape_Error(ctx, "waitExit() cannot wait on empty set");
+			break;
+		case ILibChain_Continue_Result_ERROR_NO_STACK:
+			ret = ILibDuktape_Error(ctx, "waitExit() refused, not enough C stack left for a nested wait");
+			break;
+		case ILibChain_Continue_Result_ERROR_ABORTED:
+			ret = ILibDuktape_Error(ctx, "waitExit() aborted because the script is exiting");
+			break;
+		case ILibChain_Continue_Result_TIMEOUT:
+			// Timed out. Only throw when the child is really still running, because it may have exited right at the deadline.
+			if (sp->childProcess != NULL)
+			{
+				ret = ILibDuktape_Error(ctx, "waitExit() timed out after %dms, child (pid=%d) still running", timeout, Duktape_GetIntPropertyValue(ctx, -1, "pid", 0));
+			}
 			break;
 		default:
 			ret = 0;
@@ -332,7 +349,10 @@ duk_ret_t ILibDuktape_SpawnedProcess_descriptorSetter(duk_context *ctx)
 extern void ILibProcessPipe_Process_Destroy(void *p);
 duk_ret_t ILibDuktape_SpawnedProcess_SIGCHLD_sink(duk_context *ctx)
 {
-	int statusCode = duk_require_int(ctx, 1);
+	// WEXITSTATUS because the SIGCHLD event carries the raw waitpid() status, and 'exit' reports the exit code, as the pipe close path does.
+	// The raw status sits in a variable because macOS defines WEXITSTATUS through *(int *)&(w), which needs an lvalue.
+	int rawStatus = duk_require_int(ctx, 1);
+	int statusCode = WEXITSTATUS(rawStatus);
 	int pid = duk_require_int(ctx, 2);
 	duk_push_current_function(ctx);				// [func]
 	duk_get_prop_string(ctx, -1, "_child");		// [func][child]
@@ -707,6 +727,14 @@ duk_ret_t ILibDuktape_ChildProcess_execve(duk_context *ctx)
 	}
 #endif
 }
+#ifdef _DEBUG
+// Debug builds only: child_process._stackRemaining() returns the bytes of C stack left for nested waits, or -1 when the platform gives no usable bound.
+duk_ret_t ILibDuktape_ChildProcess_stackRemaining(duk_context *ctx)
+{
+	duk_push_number(ctx, (duk_double_t)ILibChain_ContinueStackRemaining(Duktape_GetChain(ctx)));
+	return(1);
+}
+#endif
 void ILibDuktape_ChildProcess_PUSH(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);
@@ -717,6 +745,9 @@ void ILibDuktape_ChildProcess_PUSH(duk_context *ctx, void *chain)
 
 	ILibDuktape_CreateInstanceMethod(ctx, "execFile", ILibDuktape_ChildProcess_execFile, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "_execve", ILibDuktape_ChildProcess_execve, DUK_VARARGS);
+#ifdef _DEBUG
+	ILibDuktape_CreateInstanceMethod(ctx, "_stackRemaining", ILibDuktape_ChildProcess_stackRemaining, 0);
+#endif
 
 	duk_push_object(ctx);
 	duk_push_int(ctx, 0);
@@ -781,6 +812,19 @@ public:
 	\brief Sends SIGTERM to child process
 	*/
 	void kill();
+
+	/*!
+	\brief Blocks until the child process exits, while continuing to dispatch event loop activity (timers, streams, other children)\n
+	Returns immediately if the child has already exited. Calls may be nested up to 16 deep. An event handler that runs
+	while one waitExit() is blocked may itself call waitExit() on another child. Nested waits unwind in LIFO order.\n
+	Several waitExit() calls may be pending on the same child, for example when a handler running inside the wait calls it again. The child's exit ends all of them.\n
+	<b>Note:</b> On timeout the child is <b>not</b> killed. The caller decides whether to kill(), retry, or wait again
+	\param timeout <number> Optional. Maximum milliseconds to wait. <b>Default</b>: 60000 (1 minute). Pass -1 or 0 to wait forever
+	\exception Error Thrown when the timeout expires while the child is still running ("waitExit() timed out after Nms, child (pid=P) still running")
+	\exception Error Thrown when the nesting depth cap is exceeded ("waitExit() nesting depth limit reached")
+	\exception Error Thrown when a nested call finds too little C stack left ("waitExit() refused, not enough C stack left for a nested wait")
+	*/
+	void waitExit([timeout]);
 
 	/*!
 	\brief StdOut ReadableStream
