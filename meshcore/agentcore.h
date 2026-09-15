@@ -260,7 +260,7 @@ typedef struct MeshAgentHostContainer
 	char *meshServiceName;
 	char *displayName;
 	int serviceReserved;
-	long consoleText_timeStamp;
+	long long consoleText_timeStamp;
 	int consoleText_counter;
 	int consoleText_maxRate;
 	int autoproxy_status;
