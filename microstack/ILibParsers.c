@@ -2336,7 +2336,7 @@ void ILibChain_SetupWindowsWaitObject(HANDLE* waitList, int *waitListCount, stru
 	if (readset->fd_count == 0 && writeset->fd_count == 0 && ILibLinkedList_GetNode_Head(handleList) == NULL)
 	{
 		*waitListCount = 0;
-		*timeout = tv->tv_sec * 1000;
+		*timeout = (DWORD)(tv->tv_sec * 1000 + tv->tv_usec / 1000);
 		return;
 	}
 	int chkIndex;
@@ -7882,7 +7882,7 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 	if (LifeTimeMonitor->NextTriggerTick != -1 && *blocktime > (int)(LifeTimeMonitor->NextTriggerTick - CurrentTick))
 	{
 		int delta = (int)(LifeTimeMonitor->NextTriggerTick - CurrentTick);
-		if (delta < 1000) *blocktime = 1000; else *blocktime = delta;
+		*blocktime = delta < 1 ? 1 : delta;
 	}
 }
 
@@ -10056,7 +10056,7 @@ long long ILibGetUptime()
 	struct timespec ts; 
 	memset(&ts, 0, sizeof ts);
 	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return (((long long)ts.tv_sec) * 1000) + ((((long long)ts.tv_nsec) / 1000) % 1000);
+	return (((long long)ts.tv_sec) * 1000) + (((long long)ts.tv_nsec) / 1000000);
 }
 #endif
 
