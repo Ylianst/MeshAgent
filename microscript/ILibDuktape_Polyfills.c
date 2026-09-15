@@ -1646,9 +1646,9 @@ duk_ret_t ILibDuktape_DynamicBuffer_read(duk_context *ctx)
 	duk_push_this(ctx);															// [DynamicBuffer]
 	duk_get_prop_string(ctx, -1, "\xFF_buffer");								// [DynamicBuffer][buffer]
 	data = (ILibDuktape_DynamicBuffer_data*)Duktape_GetBuffer(ctx, -1, NULL);
-	duk_push_external_buffer(ctx);												// [DynamicBuffer][buffer][extBuffer]
-	duk_config_buffer(ctx, -1, data->buffer + data->start, data->bufferLen - (data->start + data->end));
-	duk_push_buffer_object(ctx, -1, 0, data->bufferLen - (data->start + data->end), DUK_BUFOBJ_NODEJS_BUFFER);
+	int len = data->bufferLen - (data->start + data->end);
+	memcpy_s(duk_push_fixed_buffer(ctx, len), len, data->buffer + data->start, len);	// [DynamicBuffer][buffer][fixedBuffer]
+	duk_push_buffer_object(ctx, -1, 0, len, DUK_BUFOBJ_NODEJS_BUFFER);
 	return(1);
 }
 duk_ret_t ILibDuktape_DynamicBuffer_new(duk_context *ctx)

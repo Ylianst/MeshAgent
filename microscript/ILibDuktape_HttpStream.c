@@ -3246,8 +3246,7 @@ duk_ret_t ILibDuktape_HttpStream_md5(duk_context *ctx)
 	ILibDuktape_readableStream *rs = (ILibDuktape_readableStream*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_readableStream_RSPTRS);
 	ILibDuktape_HttpStream_Data *data = (ILibDuktape_HttpStream_Data*)rs->user;
 
-	duk_push_external_buffer(ctx);											// [buffer]
-	duk_config_buffer(ctx, -1, data->entityHash, sizeof(data->entityHash));
+	memcpy_s(duk_push_fixed_buffer(ctx, sizeof(data->entityHash)), sizeof(data->entityHash), data->entityHash, sizeof(data->entityHash));	// [buffer]
 	duk_push_buffer_object(ctx, -1, 0, sizeof(data->entityHash), DUK_BUFOBJ_NODEJS_BUFFER);
 	return(1);
 }
