@@ -50,6 +50,9 @@ limitations under the License.
 #ifndef WIN32
 #include <sys/resource.h>
 #endif
+#ifdef __linux__
+#include <sys/syscall.h>
+#endif
 
 #ifdef _MINCORE
 #define strncmp(a,b,c) strcmp(a,b)
@@ -80,11 +83,15 @@ limitations under the License.
 #include <sys/sysctl.h>
 	// OpenBSD build also defines _FREEBSD
 	#if defined(_FREEBSD) && !defined(_OPENBSD)
-		// FreeBSD declares pthread_timedjoin_np() in pthread_np.h
+		// FreeBSD declares pthread_timedjoin_np() and pthread_attr_get_np() in pthread_np.h
 		#include <pthread_np.h>
 	#else
 		// macOS and OpenBSD have no pthread_timedjoin_np()
 		#define ILIB_NO_TIMEDJOIN
+	#endif
+	#if defined(_OPENBSD)
+		// OpenBSD declares pthread_stackseg_np() in pthread_np.h
+		#include <pthread_np.h>
 	#endif
 #else
 	#if defined(_POSIX) 
@@ -955,6 +962,25 @@ typedef struct ILibChain_WaitHandleInfo
 }ILibChain_WaitHandleInfo;
 #endif
 
+// One entry per active ILibChain_Continue() call, one nested run of the event loop. Together they form a LIFO stack, innermost first.
+// The depth cap stops runaway recursive waits from exhausting the 1 MB default stack on Windows.
+#ifndef ILibChain_MaxContinueDepth
+#define ILibChain_MaxContinueDepth 16
+#endif
+// Minimum C stack that must remain free for a nested ILibChain_Continue() to be allowed. A nested level costs 13 to 61 KB depending on the compiler,
+// so this leaves room for a few more levels plus the JS running inside them.
+#ifndef ILibChain_ContinueStackHeadroom
+#define ILibChain_ContinueStackHeadroom (192 * 1024)
+#endif
+typedef struct ILibChain_ContinueEntry
+{
+	struct ILibChain_ContinueEntry *previous;	// The next outer continuation, NULL for the outermost.
+	void *tag;			// The waiter's identity, given to ILibChain_Continue() and matched by ILibChain_EndContinue_ByTag().
+	int depth;			// 1 for the outermost continuation, checked against ILibChain_MaxContinueDepth.
+	int ended;			// Set to leave the loop, by tag, abort, timeout or an empty wait set.
+	int aborted;		// Set by ILibChain_AbortContinues(), the wait then returns ILibChain_Continue_Result_ERROR_ABORTED.
+}ILibChain_ContinueEntry;
+
 typedef struct ILibBaseChain
 {
 	int TerminateFlag;
@@ -995,7 +1021,10 @@ typedef struct ILibBaseChain
 	ILibLinkedList Links;
 	ILibLinkedList LinksPendingDelete;
 	ILibHashtable ChainStash;
-	ILibChain_ContinuationStates continuationState;
+	ILibChain_ContinueEntry *continueTop;	// The innermost live continuation, NULL when the main loop is running.
+	// Low bound of the chain thread's stack, measured once on the first ILibChain_Continue() call. NULL when it cannot be measured.
+	char *continueStackLow;
+	int continueStackLowChecked;
 	unsigned int PreSelectCount;
 	unsigned int PostSelectCount;
 	void *WatchDogThread;
@@ -2336,7 +2365,7 @@ void ILibChain_SetupWindowsWaitObject(HANDLE* waitList, int *waitListCount, stru
 	if (readset->fd_count == 0 && writeset->fd_count == 0 && ILibLinkedList_GetNode_Head(handleList) == NULL)
 	{
 		*waitListCount = 0;
-		*timeout = tv->tv_sec * 1000;
+		*timeout = (DWORD)(tv->tv_sec * 1000 + tv->tv_usec / 1000);
 		return;
 	}
 	int chkIndex;
@@ -2437,14 +2466,92 @@ void ILibChain_SetupWindowsWaitObject(HANDLE* waitList, int *waitListCount, stru
 #endif
 
 
-ILibChain_ContinuationStates ILibChain_GetContinuationState(void *chain)
+// Returns the low address of the current thread's stack, or NULL when this platform gives no way to ask.
+static char* ILibChain_GetCurrentStackLow(void)
 {
-	return(((ILibBaseChain*)chain)->continuationState);
-}
-#ifdef WIN32
-ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibChain_Link **modules, int moduleCount, int maxTimeout, HANDLE **handles)
+#if defined(WIN32)
+	// A local variable lives inside the stack, so its region's AllocationBase is the bottom of the whole stack reservation.
+	MEMORY_BASIC_INFORMATION mbi;
+	if (VirtualQuery(&mbi, &mbi, sizeof(mbi)) == 0) { return(NULL); }
+	return((char*)mbi.AllocationBase);
+#elif defined(__APPLE__)
+	// On macOS pthread_get_stackaddr_np() returns the top of the stack.
+	return((char*)pthread_get_stackaddr_np(pthread_self()) - pthread_get_stacksize_np(pthread_self()));
+#elif defined(_OPENBSD)
+	// pthread_stackseg_np() returns ss_sp as the top of the stack. Checked before _FREEBSD because the OpenBSD build defines both.
+	// The range is only used when a local variable lies inside it, so a wrong answer turns the headroom check off instead of refusing valid waits.
+	stack_t ss;
+	char *here = (char*)&ss;
+	if (pthread_stackseg_np(pthread_self(), &ss) != 0 || ss.ss_size == 0) { return(NULL); }
+	if (here < (char*)ss.ss_sp && here >= (char*)ss.ss_sp - ss.ss_size) { return((char*)ss.ss_sp - ss.ss_size); }
+	return(NULL);
+#elif defined(_FREEBSD)
+	// FreeBSD has pthread_attr_get_np() instead of pthread_getattr_np(), and it needs an initialized attr.
+	// The range is only used when a local variable lies inside it, so a wrong answer turns the headroom check off instead of refusing valid waits.
+	pthread_attr_t attr;
+	void *addr = NULL;
+	size_t size = 0;
+	char *here = (char*)&attr;
+	if (pthread_attr_init(&attr) != 0) { return(NULL); }
+	if (pthread_attr_get_np(pthread_self(), &attr) != 0 || pthread_attr_getstack(&attr, &addr, &size) != 0) { addr = NULL; }
+	pthread_attr_destroy(&attr);
+	if (addr != NULL && here >= (char*)addr && here < (char*)addr + size) { return((char*)addr); }
+	return(NULL);
+#elif defined(__linux__)
+	// glibc, musl and uClibc all have pthread_getattr_np(). For the main thread glibc reports the RLIMIT_STACK based bounds, but musl reports only
+	// the part mapped so far, and that moves down as the stack grows (measured with musl 1.2.5: 124 KB at start, 1028 KB after a 1 MB alloca).
+	// So for the main thread the bound is derived from RLIMIT_STACK instead, and without a limit musl has nothing usable to offer.
+	pthread_attr_t attr;
+	void *addr = NULL;
+	size_t size = 0;
+	struct rlimit rl;
+	if (pthread_getattr_np(pthread_self(), &attr) != 0) { return(NULL); }
+	if (pthread_attr_getstack(&attr, &addr, &size) != 0) { addr = NULL; }
+	pthread_attr_destroy(&attr);
+	if (addr != NULL && getpid() == (pid_t)syscall(SYS_gettid) && getrlimit(RLIMIT_STACK, &rl) == 0)
+	{
+#ifndef __GLIBC__
+		if (rl.rlim_cur == RLIM_INFINITY) { return(NULL); }
+#endif
+		if (rl.rlim_cur != RLIM_INFINITY && (size_t)rl.rlim_cur > size) { addr = (char*)addr + size - (size_t)rl.rlim_cur; }
+	}
+	return((char*)addr);
 #else
-ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibChain_Link **modules, int moduleCount, int maxTimeout)
+	return(NULL);
+#endif
+}
+ILibExportMethod void ILibChain_EndContinue_ByTag(void *chain, void *tag)
+{
+	// Ends every live wait that was started with this tag. A tag whose waits are all over matches nothing, so a late call is harmless.
+	ILibChain_ContinueEntry *e;
+	int found = 0;
+	if (tag == NULL) { return; }
+	for (e = ((ILibBaseChain*)chain)->continueTop; e != NULL; e = e->previous) { if (e->tag == tag) { e->ended = 1; found = 1; } }
+	if (found != 0) { ILibForceUnBlockChain(chain); }
+}
+ILibExportMethod int ILibChain_AbortContinues(void *chain)
+{
+	// Ends every live continuation so its caller throws and the C stack unwinds. Used before the script engine is destroyed.
+	ILibChain_ContinueEntry *e;
+	int count = 0;
+	for (e = ((ILibBaseChain*)chain)->continueTop; e != NULL; e = e->previous) { e->ended = 1; e->aborted = 1; ++count; }
+	if (count != 0) { ILibForceUnBlockChain(chain); }
+	return(count);
+}
+#ifdef _DEBUG
+ILibExportMethod long long ILibChain_ContinueStackRemaining(void *chain)
+{
+	ILibBaseChain *root = (ILibBaseChain*)chain;
+	char here;
+	if (root->continueStackLowChecked == 0) { root->continueStackLow = ILibChain_GetCurrentStackLow(); root->continueStackLowChecked = 1; }
+	return(root->continueStackLow == NULL ? -1 : (long long)(&here - root->continueStackLow));
+}
+#endif
+// Runs a nested copy of the event loop, PreSelect, select() and PostSelect of the given modules, until this continuation is ended by tag, aborted, the chain stops or the timeout passes.
+#ifdef WIN32
+ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibChain_Link **modules, int moduleCount, int maxTimeout, void *tag, HANDLE **handles)
+#else
+ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibChain_Link **modules, int moduleCount, int maxTimeout, void *tag)
 #endif
 {
 	int useAllModules = (modules == NULL);
@@ -2455,7 +2562,6 @@ ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibC
 	ILibChain_Link *module;
 	int slct = 0, vX = 0, mX = 0;
 	struct timeval tv;
-	struct timeval startTime;
 	fd_set readset;
 	fd_set errorset;
 	fd_set writeset;
@@ -2463,11 +2569,25 @@ ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibC
 	ILibLinkedListNode tmpNode;
 	memset(&tmpNode, 0, sizeof(tmpNode));
 
-	if (root->continuationState != ILibChain_ContinuationState_INACTIVE && root->continuationState != ILibChain_ContinuationState_END_CONTINUE) { return(ILibChain_Continue_Result_ERROR_INVALID_STATE); }
-	root->continuationState = ILibChain_ContinuationState_CONTINUE;
+	// The depth cap stops runaway recursive waits from overflowing the C stack.
+	if (root->continueTop != NULL && root->continueTop->depth >= ILibChain_MaxContinueDepth) { return(ILibChain_Continue_Result_ERROR_DEPTH_LIMIT); }
+	// A nested wait is also refused when too little stack is left below the current stack pointer. A first level wait is never refused here,
+	// so a single wait keeps working on small stacks, for example a 128 KB musl worker thread, and where the bound cannot be measured.
+	if (root->continueStackLowChecked == 0) { root->continueStackLow = ILibChain_GetCurrentStackLow(); root->continueStackLowChecked = 1; }
+	if (root->continueTop != NULL && root->continueStackLow != NULL && (char*)&root - root->continueStackLow < (ptrdiff_t)ILibChain_ContinueStackHeadroom) { return(ILibChain_Continue_Result_ERROR_NO_STACK); }
+	// Push this continuation. It lives on our own C stack, so the LIFO order of the entries is the call order.
+	ILibChain_ContinueEntry entry;
+	entry.previous = root->continueTop;
+	entry.tag = tag;
+	entry.depth = entry.previous != NULL ? entry.previous->depth + 1 : 1;
+	entry.ended = 0;
+	entry.aborted = 0;
+	root->continueTop = &entry;
 	currentNode = root->node;
 
-	gettimeofday(&startTime, NULL);
+	// The deadline is on the same monotonic millisecond clock the chain timers use. 0 and negative timeouts wait forever.
+	long long deadline = maxTimeout > 0 ? ILibGetUptime() + maxTimeout : 0;
+	long long remaining = 0;
 	ILibRemoteLogging_printf(ILibChainGetLogger(chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "ContinueChain...");
 
 #ifdef WIN32
@@ -2475,14 +2595,14 @@ ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibC
 	ILibChain_WaitHandleInfo* currentInfo = chain->currentInfo;
 #endif
 
-	while (root->TerminateFlag == 0 && root->continuationState == ILibChain_ContinuationState_CONTINUE)
+	while (root->TerminateFlag == 0 && entry.ended == 0)
 	{
 		if (maxTimeout > 0)
 		{
-			gettimeofday(&tv, NULL);
-			if (tv.tv_sec > (startTime.tv_sec + maxTimeout / 1000))
+			remaining = deadline - ILibGetUptime();
+			if (remaining <= 0)
 			{
-				root->continuationState = ILibChain_ContinuationState_END_CONTINUE;
+				entry.ended = 1;
 				ret = ILibChain_Continue_Result_TIMEOUT;
 				break;
 			}
@@ -2491,8 +2611,9 @@ ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibC
 		FD_ZERO(&readset);
 		FD_ZERO(&errorset);
 		FD_ZERO(&writeset);
-		tv.tv_sec = maxTimeout < 0 ? UPNP_MAX_WAIT : maxTimeout / 1000;
-		tv.tv_usec = 0;
+		// select() sleeps at most until the deadline, with millisecond precision. 0 and negative timeouts use UPNP_MAX_WAIT, because a zero timeout would spin.
+		tv.tv_sec = maxTimeout <= 0 ? UPNP_MAX_WAIT : (long)(remaining / 1000);
+		tv.tv_usec = maxTimeout <= 0 ? 0 : (long)((remaining % 1000) * 1000);
 
 		//
 		// Iterate through all the PreSelect function pointers in the chain
@@ -2564,6 +2685,10 @@ ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibC
 			}
 		}
 
+		// An inner wait can end this entry while we are still inside the PreSelect dispatch above. That wake-up was consumed by the inner select(),
+		// so check again here. Without this the entry sleeps one full select() cycle before it notices it is done.
+		if (entry.ended != 0) { continue; }
+
 		//
 		// The actual Select Statement
 		//
@@ -2573,9 +2698,9 @@ ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibC
 		chain->currentWaitTimeout = 0;
 
 		ILibChain_SetupWindowsWaitObject(chain->WaitHandles, &x, &tv, &(chain->currentWaitTimeout), &readset, &writeset, &errorset, chain->auxSelectHandles, handles);
-		if (x == 0 && (maxTimeout < 0 && chain->currentWaitTimeout == UPNP_MAX_WAIT))
+		if (x == 0 && (maxTimeout <= 0 && chain->currentWaitTimeout == UPNP_MAX_WAIT))
 		{
-			root->continuationState = ILibChain_ContinuationState_END_CONTINUE;
+			entry.ended = 1;
 			ret = ILibChain_Continue_Result_ERROR_EMPTY_SET;
 			slct = -1;
 		}
@@ -2651,18 +2776,15 @@ ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibC
 	}
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "ContinueChain...Ending...");
+	// Pop this continuation and restore the iterator state the outer loop was using.
+	root->continueTop = entry.previous;
+	if (entry.aborted != 0) { ret = ILibChain_Continue_Result_ERROR_ABORTED; }
 	root->node = currentNode;
 #ifdef WIN32
 	root->currentHandle = currentHandle;
 	root->currentInfo = currentInfo;
 #endif
 	return(root->TerminateFlag != 0 ? ILibChain_Continue_Result_ERROR_CHAIN_EXITING : ret);
-}
-
-ILibExportMethod void ILibChain_EndContinue(void *chain)
-{
-	((ILibBaseChain*)chain)->continuationState = ILibChain_ContinuationState_END_CONTINUE;
-	ILibForceUnBlockChain(chain);
 }
 
 char* g_ILibCrashID = NULL;
@@ -3165,7 +3287,7 @@ void ILibChain_WatchDogStart(void *obj)
 	fd_set readset, writeset, errorset;
 	int slct;
 	struct timeval tv;
-	long stamp = ILibGetTimeStamp();
+	long long stamp = ILibGetTimeStamp();
 	tv.tv_usec = 0;
 	tv.tv_sec = ILibChain_WATCHDOG_TIMEOUT / 1000;
 #endif
@@ -4108,8 +4230,6 @@ ILibExportMethod void ILibStartChain(void *Chain)
 		FD_ZERO(&writeset);
 		tv.tv_sec = UPNP_MAX_WAIT;
 		tv.tv_usec = 0;
-
-		if (chain->continuationState == ILibChain_ContinuationState_END_CONTINUE) { chain->continuationState = ILibChain_ContinuationState_INACTIVE; }
 
 		//
 		// Iterate through all the PreSelect function pointers in the chain
@@ -7882,7 +8002,7 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 	if (LifeTimeMonitor->NextTriggerTick != -1 && *blocktime > (int)(LifeTimeMonitor->NextTriggerTick - CurrentTick))
 	{
 		int delta = (int)(LifeTimeMonitor->NextTriggerTick - CurrentTick);
-		if (delta < 1000) *blocktime = 1000; else *blocktime = delta;
+		*blocktime = delta < 1 ? 1 : delta;
 	}
 }
 
@@ -9847,11 +9967,11 @@ int ILibGetMillisecondTimeSpan(struct timeval *tv1, struct timeval *tv2)
 }
 
 
-long ILibGetTimeStamp()
+long long ILibGetTimeStamp(void)
 {
 	struct timeval tv;
 	gettimeofday(&tv, NULL);
-	return((tv.tv_sec * 1000) + (tv.tv_usec / 1000));
+	return(((long long)tv.tv_sec * 1000) + (tv.tv_usec / 1000));
 }
 int ILibIsLittleEndian() { int v = 1; return (((char*)&v)[0] == 1 ? 1 : 0); }
 int ILibGetCurrentTimezoneOffset_Minutes()
@@ -10056,7 +10176,7 @@ long long ILibGetUptime()
 	struct timespec ts; 
 	memset(&ts, 0, sizeof ts);
 	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return (((long long)ts.tv_sec) * 1000) + ((((long long)ts.tv_nsec) / 1000) % 1000);
+	return (((long long)ts.tv_sec) * 1000) + (((long long)ts.tv_nsec) / 1000000);
 }
 #endif
 

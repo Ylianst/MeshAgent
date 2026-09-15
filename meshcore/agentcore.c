@@ -800,7 +800,7 @@ duk_ret_t ILibDuktape_MeshAgent_SendCommand(duk_context *ctx)
 		if (strcasecmp(Duktape_GetStringPropertyValue(ctx, 0, "action", ""), "msg") == 0 && strcasecmp(Duktape_GetStringPropertyValue(ctx, 0, "type", ""), "console") == 0)
 		{
 			// sendConsoleText()
-			long current = ILibGetTimeStamp();
+			long long current = ILibGetTimeStamp();
 			if (agent->consoleText_timeStamp == 0 || current - agent->consoleText_timeStamp > 1000)
 			{
 				agent->consoleText_timeStamp = current;
