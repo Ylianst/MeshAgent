@@ -486,6 +486,9 @@ void ILibProcessPipe_Pipe_SetBrokenPipeHandler(ILibProcessPipe_Pipe targetPipe, 
 	if (ILibMemory_CanaryOK(targetPipe)) { ((ILibProcessPipe_PipeObject*)targetPipe)->brokenPipeHandler = (ILibProcessPipe_GenericBrokenPipeHandler)handler; }
 }
 
+#ifdef WIN32
+static LONG ILibProcessPipe_PipeNameCounter = 0;
+#endif
 ILibProcessPipe_PipeObject* ILibProcessPipe_CreatePipe(ILibProcessPipe_Manager manager, int pipeBufferSize, ILibProcessPipe_GenericBrokenPipeHandler brokenPipeHandler, int extraMemorySize)
 {
 	ILibProcessPipe_PipeObject* retVal = NULL;
@@ -508,10 +511,10 @@ ILibProcessPipe_PipeObject* ILibProcessPipe_CreatePipe(ILibProcessPipe_Manager m
 
 	do
 	{
-		sprintf_s(pipeName, sizeof(pipeName), "\\\\.\\pipe\\%p%u", (void*)retVal, pipeCounter++);
+		sprintf_s(pipeName, sizeof(pipeName), "\\\\.\\pipe\\meshagent_%lu_%ld", GetCurrentProcessId(), (long)InterlockedIncrement(&ILibProcessPipe_PipeNameCounter));
 		retVal->mPipe_ReadEnd = CreateNamedPipeA(pipeName, FILE_FLAG_FIRST_PIPE_INSTANCE | PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED, PIPE_TYPE_BYTE, 1, pipeBufferSize, pipeBufferSize, 0, &saAttr);
-		if (retVal->mPipe_ReadEnd == (HANDLE)INVALID_HANDLE_VALUE) { ILIBCRITICALEXIT(254); }
-	} while (retVal->mPipe_ReadEnd == (HANDLE)ERROR_ACCESS_DENIED);
+	} while (retVal->mPipe_ReadEnd == (HANDLE)INVALID_HANDLE_VALUE && (GetLastError() == ERROR_PIPE_BUSY || GetLastError() == ERROR_ACCESS_DENIED) && ++pipeCounter < 1000);
+	if (retVal->mPipe_ReadEnd == (HANDLE)INVALID_HANDLE_VALUE) { ILIBCRITICALEXIT(254); }
 
 	if ((retVal->mOverlapped = (struct _OVERLAPPED*)malloc(sizeof(struct _OVERLAPPED))) == NULL) { ILIBCRITICALEXIT(254); }
 	memset(retVal->mOverlapped, 0, sizeof(struct _OVERLAPPED));
