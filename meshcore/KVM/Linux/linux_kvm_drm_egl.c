@@ -42,6 +42,12 @@ limitations under the License.
 #endif
 #endif
 
+// EGL_EXT_device_drm_render_node postdates some distro EGL headers (Raspbian bullseye / Mesa
+// 20.3); define its token so the DRM device match still builds against them.
+#ifndef EGL_DRM_RENDER_NODE_FILE_EXT
+#define EGL_DRM_RENDER_NODE_FILE_EXT 0x3377
+#endif
+
 #if defined(__linux__)
 #include <dlfcn.h>
 
