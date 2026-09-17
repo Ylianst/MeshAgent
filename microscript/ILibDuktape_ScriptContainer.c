@@ -316,7 +316,7 @@ void ILibDuktape_ScriptContainer_CheckEmbeddedEx(char *exePath, char **script, i
 	{
 		i = sprintf_s(g_AgentCrashID, sizeof(g_AgentCrashID), "%s_", exePath);
 		sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s.exe", exePath);
-		_wfopen_s(&tmpFile, ILibUTF8ToWide(ILibScratchPad, -1), L"rb");
+		tmpFile = ILibFile_Open(ILibScratchPad, "rb");
 	}
 	else
 	{
@@ -350,11 +350,7 @@ void ILibDuktape_ScriptContainer_CheckEmbeddedEx(char *exePath, char **script, i
 #endif
 	}
 
-#ifdef WIN32
-	_wfopen_s(&tmpFile, ILibUTF8ToWide(exePath, -1), L"rb");
-#else
-	tmpFile = fopen(exePath, "rb");
-#endif
+	tmpFile = ILibFile_Open(exePath, "rb");
 
 	if (tmpFile != NULL)
 	{
