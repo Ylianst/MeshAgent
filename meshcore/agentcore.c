@@ -372,10 +372,6 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent);
 int agent_VerifyMeshCertificates(MeshAgentHostContainer *agent);
 void MeshServer_SendJSON(MeshAgentHostContainer* agent, ILibWebClient_StateObject WebStateObject, char *JSON, int JSONLength);
 
-#if defined(_LINKVM) && defined(_POSIX) && !defined(__APPLE__)
-extern void ILibProcessPipe_FreePipe(ILibProcessPipe_Pipe pipeObject);
-#endif
-
 void MeshAgent_sendConsoleText(duk_context *ctx, char *format, ...)
 {
 	char dest[4096];

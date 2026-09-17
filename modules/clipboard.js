@@ -148,6 +148,13 @@ function dispatchRead(sid)
     }
     else
     {
+        // A remote desktop with Automatic Clipboard sends getclip once per second. Each read used to
+        // spawn its own child, and when read() never settled (no X selection owner answering the fake
+        // window) the child never exited, so they piled up one per second until the agent was starved.
+        // Keep at most one read child in flight and recycle a stuck one after a timeout.
+        var self = require('clipboard');
+        if (self._readPending != null) { return (self._readPending); }
+
         var childProperties = { sessionId: id };
         if (process.platform == 'linux')
         {
@@ -156,24 +163,41 @@ function dispatchRead(sid)
         }
 
         var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
-        ret.success = false;
-        ret.master = require('ScriptContainer').Create(childProperties);
-        ret.master.promise = ret;
-        ret.master.on('data', function (d)
+        // finish() runs exactly once: it always tears the child down (exit2 SIGKILLs a stuck one) and
+        // clears the pending latch before settling, so a settle path can never skip the cleanup. The
+        // read resolves with the value or, on exit/timeout, with nothing; callers treat that as "no
+        // clipboard" and there is no reject handler to leak an uncaughtException every second.
+        ret.finish = function (value)
         {
-            this.promise.success = true;
-            this.promise._res(d);
-            this.exit();
-        });
-        ret.master.on('exit', function (code)
-        {
-            if (!this.promise.success)
+            if (this._done) { return; }
+            this._done = true;
+            if (this.master != null)
             {
-                this.promise._rej('Error reading clipboard');
+                // exit2() first: it is the essential teardown. clearTimeout() throws when it is the
+                // firing timer itself that called finish(), so it must not run before exit2 or sit
+                // outside a guard, or a stuck child would leak and pin the pending latch forever.
+                try { this.master.exit2(); } catch (e) { }
+                try { if (this.master.timeout != null) { clearTimeout(this.master.timeout); } } catch (e) { }
+                this.master.timeout = null;
+                delete this.master;
             }
-            delete this.promise.master;
-        });
-        ret.master.ExecuteString("var parent = require('ScriptContainer'); require('clipboard').read().then(function(v){parent.send(v);}, function(e){console.error(e);process.exit();});");
+            if (self._readPending == this) { self._readPending = null; }
+            try { this._res(value); } catch (e) { }
+        };
+        try
+        {
+            ret.master = require('ScriptContainer').Create(childProperties);
+            self._readPending = ret;
+            ret.master.promise = ret;
+            ret.master.on('data', function (d) { this.promise.finish(d); });
+            ret.master.on('exit', function (code) { this.promise.finish(); });
+            ret.master.timeout = setTimeout(function (r) { r.finish(); }, 5000, ret);
+            ret.master.ExecuteString("var parent = require('ScriptContainer'); require('clipboard').read().then(function(v){parent.send(v);}, function(e){console.error(e);process.exit();});");
+        }
+        catch (e)
+        {
+            ret.finish();
+        }
         return (ret);
     }
 }
