@@ -231,7 +231,7 @@ char *ILibWideToUTF8_stupidEx(WCHAR* wstr, int wstrBYTESIZE, char *buffer, int b
 
 
 int ILibGetLocalTime(char *dest, int destLen);
-long ILibGetTimeStamp();
+long long ILibGetTimeStamp(void);
 
 #ifdef ILibEXPORT
 #ifdef WIN32
@@ -397,19 +397,16 @@ int ILibIsRunningOnChainThread(void* chain);
 		ILibServerScope_LocalSegment=2
 	}ILibServerScope;
 
-	typedef enum ILibChain_ContinuationStates
-	{
-		ILibChain_ContinuationState_INACTIVE = 0,
-		ILibChain_ContinuationState_CONTINUE = 1,
-		ILibChain_ContinuationState_END_CONTINUE = 2
-	}ILibChain_ContinuationStates;
 	typedef enum ILibChain_Continue_Result
 	{
 		ILibChain_Continue_Result_EXIT = 0,
 		ILibChain_Continue_Result_TIMEOUT = 1,
-		ILibChain_Continue_Result_ERROR_INVALID_STATE = 10,
+		ILibChain_Continue_Result_ERROR_DEPTH_LIMIT = 10,
 		ILibChain_Continue_Result_ERROR_CHAIN_EXITING = 11,
 		ILibChain_Continue_Result_ERROR_EMPTY_SET = 12,
+		ILibChain_Continue_Result_ERROR_NO_STACK = 13,
+		ILibChain_Continue_Result_ERROR_ABORTED = 14,
+		ILibChain_Continue_Result_ERROR_OUTER_ENDED = 15,
 	}ILibChain_Continue_Result;
 
 	typedef	void(*ILibChain_PreSelect)(void* object, fd_set *readset, fd_set *writeset, fd_set *errorset, int* blocktime);
@@ -1172,13 +1169,24 @@ int ILibIsRunningOnChainThread(void* chain);
 	void ILibChain_PartialStart(void *chain);
 	ILibExportMethod void ILibStartChain(void *chain);
 	ILibExportMethod void ILibStopChain(void *chain);
+	// Runs a nested copy of the event loop (the given modules, all when NULL) until the continuation tagged 'tag' is ended, aborted, the chain stops, or maxTimeout ms pass (0 or negative: no limit).
+	// Calls may nest up to ILibChain_MaxContinueDepth deep. Only ever call this on the chain thread.
 #ifdef WIN32
-	ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *chain, ILibChain_Link **modules, int moduleCount, int maxTimeout, HANDLE **handles);
+	ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *chain, ILibChain_Link **modules, int moduleCount, int maxTimeout, void *tag, HANDLE **handles);
 #else
-	ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *chain, ILibChain_Link **modules, int moduleCount, int maxTimeout);
+	ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *chain, ILibChain_Link **modules, int moduleCount, int maxTimeout, void *tag);
 #endif
-	ILibExportMethod void ILibChain_EndContinue(void *chain);
-	ILibChain_ContinuationStates ILibChain_GetContinuationState(void *chain);
+	// Ends every live continuation that was started with this tag, never by position. A tag with no live continuation matches nothing.
+	ILibExportMethod void ILibChain_EndContinue_ByTag(void *chain, void *tag);
+	// Ends every live continuation with ILibChain_Continue_Result_ERROR_ABORTED and returns how many there were, so their callers throw and the C stack unwinds before the script engine goes away.
+	// Also refuses every later ILibChain_Continue() on this chain with the same result, until ILibChain_ResumeContinues() is called.
+	ILibExportMethod int ILibChain_AbortContinues(void *chain);
+	// Lets ILibChain_Continue() run again after ILibChain_AbortContinues(). Called once the script engine that was going away is gone.
+	ILibExportMethod void ILibChain_ResumeContinues(void *chain);
+#ifdef _DEBUG
+	// Debug builds only: bytes of C stack left below the caller on the chain thread, the same bound the nested ILibChain_Continue() check uses. -1 when the platform gives no usable bound.
+	ILibExportMethod long long ILibChain_ContinueStackRemaining(void *chain);
+#endif
 	#define ILibChain_FreeLink(link) ((ILibChain_Link*)link)->RESERVED = 0xFFFFFFFF;free(link);
 	#define ILibChain_IsLinkAlive(link) (((ILibChain_Link*)link)->RESERVED == ILibMemory_Canary)
 

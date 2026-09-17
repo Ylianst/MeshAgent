@@ -837,8 +837,17 @@ ILibDuktape_ContextData* ILibDuktape_GetContextData(duk_context *ctx)
 	return((ILibDuktape_ContextData*)mfuncs.udata);
 }
 
+void Duktape_SafeDestroyHeap_Deferred(void *obj)
+{
+	Duktape_SafeDestroyHeap((duk_context*)obj);
+}
 void Duktape_SafeDestroyHeap(duk_context *ctx)
 {
+	void *chain = Duktape_GetChain(ctx);
+	// A live waitExit() or promise.wait() still has this heap's frames on the C stack, so the heap cannot go yet. Abort the waits so they throw and unwind,
+	// and come back from the base timer until none is left. Every destroy path gets this, not only process.exit(), because a core update can arrive inside a wait.
+	if (chain != NULL && ILibChain_AbortContinues(chain) > 0) { ILibLifeTime_AddEx(ILibGetBaseTimer(chain), ctx, 0, Duktape_SafeDestroyHeap_Deferred, NULL); return; }
+
 	void *process = ILibDuktape_GetProcessObject(ctx);
 	ILibDuktape_ContextData *ctxd = duk_ctx_context_data(ctx);
 	ctxd->flags |= duk_destroy_heap_in_progress;
@@ -856,6 +865,8 @@ void Duktape_SafeDestroyHeap(duk_context *ctx)
 
 	duk_require_stack(ctx, 2 * DUK_API_ENTRY_STACK);				
 	duk_destroy_heap(ctx);
+	// The waits of this heap are gone with it. A heap started on the same chain, for example the next core, may wait again.
+	if (chain != NULL && ctxd->fakechain == 0) { ILibChain_ResumeContinues(chain); }
 
 	if (ctxd->fakechain != 0 && ctxd->chain != NULL)
 	{

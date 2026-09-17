@@ -494,6 +494,13 @@ void ILibDuktape_ScriptContainer_Process_ExitCallback(void *obj)
 	if (ILibMemory_CanaryOK(obj))
 	{
 		duk_context *ctx = ((void**)obj)[0];
+		// Inside waitExit() or promise.wait() this runs from the wait's own loop, before the stack has unwound, so the heap cannot be destroyed yet.
+		// Abort every wait so they throw and unwind, and run again on the next timer pass until no wait is left. Each pass ends at least one level.
+		if (ILibChain_AbortContinues(Duktape_GetChain(ctx)) > 0)
+		{
+			ILibLifeTime_Add(ILibGetBaseTimer(Duktape_GetChain(ctx)), obj, 0, ILibDuktape_ScriptContainer_Process_ExitCallback, NULL);
+			return;
+		}
 		Duktape_SafeDestroyHeap(ctx);
 	}
 }
@@ -746,9 +753,9 @@ void ILibDuktape_Process_stdin_WindowsRunLoop(void *arg)
 {
 	ILibDuktape_Process_StdIn_Data *data = (ILibDuktape_Process_StdIn_Data*)arg;
 	HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
-	DWORD bytesRead, waitResult;
+	DWORD bytesRead, continueResult;
 
-	while (((waitResult = WaitForSingleObjectEx(data->resumeEvent, INFINITE, TRUE)) == WAIT_OBJECT_0 || waitResult == WAIT_IO_COMPLETION) && !data->exit)
+	while (((continueResult = WaitForSingleObjectEx(data->resumeEvent, INFINITE, TRUE)) == WAIT_OBJECT_0 || continueResult == WAIT_IO_COMPLETION) && !data->exit)
 	{
 		if (!ReadFile(h, data->buffer + data->endPointer, data->bufferSize - data->endPointer, &bytesRead, NULL))
 		{
@@ -976,7 +983,10 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_SignalListener_Immediate(duk_conte
 	{
 	case SIGCHLD:
 		s = 0;
-		waitpid(((pid_t*)sigbuffer)[2], &s, 0);
+		// WNOHANG because ILibProcessPipe already reaps this child when its pipe closes, and a reused pid number would make a blocking wait hang on an unrelated child.
+		// Not emitted when the child is still there (0), because without SA_NOCLDSTOP a stop or continue raises SIGCHLD too and the sink takes any event for its pid as an exit.
+		// ECHILD means the pipe path reaped it already, which is still an exit, so the event is emitted.
+		if (waitpid(((pid_t*)sigbuffer)[2], &s, WNOHANG) == 0) { break; }
 		ILibDuktape_EventEmitter_SetupEmit(ctx, h, "SIGCHLD");	// [emit][this][SIGCHLD]
 		duk_push_string(ctx, signame);	// [emit][this][SIGTERM][name]
 		duk_push_int(ctx, s);									// [emit][this][SIGCHLD][name][code]
@@ -1011,8 +1021,9 @@ void ILibDuktape_ScriptContainer_Process_SignalListener_PostSelect(void* object,
 
 	if (FD_ISSET(SignalDescriptors[0], readset))
 	{
-		if((bytesRead = read(SignalDescriptors[0], sigbuffer, sizeof(int))) == sizeof(int) && ((int*)sigbuffer)[0] < sizeof(sigbuffer) &&
-			(bytesRead += read(SignalDescriptors[0], sigbuffer + sizeof(int), ((int*)sigbuffer)[0])) == ((int*)sigbuffer)[0])
+		// ((int*)sigbuffer)[0] is the total message length including the length field itself, so the second read asks only for the remainder.
+		if((bytesRead = read(SignalDescriptors[0], sigbuffer, sizeof(int))) == sizeof(int) && ((int*)sigbuffer)[0] >= (int)sizeof(int) && ((int*)sigbuffer)[0] < sizeof(sigbuffer) &&
+			(bytesRead += read(SignalDescriptors[0], sigbuffer + sizeof(int), ((int*)sigbuffer)[0] - sizeof(int))) == ((int*)sigbuffer)[0])
 		{
 			duk_push_global_object(ctx);											//[g]
 			duk_get_prop_string(ctx, -1, "setImmediate");							//[g][immediate]
@@ -2635,7 +2646,8 @@ duk_ret_t ILibDuktape_Polyfills_promise_wait_impl_res(duk_context *ctx)
 
 	duk_dup(ctx, 0);							// [func][obj][resolvedValue]
 	duk_put_prop_string(ctx, -2, "return");		// [func][obj]
-	ILibChain_EndContinue(duk_ctx_chain(ctx));
+	// obj is the tag of this wait(). Ending by tag ends only the wait entry started with it, and nothing when that wait is already over.
+	ILibChain_EndContinue_ByTag(duk_ctx_chain(ctx), duk_get_heapptr(ctx, -1));
 	return(0);
 }
 duk_ret_t ILibDuktape_Polyfills_promise_wait_impl_rej(duk_context *ctx)
@@ -2646,9 +2658,11 @@ duk_ret_t ILibDuktape_Polyfills_promise_wait_impl_rej(duk_context *ctx)
 
 	duk_dup(ctx, 0);							// [func][obj][rejectedValue]
 	duk_put_prop_string(ctx, -2, "error");		// [func][obj]
-	ILibChain_EndContinue(duk_ctx_chain(ctx));
+	// obj is the tag of this wait(). Ending by tag ends only the wait entry started with it, and nothing when that wait is already over.
+	ILibChain_EndContinue_ByTag(duk_ctx_chain(ctx), duk_get_heapptr(ctx, -1));
 	return(0);
 }
+// promise.wait(p[, ms]) blocks the script until p settles, by running a nested event loop through ILibChain_Continue() with a per-call state object as the tag.
 duk_ret_t ILibDuktape_Polyfills_promise_wait_impl(duk_context *ctx)
 {
 	ILibChain_Continue_Result continueResult;
@@ -2667,22 +2681,32 @@ duk_ret_t ILibDuktape_Polyfills_promise_wait_impl(duk_context *ctx)
 
 	if (!duk_has_prop_string(ctx, -2, "settled"))
 	{
+		// obj is the tag of this wait. The resolve and reject sinks hold obj and end the wait through it.
 #ifdef WIN32
-		continueResult = ILibChain_Continue(duk_ctx_chain(ctx), NULL, 0, timeout, NULL);
+		continueResult = ILibChain_Continue(duk_ctx_chain(ctx), NULL, 0, timeout, duk_get_heapptr(ctx, -2), NULL);
 #else
-		continueResult = ILibChain_Continue(duk_ctx_chain(ctx), NULL, 0, timeout);
+		continueResult = ILibChain_Continue(duk_ctx_chain(ctx), NULL, 0, timeout, duk_get_heapptr(ctx, -2));
 #endif
 
 		switch (continueResult)
 		{
-		case ILibChain_Continue_Result_ERROR_INVALID_STATE:
-			ret = ILibDuktape_Error(ctx, "wait() already in progress");
+		case ILibChain_Continue_Result_ERROR_DEPTH_LIMIT:
+			ret = ILibDuktape_Error(ctx, "wait() nesting depth limit reached");
 			break;
 		case ILibChain_Continue_Result_ERROR_CHAIN_EXITING:
 			ret = ILibDuktape_Error(ctx, "wait() aborted because thread is exiting");
 			break;
 		case ILibChain_Continue_Result_ERROR_EMPTY_SET:
 			ret = ILibDuktape_Error(ctx, "wait() cannot wait on empty set");
+			break;
+		case ILibChain_Continue_Result_ERROR_NO_STACK:
+			ret = ILibDuktape_Error(ctx, "wait() refused, not enough C stack left for a nested wait");
+			break;
+		case ILibChain_Continue_Result_ERROR_ABORTED:
+			ret = ILibDuktape_Error(ctx, "wait() aborted because the script is exiting");
+			break;
+		case ILibChain_Continue_Result_ERROR_OUTER_ENDED:
+			ret = ILibDuktape_Error(ctx, "wait() refused because an enclosing wait has already ended and is unwinding");
 			break;
 		case ILibChain_Continue_Result_TIMEOUT:
 			ret = ILibDuktape_Error(ctx, "wait() timeout");

@@ -146,6 +146,8 @@ typedef struct ILibProcessPipe_Manager_Object
 {
 	ILibChain_Link ChainLink;
 	ILibLinkedList ActivePipes;
+	// Bumped on every removal from ActivePipes, so OnPostSelect can tell that a read handler changed the list under it.
+	int ActivePipesGeneration;
 
 #ifdef WIN32
 	int abort;
@@ -300,16 +302,11 @@ void ILibProcessPipe_Manager_OnPreSelect(void* object, fd_set *readset, fd_set *
 	void *node, *nextnode;
 	ILibProcessPipe_PipeObject *j;
 
+	// A broken pipe leaves ActivePipes the moment it breaks, in ILibProcessPipe_Process_ReadHandler, so every listed pipe here is live.
 	node = ILibLinkedList_GetNode_Head(man->ActivePipes);
 	while(node != NULL && (j = (ILibProcessPipe_PipeObject*)ILibLinkedList_GetDataFromNode(node)) != NULL)
 	{
 		nextnode = ILibLinkedList_GetNextNode(node);
-		if (((int*)ILibLinkedList_GetExtendedMemory(node))[0] != 0 || (j = (ILibProcessPipe_PipeObject*)ILibLinkedList_GetDataFromNode(node)) == NULL)
-		{
-			ILibLinkedList_Remove(node);
-			node = nextnode;
-			continue;
-		}
 		if (ILibMemory_CanaryOK(j) && j->mPipe_ReadEnd != -1)
 		{
 			FD_SET(j->mPipe_ReadEnd, readset);
@@ -328,6 +325,7 @@ void ILibProcessPipe_Manager_OnPostSelect(void* object, int slct, fd_set *readse
 	//	printf("ILibProcessPipe_Manager_PostSelect(%s)\n", ((ILibChain_Link*)object)->MetaData);
 	//}
 
+	// Every pipe is served on every pass, also when a continuation ends during the walk, because other nested waits still need their pipes.
 	node = ILibLinkedList_GetNode_Head(man->ActivePipes);
 	while(node != NULL && (j = (ILibProcessPipe_PipeObject*)ILibLinkedList_GetDataFromNode(node)) != NULL)
 	{
@@ -336,10 +334,14 @@ void ILibProcessPipe_Manager_OnPostSelect(void* object, int slct, fd_set *readse
 		{
 			if (j->mPipe_ReadEnd != -1 && FD_ISSET(j->mPipe_ReadEnd, readset) != 0)
 			{
+				// The read handler can free any node in this list, nextNode included, when a broken pipe destroys the process and its other pipe.
+				// Clear this fd first, so the pipe is not dispatched twice, and start over from the head when the list changed while the handler ran.
+				int generation = man->ActivePipesGeneration;
+				FD_CLR(j->mPipe_ReadEnd, readset);
 				ILibProcessPipe_Process_ReadHandler(j);
+				if (generation != man->ActivePipesGeneration) { node = ILibLinkedList_GetNode_Head(man->ActivePipes); continue; }
 			}
 		}
-		if (ILibChain_GetContinuationState(man->ChainLink.ParentChain) == ILibChain_ContinuationState_END_CONTINUE) { break; }
 		node = nextNode;
 	}
 }
@@ -363,7 +365,7 @@ ILibProcessPipe_Manager ILibProcessPipe_Manager_Create(void *chain)
 	memset(retVal, 0, sizeof(ILibProcessPipe_Manager_Object));
 	retVal->ChainLink.MetaData = ILibMemory_SmartAllocate_FromString("ILibProcessPipe_Manager");
 	retVal->ChainLink.ParentChain = chain;
-	retVal->ActivePipes = ILibLinkedList_CreateEx(sizeof(int));
+	retVal->ActivePipes = ILibLinkedList_Create();
 
 #ifndef WIN32
 	retVal->ChainLink.PreSelectHandler = &ILibProcessPipe_Manager_OnPreSelect;
@@ -415,10 +417,12 @@ void ILibProcessPipe_FreePipe(ILibProcessPipe_PipeObject *pipeObject)
 #else
 	if (pipeObject->manager != NULL)
 	{
+		ILibLifeTime_Remove(ILibGetBaseTimer(pipeObject->manager->ChainLink.ParentChain), pipeObject);
 		void *node = ILibLinkedList_GetNode_Search(pipeObject->manager->ActivePipes, NULL, pipeObject);
 		if (node != NULL)
 		{
 			ILibLinkedList_Remove(node);
+			pipeObject->manager->ActivePipesGeneration++;
 		}
 	}
 	if (pipeObject->mPipe_ReadEnd != -1) { close(pipeObject->mPipe_ReadEnd); }
@@ -486,6 +490,9 @@ void ILibProcessPipe_Pipe_SetBrokenPipeHandler(ILibProcessPipe_Pipe targetPipe, 
 	if (ILibMemory_CanaryOK(targetPipe)) { ((ILibProcessPipe_PipeObject*)targetPipe)->brokenPipeHandler = (ILibProcessPipe_GenericBrokenPipeHandler)handler; }
 }
 
+#ifdef WIN32
+static LONG ILibProcessPipe_PipeNameCounter = 0;
+#endif
 ILibProcessPipe_PipeObject* ILibProcessPipe_CreatePipe(ILibProcessPipe_Manager manager, int pipeBufferSize, ILibProcessPipe_GenericBrokenPipeHandler brokenPipeHandler, int extraMemorySize)
 {
 	ILibProcessPipe_PipeObject* retVal = NULL;
@@ -508,10 +515,10 @@ ILibProcessPipe_PipeObject* ILibProcessPipe_CreatePipe(ILibProcessPipe_Manager m
 
 	do
 	{
-		sprintf_s(pipeName, sizeof(pipeName), "\\\\.\\pipe\\%p%u", (void*)retVal, pipeCounter++);
+		sprintf_s(pipeName, sizeof(pipeName), "\\\\.\\pipe\\meshagent_%lu_%ld", GetCurrentProcessId(), (long)InterlockedIncrement(&ILibProcessPipe_PipeNameCounter));
 		retVal->mPipe_ReadEnd = CreateNamedPipeA(pipeName, FILE_FLAG_FIRST_PIPE_INSTANCE | PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED, PIPE_TYPE_BYTE, 1, pipeBufferSize, pipeBufferSize, 0, &saAttr);
-		if (retVal->mPipe_ReadEnd == (HANDLE)INVALID_HANDLE_VALUE) { ILIBCRITICALEXIT(254); }
-	} while (retVal->mPipe_ReadEnd == (HANDLE)ERROR_ACCESS_DENIED);
+	} while (retVal->mPipe_ReadEnd == (HANDLE)INVALID_HANDLE_VALUE && (GetLastError() == ERROR_PIPE_BUSY || GetLastError() == ERROR_ACCESS_DENIED) && ++pipeCounter < 1000);
+	if (retVal->mPipe_ReadEnd == (HANDLE)INVALID_HANDLE_VALUE) { ILIBCRITICALEXIT(254); }
 
 	if ((retVal->mOverlapped = (struct _OVERLAPPED*)malloc(sizeof(struct _OVERLAPPED))) == NULL) { ILIBCRITICALEXIT(254); }
 	memset(retVal->mOverlapped, 0, sizeof(struct _OVERLAPPED));
@@ -537,6 +544,9 @@ void ILibProcessPipe_Process_Destroy(ILibProcessPipe_Process_Object *p)
 	if (!ILibMemory_CanaryOK(p)) { return; }
 
 	if (p->exiting != 0) { return; }
+#ifndef WIN32
+	if (p->parent != NULL) { ILibLifeTime_Remove(ILibGetBaseTimer(p->parent->ChainLink.ParentChain), p); }
+#endif
 	if (p->stdIn != NULL) { ILibProcessPipe_FreePipe(p->stdIn); }
 	if (p->stdOut != NULL) { ILibProcessPipe_FreePipe(p->stdOut); }
 	if (p->stdErr != NULL) { ILibProcessPipe_FreePipe(p->stdErr); }
@@ -551,22 +561,41 @@ void ILibProcessPipe_Process_BrokenPipeSink_DestroyHandler(void *object)
 {
 	ILibProcessPipe_Process_Destroy((ILibProcessPipe_Process_Object*)object);
 }
+// Runs on the chain thread after the child's pipes closed, from the reader and again from the poll timer below until the child is reaped.
+void ILibProcessPipe_Process_BrokenPipeSink_Reap(void *object)
+{
+	ILibProcessPipe_Process_Object *p = (ILibProcessPipe_Process_Object*)object;
+	int status = 0;
+	pid_t r;
+	if (!ILibMemory_CanaryOK(p)) { return; }
+
+	// With both stdout and stderr piped this runs twice, once per pipe. Clear exitHandler first so the second call does not waitpid() again.
+	// By then the pid may already be reused by a new child and a wait here would take that child's exit.
+	if (p->exitHandler != NULL)
+	{
+		// Never blocks, because closed pipes do not mean the child has exited. A helper that redirects its own stdio and keeps running
+		// would otherwise stall the whole event loop until it exits. The retry on EINTR is for FreeBSD and OpenBSD, which return -1 when the child's own SIGCHLD lands (no SA_RESTART).
+		while ((r = waitpid((pid_t)p->PID, &status, WNOHANG)) < 0 && errno == EINTR) { }
+		if (r == 0)
+		{
+			// Still running with its pipes closed. Poll instead of blocking. Destroy waits for the reap, so the process object stays valid meanwhile.
+			ILibLifeTime_AddEx(ILibGetBaseTimer(p->parent->ChainLink.ParentChain), p, 100, ILibProcessPipe_Process_BrokenPipeSink_Reap, NULL);
+			return;
+		}
+		ILibProcessPipe_Process_ExitHandler handler = p->exitHandler;
+		p->exitHandler = NULL;
+		handler(p, WEXITSTATUS(status), p->userObject);
+	}
+
+	// Unwind the stack, and destroy the process object
+	ILibLifeTime_Add(ILibGetBaseTimer(p->parent->ChainLink.ParentChain), p, 0, ILibProcessPipe_Process_BrokenPipeSink_DestroyHandler, NULL);
+}
 void ILibProcessPipe_Process_BrokenPipeSink(ILibProcessPipe_Pipe sender)
 {
 	ILibProcessPipe_Process_Object *p = ((ILibProcessPipe_PipeObject*)sender)->mProcess;
-	int status;
 	if (ILibIsRunningOnChainThread(((ILibProcessPipe_PipeObject*)sender)->manager->ChainLink.ParentChain) != 0)
 	{
-		// This was called from the Reader
-		if (p->exitHandler != NULL)
-		{
-
-			waitpid((pid_t)p->PID, &status, 0);
-			p->exitHandler(p, WEXITSTATUS(status), p->userObject);
-		}
-
-		// Unwind the stack, and destroy the process object
-		ILibLifeTime_Add(ILibGetBaseTimer(p->parent->ChainLink.ParentChain), p, 0, ILibProcessPipe_Process_BrokenPipeSink_DestroyHandler, NULL);
+		ILibProcessPipe_Process_BrokenPipeSink_Reap(p);
 	}
 }
 #endif
@@ -581,7 +610,9 @@ void ILibProcessPipe_Process_SoftKill(ILibProcessPipe_Process p)
 #else
 	int code;
 	kill((pid_t)j->PID, SIGKILL);
-	waitpid((pid_t)j->PID, &code, 0);
+	// WNOHANG because this is only a best effort reap. The real reap happens in ILibProcessPipe_Process_BrokenPipeSink once the pipes
+	// close. If that reap came first and the pid number was reused by a new child, a blocking wait here would hang on that child.
+	waitpid((pid_t)j->PID, &code, WNOHANG);
 #endif
 }
 
@@ -590,6 +621,12 @@ void ILibProcessPipe_Process_HardKill(ILibProcessPipe_Process p)
 	if (!ILibMemory_CanaryOK(p)) { return; }
 
 	ILibProcessPipe_Process_SoftKill(p);
+#ifndef WIN32
+	// Reaped here because Destroy() frees the pipes, so the BrokenPipeSink reap can never run for this child and it would stay a zombie.
+	// Blocking is safe: SIGKILL was just sent and cannot be caught, so the child is gone within moments. Retried on EINTR for the same reason as in BrokenPipeSink.
+	int status;
+	while (waitpid((pid_t)((ILibProcessPipe_Process_Object*)p)->PID, &status, 0) < 0 && errno == EINTR) { }
+#endif
 	ILibProcessPipe_Process_Destroy(p);
 }
 
@@ -1155,8 +1192,9 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 		void *pipenode = ILibLinkedList_GetNode_Search(pipeObject->manager->ActivePipes, NULL, pipeObject);
 		if (pipenode != NULL)
 		{
-			// Flag this node for removal
-			((int*)ILibLinkedList_GetExtendedMemory(pipenode))[0] = 1;
+			// Removed at once, so a new child's pipe that reuses this fd number is never matched against this stale entry.
+			ILibLinkedList_Remove(pipenode);
+			pipeObject->manager->ActivePipesGeneration++;
 		}
 #endif
 		if (pipeObject->brokenPipeHandler != NULL) 
@@ -1269,6 +1307,7 @@ void ILibProcessPipe_Pipe_Pause(ILibProcessPipe_Pipe pipeObject)
 	}
 #else
 	ILibLinkedList_Remove(ILibLinkedList_GetNode_Search(p->manager->ActivePipes, NULL, pipeObject));
+	p->manager->ActivePipesGeneration++;
 #endif
 }
 
