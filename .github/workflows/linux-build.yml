@@ -59,13 +59,13 @@ jobs:
       # ARCHID=32 is MeshCentral's distributed 64-bit ARM slot (meshagent_aarch64); ARCHID=26
       # above (meshagent_arm64) is the legacy twin the server marks "replaced by ARCHID 32".
       # The makefile pins a Bootlin cross-toolchain for 32 that no runner has, so override
-      # CC/STRIP to the native aarch64 gcc. Compiling inside bullseye (glibc 2.31) keeps the
-      # binary runnable on Raspberry Pi OS Bullseye/Bookworm/Trixie, not just the runner glibc.
+      # CC/STRIP to the native aarch64 gcc. bookworm (glibc 2.36) keeps the binary runnable on
+      # Raspberry Pi OS Bookworm and the reporter's Trixie; Debian 11 bullseye is EOL and 404s.
       - name: Build aarch64 (ARCHID=32) in an older-glibc container
         run: |
-          docker run --rm -v "${{ github.workspace }}":/src -w /src debian:bullseye bash -c '
+          docker run --rm -v "${{ github.workspace }}":/src -w /src debian:bookworm bash -c '
             apt-get update &&
-            apt-get install -y git build-essential libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev &&
+            apt-get install -y git build-essential pkg-config libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev &&
             git config --global --add safe.directory /src &&
             make -j4 linux ARCHID=32 CC=gcc STRIP=strip
           '
@@ -93,7 +93,7 @@ jobs:
         run: |
           docker run --rm --platform linux/arm/v6 --entrypoint /bin/bash -v "${{ github.workspace }}":/src -w /src balenalib/rpi-raspbian:bullseye -c '
             apt-get update &&
-            apt-get install -y git build-essential libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev &&
+            apt-get install -y git build-essential pkg-config libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev &&
             git config --global --add safe.directory /src &&
             make -j4 linux ARCHID=25
           '
