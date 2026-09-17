@@ -983,9 +983,10 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_SignalListener_Immediate(duk_conte
 	{
 	case SIGCHLD:
 		s = 0;
-		// WNOHANG because ILibProcessPipe already reaps this child when its pipe closes. If that reap came first and the pid number
-		// was reused by a new child, a blocking wait here would hang on that unrelated child. Finding no zombie here is the normal case.
-		waitpid(((pid_t*)sigbuffer)[2], &s, WNOHANG);
+		// WNOHANG because ILibProcessPipe already reaps this child when its pipe closes, and a reused pid number would make a blocking wait hang on an unrelated child.
+		// Not emitted when the child is still there (0), because without SA_NOCLDSTOP a stop or continue raises SIGCHLD too and the sink takes any event for its pid as an exit.
+		// ECHILD means the pipe path reaped it already, which is still an exit, so the event is emitted.
+		if (waitpid(((pid_t*)sigbuffer)[2], &s, WNOHANG) == 0) { break; }
 		ILibDuktape_EventEmitter_SetupEmit(ctx, h, "SIGCHLD");	// [emit][this][SIGCHLD]
 		duk_push_string(ctx, signame);	// [emit][this][SIGTERM][name]
 		duk_push_int(ctx, s);									// [emit][this][SIGCHLD][name][code]
@@ -2724,6 +2725,9 @@ duk_ret_t ILibDuktape_Polyfills_promise_wait_impl(duk_context *ctx)
 			break;
 		case ILibChain_Continue_Result_ERROR_ABORTED:
 			ret = ILibDuktape_Error(ctx, "wait() aborted because the script is exiting");
+			break;
+		case ILibChain_Continue_Result_ERROR_OUTER_ENDED:
+			ret = ILibDuktape_Error(ctx, "wait() refused because an enclosing wait has already ended and is unwinding");
 			break;
 		case ILibChain_Continue_Result_TIMEOUT:
 			ret = ILibDuktape_Error(ctx, "wait() timeout");

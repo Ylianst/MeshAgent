@@ -417,6 +417,7 @@ void ILibProcessPipe_FreePipe(ILibProcessPipe_PipeObject *pipeObject)
 #else
 	if (pipeObject->manager != NULL)
 	{
+		ILibLifeTime_Remove(ILibGetBaseTimer(pipeObject->manager->ChainLink.ParentChain), pipeObject);
 		void *node = ILibLinkedList_GetNode_Search(pipeObject->manager->ActivePipes, NULL, pipeObject);
 		if (node != NULL)
 		{
@@ -543,6 +544,9 @@ void ILibProcessPipe_Process_Destroy(ILibProcessPipe_Process_Object *p)
 	if (!ILibMemory_CanaryOK(p)) { return; }
 
 	if (p->exiting != 0) { return; }
+#ifndef WIN32
+	if (p->parent != NULL) { ILibLifeTime_Remove(ILibGetBaseTimer(p->parent->ChainLink.ParentChain), p); }
+#endif
 	if (p->stdIn != NULL) { ILibProcessPipe_FreePipe(p->stdIn); }
 	if (p->stdOut != NULL) { ILibProcessPipe_FreePipe(p->stdOut); }
 	if (p->stdErr != NULL) { ILibProcessPipe_FreePipe(p->stdErr); }
@@ -557,27 +561,41 @@ void ILibProcessPipe_Process_BrokenPipeSink_DestroyHandler(void *object)
 {
 	ILibProcessPipe_Process_Destroy((ILibProcessPipe_Process_Object*)object);
 }
+// Runs on the chain thread after the child's pipes closed, from the reader and again from the poll timer below until the child is reaped.
+void ILibProcessPipe_Process_BrokenPipeSink_Reap(void *object)
+{
+	ILibProcessPipe_Process_Object *p = (ILibProcessPipe_Process_Object*)object;
+	int status = 0;
+	pid_t r;
+	if (!ILibMemory_CanaryOK(p)) { return; }
+
+	// With both stdout and stderr piped this runs twice, once per pipe. Clear exitHandler first so the second call does not waitpid() again.
+	// By then the pid may already be reused by a new child and a wait here would take that child's exit.
+	if (p->exitHandler != NULL)
+	{
+		// Never blocks, because closed pipes do not mean the child has exited. A helper that redirects its own stdio and keeps running
+		// would otherwise stall the whole event loop until it exits. The retry on EINTR is for FreeBSD and OpenBSD, which return -1 when the child's own SIGCHLD lands (no SA_RESTART).
+		while ((r = waitpid((pid_t)p->PID, &status, WNOHANG)) < 0 && errno == EINTR) { }
+		if (r == 0)
+		{
+			// Still running with its pipes closed. Poll instead of blocking. Destroy waits for the reap, so the process object stays valid meanwhile.
+			ILibLifeTime_AddEx(ILibGetBaseTimer(p->parent->ChainLink.ParentChain), p, 100, ILibProcessPipe_Process_BrokenPipeSink_Reap, NULL);
+			return;
+		}
+		ILibProcessPipe_Process_ExitHandler handler = p->exitHandler;
+		p->exitHandler = NULL;
+		handler(p, WEXITSTATUS(status), p->userObject);
+	}
+
+	// Unwind the stack, and destroy the process object
+	ILibLifeTime_Add(ILibGetBaseTimer(p->parent->ChainLink.ParentChain), p, 0, ILibProcessPipe_Process_BrokenPipeSink_DestroyHandler, NULL);
+}
 void ILibProcessPipe_Process_BrokenPipeSink(ILibProcessPipe_Pipe sender)
 {
 	ILibProcessPipe_Process_Object *p = ((ILibProcessPipe_PipeObject*)sender)->mProcess;
-	int status = 0;
 	if (ILibIsRunningOnChainThread(((ILibProcessPipe_PipeObject*)sender)->manager->ChainLink.ParentChain) != 0)
 	{
-		// This was called from the Reader. With both stdout and stderr piped this runs twice, once per pipe. Clear exitHandler first so the
-		// second call does not waitpid() again. By then the pid may already be reused by a new child and a blocking wait would hang on it.
-		if (p->exitHandler != NULL)
-		{
-			ILibProcessPipe_Process_ExitHandler handler = p->exitHandler;
-			p->exitHandler = NULL;
-
-			// Retried on EINTR because the pipes can close before the child is a zombie, and its own SIGCHLD then interrupts this wait (no SA_RESTART).
-			// FreeBSD and OpenBSD then return -1 with EINTR instead of waiting on.
-			while (waitpid((pid_t)p->PID, &status, 0) < 0 && errno == EINTR) { }
-			handler(p, WEXITSTATUS(status), p->userObject);
-		}
-
-		// Unwind the stack, and destroy the process object
-		ILibLifeTime_Add(ILibGetBaseTimer(p->parent->ChainLink.ParentChain), p, 0, ILibProcessPipe_Process_BrokenPipeSink_DestroyHandler, NULL);
+		ILibProcessPipe_Process_BrokenPipeSink_Reap(p);
 	}
 }
 #endif
@@ -603,6 +621,12 @@ void ILibProcessPipe_Process_HardKill(ILibProcessPipe_Process p)
 	if (!ILibMemory_CanaryOK(p)) { return; }
 
 	ILibProcessPipe_Process_SoftKill(p);
+#ifndef WIN32
+	// Reaped here because Destroy() frees the pipes, so the BrokenPipeSink reap can never run for this child and it would stay a zombie.
+	// Blocking is safe: SIGKILL was just sent and cannot be caught, so the child is gone within moments. Retried on EINTR for the same reason as in BrokenPipeSink.
+	int status;
+	while (waitpid((pid_t)((ILibProcessPipe_Process_Object*)p)->PID, &status, 0) < 0 && errno == EINTR) { }
+#endif
 	ILibProcessPipe_Process_Destroy(p);
 }
 

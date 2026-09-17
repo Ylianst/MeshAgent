@@ -406,6 +406,7 @@ int ILibIsRunningOnChainThread(void* chain);
 		ILibChain_Continue_Result_ERROR_EMPTY_SET = 12,
 		ILibChain_Continue_Result_ERROR_NO_STACK = 13,
 		ILibChain_Continue_Result_ERROR_ABORTED = 14,
+		ILibChain_Continue_Result_ERROR_OUTER_ENDED = 15,
 	}ILibChain_Continue_Result;
 
 	typedef	void(*ILibChain_PreSelect)(void* object, fd_set *readset, fd_set *writeset, fd_set *errorset, int* blocktime);
@@ -1176,7 +1177,10 @@ int ILibIsRunningOnChainThread(void* chain);
 	// Ends every live continuation that was started with this tag, never by position. A tag with no live continuation matches nothing.
 	ILibExportMethod void ILibChain_EndContinue_ByTag(void *chain, void *tag);
 	// Ends every live continuation with ILibChain_Continue_Result_ERROR_ABORTED and returns how many there were, so their callers throw and the C stack unwinds before the script engine goes away.
+	// Also refuses every later ILibChain_Continue() on this chain with the same result, until ILibChain_ResumeContinues() is called.
 	ILibExportMethod int ILibChain_AbortContinues(void *chain);
+	// Lets ILibChain_Continue() run again after ILibChain_AbortContinues(). Called once the script engine that was going away is gone.
+	ILibExportMethod void ILibChain_ResumeContinues(void *chain);
 #ifdef _DEBUG
 	// Debug builds only: bytes of C stack left below the caller on the chain thread, the same bound the nested ILibChain_Continue() check uses. -1 when the platform gives no usable bound.
 	ILibExportMethod long long ILibChain_ContinueStackRemaining(void *chain);

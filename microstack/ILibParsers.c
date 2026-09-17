@@ -936,9 +936,16 @@ struct ILibLifeTime
 	
 	void *DeleteList;
 	void *ObjectList;
-	void *ActiveList;
+	// Innermost frame of due timers being dispatched, NULL outside ILibLifeTime_Check(). A stack, because a wait inside a timer callback runs a nested check.
+	struct ILibLifeTime_ActiveFrame *ActiveList;
 	int ObjectCount;
 };
+// One per running ILibLifeTime_Check(), on its own C stack, so ILibLifeTime_Remove() can still cancel a timer queued by an outer check while an inner one runs.
+typedef struct ILibLifeTime_ActiveFrame
+{
+	void *queue;
+	struct ILibLifeTime_ActiveFrame *previous;
+}ILibLifeTime_ActiveFrame;
 
 typedef struct ILibChain_Link_Hook
 {
@@ -1022,6 +1029,8 @@ typedef struct ILibBaseChain
 	ILibLinkedList LinksPendingDelete;
 	ILibHashtable ChainStash;
 	ILibChain_ContinueEntry *continueTop;	// The innermost live continuation, NULL when the main loop is running.
+	int continueAborted;	// Set by ILibChain_AbortContinues() and cleared by ILibChain_ResumeContinues(), so no new continuation can start while a script engine is going away.
+	ILibLinkedList continueDeferredRemoves;	// Links whose ILibChain_SafeRemoveEx() arrived while a continuation was live. Replayed when the outermost one returns.
 	// Low bound of the chain thread's stack, measured once on the first ILibChain_Continue() call. NULL when it cannot be measured.
 	char *continueStackLow;
 	int continueStackLowChecked;
@@ -1973,6 +1982,9 @@ void ILibChain_SafeAdd(void *chain, void *object)
 }
 void ILibChain_SafeRemoveEx(void *chain, void *object)
 {
+	// Deferred while a continuation is live, because every outer loop is parked on a Links node that may be this one and reads it after the inner wait returns.
+	// The outermost ILibChain_Continue() replays these through the base timer, where no walk is parked. Meanwhile the link stays in Links, already marked dead by ILibChain_SafeRemove().
+	if (((ILibBaseChain*)chain)->continueTop != NULL) { ILibLinkedList_AddTail(((ILibBaseChain*)chain)->continueDeferredRemoves, object); return; }
 	ILibLinkedList links = ILibChain_GetLinks(chain);
 	void *node = ILibLinkedList_GetNode_Search(links, NULL, object);
 	ILibChain_Link *link = (ILibChain_Link*)ILibLinkedList_GetDataFromNode(node);
@@ -2036,6 +2048,7 @@ void *ILibCreateChainEx(int extraMemorySize)
 
 	RetVal->Links = ILibLinkedList_CreateEx(sizeof(ILibChain_Link_Hook));
 	RetVal->LinksPendingDelete = ILibLinkedList_Create();
+	RetVal->continueDeferredRemoves = ILibLinkedList_Create();
 
 #if defined(WIN32) || defined(_WIN32_WCE)
 	RetVal->TerminateFlag = 1;
@@ -2161,6 +2174,7 @@ void ILibChain_DestroyEx(void *subChain)
 	}
 	ILibLinkedList_Destroy(((ILibBaseChain*)subChain)->Links);
 	ILibLinkedList_Destroy(((ILibBaseChain*)subChain)->LinksPendingDelete);
+	ILibLinkedList_Destroy(((ILibBaseChain*)subChain)->continueDeferredRemoves);
 
 #ifdef _REMOTELOGGINGSERVER
 	ILibRemoteLogging_Destroy(((ILibBaseChain*)subChain)->ChainLogger);
@@ -2535,8 +2549,14 @@ ILibExportMethod int ILibChain_AbortContinues(void *chain)
 	ILibChain_ContinueEntry *e;
 	int count = 0;
 	for (e = ((ILibBaseChain*)chain)->continueTop; e != NULL; e = e->previous) { e->ended = 1; e->aborted = 1; ++count; }
+	// Sticky, so a script that catches the abort and waits again is refused at once instead of being aborted again on every pass forever.
+	((ILibBaseChain*)chain)->continueAborted = 1;
 	if (count != 0) { ILibForceUnBlockChain(chain); }
 	return(count);
+}
+ILibExportMethod void ILibChain_ResumeContinues(void *chain)
+{
+	((ILibBaseChain*)chain)->continueAborted = 0;
 }
 #ifdef _DEBUG
 ILibExportMethod long long ILibChain_ContinueStackRemaining(void *chain)
@@ -2569,6 +2589,10 @@ ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibC
 	ILibLinkedListNode tmpNode;
 	memset(&tmpNode, 0, sizeof(tmpNode));
 
+	if (root->continueAborted != 0) { return(ILibChain_Continue_Result_ERROR_ABORTED); }
+	// Refused while an enclosing continuation has already ended, because that one cannot return until this new inner one would end.
+	// Its caller would otherwise wait past its own deadline for a wait it knows nothing about. The handler that asked gets an error, as before nesting existed.
+	{ ILibChain_ContinueEntry *e; for (e = root->continueTop; e != NULL; e = e->previous) { if (e->ended != 0) { return(ILibChain_Continue_Result_ERROR_OUTER_ENDED); } } }
 	// The depth cap stops runaway recursive waits from overflowing the C stack.
 	if (root->continueTop != NULL && root->continueTop->depth >= ILibChain_MaxContinueDepth) { return(ILibChain_Continue_Result_ERROR_DEPTH_LIMIT); }
 	// A nested wait is also refused when too little stack is left below the current stack pointer. A first level wait is never refused here,
@@ -2778,6 +2802,16 @@ ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibC
 	ILibRemoteLogging_printf(ILibChainGetLogger(chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "ContinueChain...Ending...");
 	// Pop this continuation and restore the iterator state the outer loop was using.
 	root->continueTop = entry.previous;
+	if (entry.previous == NULL)
+	{
+		// Replay the removals that arrived during the nested waits. They run from the main loop's base timer, where no walk is parked on any node.
+		void *dn;
+		while ((dn = ILibLinkedList_GetNode_Head(root->continueDeferredRemoves)) != NULL)
+		{
+			ILibChain_RunOnMicrostackThreadEx(Chain, ILibChain_SafeRemoveEx, ILibLinkedList_GetDataFromNode(dn));
+			ILibLinkedList_Remove(dn);
+		}
+	}
 	if (entry.aborted != 0) { ret = ILibChain_Continue_Result_ERROR_ABORTED; }
 	root->node = currentNode;
 #ifdef WIN32
@@ -4493,6 +4527,7 @@ ILibExportMethod void ILibStartChain(void *Chain)
 		chain->node = ILibLinkedList_GetNextNode(chain->node);
 	}
 	ILibLinkedList_Destroy(((ILibBaseChain*)Chain)->LinksPendingDelete);
+	ILibLinkedList_Destroy(((ILibBaseChain*)Chain)->continueDeferredRemoves);
 
 #ifdef _REMOTELOGGINGSERVER
 	if (((ILibBaseChain*)Chain)->LoggingWebServer != NULL && ((ILibBaseChain*)Chain)->ChainLogger != NULL) 
@@ -7956,7 +7991,10 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 	LifeTimeMonitor->NextTriggerTick = -1;
 
 	// This is an optimization. We are going to create the root of this linked list on the stack instead of the heap.
-	LifeTimeMonitor->ActiveList = (EventQueue = ILibMemory_AllocateA(sizeof(ILibLinkedListNode_Root)));
+	ILibLifeTime_ActiveFrame activeFrame;
+	activeFrame.queue = (EventQueue = ILibMemory_AllocateA(sizeof(ILibLinkedListNode_Root)));
+	activeFrame.previous = LifeTimeMonitor->ActiveList;
+	LifeTimeMonitor->ActiveList = &activeFrame;
 
 	ILibLinkedList_Lock(LifeTimeMonitor->ObjectList);
 	node = ILibLinkedList_GetNode_Head(LifeTimeMonitor->ObjectList);
@@ -7996,7 +8034,7 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 		ILibMemory_Free(EVT);
 		node = ILibQueue_DeQueue(EventQueue);
 	}
-	LifeTimeMonitor->ActiveList = NULL;
+	LifeTimeMonitor->ActiveList = activeFrame.previous;
 
 	// Compute how much time until next trigger
 	if (LifeTimeMonitor->NextTriggerTick != -1 && *blocktime > (int)(LifeTimeMonitor->NextTriggerTick - CurrentTick))
@@ -8083,12 +8121,12 @@ int ILibLifeTime_Remove(void *LifeTimeToken, void *data)
 	}
 	ILibLinkedList_UnLock(UPnPLifeTime->ObjectList);
 
-	if (UPnPLifeTime->ActiveList != NULL)
+	// We were called from a Timer Dispatch, but since we are on the same thread, we are ok to modify these Queues.
+	// Every frame is searched, not only the innermost, so a timer queued by an outer check is still cancelled from inside a nested wait.
+	ILibLifeTime_ActiveFrame *frame;
+	for (frame = UPnPLifeTime->ActiveList; frame != NULL; frame = frame->previous)
 	{
-		// 
-		// We were called from a Timer Dispatch, but since we are on the same thread, we are ok to modify this Queue
-		//
-		node = ILibLinkedList_GetNode_Head(UPnPLifeTime->ActiveList);
+		node = ILibLinkedList_GetNode_Head(frame->queue);
 		while (node != NULL)
 		{
 			evt = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node);

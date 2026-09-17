@@ -1,4 +1,6 @@
-// waitExit() test. Covers nesting, the timeout that throws, the wait forever escapes, two waits on one child, promise.wait(), process.exit() inside a wait and the depth cap.
+// waitExit() test. Covers nesting, the timeout that throws, the wait forever escapes, two waits on one child, promise.wait(), process.exit() inside a wait,
+// detached child, closed stdio, stopped child, retried wait after process.exit(), wait from an ended wait's last pass,
+// socket.close() inside a wait, clearTimeout() inside a nested wait and the depth cap.
 // Works on Windows, Linux, BSD and macOS.
 var cp = require('child_process');
 var win = process.platform == 'win32';
@@ -37,7 +39,7 @@ var hung = slp(30);
 var threw = false, t = Date.now();
 try
 {
-    hung.waitExit(500);            // Without an argument the 2 minute default applies and throws the same way.
+    hung.waitExit(500);            // Without an argument the 1 minute default applies and throws the same way.
 }
 catch (e)
 {
@@ -102,7 +104,97 @@ try { ex.waitExit(20000); } catch (e) { exOut += ' [' + e + ']'; ex.kill(); }
 var exOK = exCode == 3 && exOut.indexOf('EXIT_CALLED') >= 0 && exOut.indexOf('RETURNED') < 0;
 ok(exOK, 'process.exit(3) two waits deep ended the child agent with code 3' + (exOK ? '' : (' (code=' + exCode + ', output: ' + exOut.replace(/\s+/g, ' ').substring(0, 300) + ')')));
 
-// 10) Nest 16 deep. The 17th nested wait must throw and the loop must survive.
+// 10) A detached child has no pipes, so its exit only arrives through the SIGCHLD relay. That path never ended the wait, so waitExit()
+// ran to its deadline and then read the freed child record. Now it returns as soon as the child is reaped. POSIX only.
+if (!win)
+{
+    var det = cp.execFile('/bin/sh', ['sh', '-c', 'exit 4'], { detached: true, type: cp.SpawnTypes.DETACHED }), detCode = -1, detExits = 0, detErr = null;
+    det.on('exit', function (c) { detCode = c; ++detExits; });
+    t = Date.now();
+    try { det.waitExit(3000); } catch (e) { detErr = '' + e; }
+    var detOK = detErr == null && detExits == 1 && detCode == 4 && Date.now() - t < 2000;
+    ok(detOK, 'detached child: waitExit() ended by the SIGCHLD relay' + (detOK ? '' : (' (err=' + detErr + ', exits=' + detExits + ', code=' + detCode + ', took ' + (Date.now() - t) + ' ms)')));
+}
+
+// 11) A child that closes its own stdout and stderr and keeps running. The pipe reap used to block the whole event loop in waitpid()
+// until the child exited, so a timer armed inside the wait could only fire afterwards. Now the reap polls. POSIX only.
+if (!win)
+{
+    var quiet = sh('exec >/dev/null 2>&1; sleep 0.6'), quietCode = -1, quietExits = 0, tickAt = -1, quietErr = null;
+    quiet.on('exit', function (c) { quietCode = c; ++quietExits; });
+    t = Date.now();
+    var t4 = setTimeout(function () { tickAt = Date.now() - t; }, 150);
+    try { quiet.waitExit(3000); } catch (e) { quietErr = '' + e; }
+    var quietOK = quietErr == null && quietExits == 1 && quietCode == 0 && Date.now() - t >= 500 && tickAt >= 0 && tickAt < 450;
+    ok(quietOK, 'child with closed stdio: loop stayed live and exit still arrived' + (quietOK ? '' : (' (err=' + quietErr + ', exits=' + quietExits + ', code=' + quietCode + ', timer at ' + tickAt + ' ms, took ' + (Date.now() - t) + ' ms)')));
+}
+
+// 12) A stopped child raises SIGCHLD too. The relay used to publish that as an exit with code 0, which ended the wait and closed the pipes
+// of a live child. Now only a real reap is published, so the wait lasts until the continued child really exits. POSIX only.
+if (!win)
+{
+    var stopped = slp(1), stopCode = -1, stopExits = 0, stopErr = null;
+    stopped.on('exit', function (c) { stopCode = c; ++stopExits; });
+    t = Date.now();
+    sh('kill -STOP ' + stopped.pid).waitExit(3000);
+    var t5 = setTimeout(function () { sh('kill -CONT ' + stopped.pid).waitExit(3000); }, 300);
+    try { stopped.waitExit(4000); } catch (e) { stopErr = '' + e; }
+    var stopOK = stopErr == null && stopExits == 1 && stopCode == 0 && Date.now() - t >= 900;
+    ok(stopOK, 'stopped then continued child: a stop did not count as an exit' + (stopOK ? '' : (' (err=' + stopErr + ', exits=' + stopExits + ', code=' + stopCode + ', took ' + (Date.now() - t) + ' ms)')));
+}
+
+// 13) process.exit() inside a wait, and the script catches the abort and waits again. The chain refuses every wait after the abort at once,
+// so the retry throws without running a loop pass and the process still ends with the requested code.
+var stickyScript = [
+    "var cp = require('child_process'), win = process.platform == 'win32';",
+    "function slp() { return (win ? cp.execFile(process.env['windir'] + '\\\\System32\\\\cmd.exe', ['cmd.exe', '/c', 'ping -n 4 127.0.0.1 > nul']) : cp.execFile('/bin/sh', ['sh', '-c', 'sleep 3'])); }",
+    "var a = slp();",
+    "var k = setTimeout(function () { process.exit(3); }, 100);",
+    "try { a.waitExit(); console.log('FIRST_RETURNED'); }",
+    "catch (e) { var b = slp(); var t = Date.now(); try { b.waitExit(); console.log('SECOND_RETURNED'); } catch (e2) { console.log('SECOND_REFUSED after ' + (Date.now() - t) + 'ms: ' + e2); } }"
+].join('\n');
+var st = cp.execFile(process.execPath, ['meshagent', '-b64exec', Buffer.from(stickyScript).toString('base64')]), stOut = '', stCode = -1;
+st.stdout.on('data', function (d) { stOut += d.toString(); });
+st.stderr.on('data', function (d) { stOut += d.toString(); });
+st.on('exit', function (c) { stCode = c; });
+t = Date.now();
+try { st.waitExit(20000); } catch (e) { stOut += ' [' + e + ']'; st.kill(); }
+var stOK = stCode == 3 && stOut.indexOf('SECOND_REFUSED') >= 0 && stOut.indexOf('RETURNED') < 0 && Date.now() - t < 2500;
+ok(stOK, 'process.exit(3) with a retried wait: retry refused at once, child agent ended with code 3' + (stOK ? '' : (' (code=' + stCode + ', took ' + (Date.now() - t) + ' ms, output: ' + stOut.replace(/\s+/g, ' ').substring(0, 300) + ')')));
+
+// 14) A wait started from a handler that runs after its enclosing wait has already ended is refused, because the enclosing wait cannot
+// return until the new one ends. Whether the second child's 'exit' runs inside the first wait's last pass or in the main loop depends on
+// timing, so both outcomes pass. Only a hang or another error is a failure.
+var fa = sh('exit 0'), fb = sh('exit 0'), lateErr = null, lateOK = false, lateRan = false;
+fb.on('exit', function () { lateRan = true; var fc = sh('exit 0'); try { fc.waitExit(2000); lateOK = true; } catch (e) { lateErr = '' + e; } });
+fa.waitExit(2000);
+if (!lateRan) { fb.waitExit(2000); }
+ok(lateRan && (lateOK || (lateErr != null && lateErr.indexOf('enclosing wait') >= 0)), "wait from another child's exit handler: " + (lateOK ? 'ran in a later pass, allowed' : ('ran in the ended wait\'s last pass, refused (err=' + lateErr + ')')));
+
+// 15) socket.close() then waitExit() inside a dgram 'message' handler. close() removes the socket's chain link through the base timer, which
+// the nested wait runs, so the link's list node was freed while the enclosing loop was parked on it. The removal is now deferred.
+var dg = require('dgram').createSocket({ type: 'udp4' }), dgOK = false, dgErr = null, dgGot = false;
+dg.bind({ port: 0, address: '127.0.0.1', exclusive: true });
+var pdg = new promise(function (res)
+{
+    dg.on('message', function () { dgGot = true; dg.close(); var c = sh('exit 0'); var cc = -1; c.on('exit', function (x) { cc = x; }); try { c.waitExit(2000); dgOK = cc == 0; } catch (e) { dgErr = '' + e; } res(); });
+});
+dg.send(Buffer.from('x'), dg.address().port, '127.0.0.1');
+try { promise.wait(pdg, 3000); } catch (e) { dgErr = '' + e; }
+var afterDg = sh('exit 0'), afterCode = -1; afterDg.on('exit', function (x) { afterCode = x; }); afterDg.waitExit(2000);
+var dgAll = dgGot && dgOK && dgErr == null && afterCode == 0;
+ok(dgAll, 'socket.close() then waitExit() inside a dgram message handler' + (dgAll ? '' : (' (got=' + dgGot + ', ok=' + dgOK + ', err=' + dgErr + ', later wait code=' + afterCode + ')')));
+
+// 16) clearTimeout() inside a nested wait, of a timer already due in the same timer pass as the caller. The due timers of the outer pass
+// used to be invisible to clearTimeout() while a nested wait ran, so the cleared timer fired anyway on freed memory. Now every pass is searched.
+var tbFired = false, tbCleared = false, tbFiredAfterClear = false, tb = null;
+var ta = setTimeout(function () { var c = slp(1); c.waitExit(3000); clearTimeout(tb); tbCleared = true; }, 0);
+tb = setTimeout(function () { tbFired = true; if (tbCleared) { tbFiredAfterClear = true; } }, 0);
+var t6 = null;
+try { promise.wait(new promise(function (res) { t6 = setTimeout(res, 1500); }), 5000); } catch (e) { }
+ok(tbCleared && !tbFiredAfterClear, 'clearTimeout() inside a nested wait cancelled a timer of the outer pass' + ((tbCleared && !tbFiredAfterClear) ? '' : (' (cleared=' + tbCleared + ', fired=' + tbFired + ', fired after clear=' + tbFiredAfterClear + ')')));
+
+// 17) Nest 16 deep. The 17th nested wait must throw and the loop must survive.
 // refs keeps every timer object referenced, same reason as t1 above: a garbage collected timer is cancelled by its finalizer.
 var refs = [], depth = 0, maxD = 0, capHit = 0, okWaits = 0, launched = 0;
 function nest()

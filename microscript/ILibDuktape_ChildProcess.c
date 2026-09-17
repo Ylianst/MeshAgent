@@ -158,9 +158,6 @@ void ILibDuktape_ChildProcess_SubProcess_ExitHandler(ILibProcessPipe_Process sen
 	}
 #endif
 
-	// Ends every waitExit() pending on this child. p is the tag they passed to ILibChain_Continue(). A child nobody waits on matches nothing.
-	ILibChain_EndContinue_ByTag(Duktape_GetChain(p->ctx), p);
-
 	duk_get_prop_string(p->ctx, -1, "emit");		// [childProcess][emit]
 	duk_swap_top(p->ctx, -2);						// [emit][this]
 	duk_push_string(p->ctx, "exit");				// [emit][this][exit]
@@ -168,6 +165,10 @@ void ILibDuktape_ChildProcess_SubProcess_ExitHandler(ILibProcessPipe_Process sen
 	duk_push_null(p->ctx);							// [emit][this][exit][exitCode][sig]
 	if (duk_pcall_method(p->ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(p->ctx, "child_process.subProcess.exit(): "); }
 	duk_pop(p->ctx);
+
+	// Ends every waitExit() pending on this child. p is the tag they passed to ILibChain_Continue(). A child nobody waits on matches nothing.
+	// Done after 'exit' was emitted, because a wait started from that handler is refused once its enclosing wait has ended.
+	ILibChain_EndContinue_ByTag(Duktape_GetChain(p->ctx), p);
 
 	duk_push_heapptr(p->ctx, p->subProcess);		// [childProcess]
 	ILibDuktape_ChildProcess_DeleteBackReferences(p->ctx, -1, "stdin");
@@ -272,6 +273,9 @@ duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 		case ILibChain_Continue_Result_ERROR_ABORTED:
 			ret = ILibDuktape_Error(ctx, "waitExit() aborted because the script is exiting");
 			break;
+		case ILibChain_Continue_Result_ERROR_OUTER_ENDED:
+			ret = ILibDuktape_Error(ctx, "waitExit() refused because an enclosing wait has already ended and is unwinding");
+			break;
 		case ILibChain_Continue_Result_TIMEOUT:
 			// Timed out. Only throw when the child is really still running, because it may have exited right at the deadline.
 			if (sp->childProcess != NULL)
@@ -370,10 +374,15 @@ duk_ret_t ILibDuktape_SpawnedProcess_SIGCHLD_sink(duk_context *ctx)
 		if (!duk_has_prop_string(ctx, -1, "stdout"))
 		{
 			// We are detached, so we can just emit 'exit' and be done
+			// A detached child has no pipes, so this is the only exit path. Mark it exited and end every waitExit() tagged with it,
+			// because the MemBuf that owns sp is deleted below and a wait that ran to its deadline would otherwise read sp after the free.
+			ILibDuktape_ChildProcess_SubProcess *sp = (ILibDuktape_ChildProcess_SubProcess*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_ChildProcess_MemBuf);
+			if (sp != NULL) { sp->childProcess = NULL; }
 			ILibDuktape_EventEmitter_SetupEmit(ctx, child, "exit");	// [child][emit][this][exit]
 			duk_push_int(ctx, statusCode);							// [child][emit][this][exit][code]
 			duk_push_null(ctx);										// [child][emit][this][exit][code][null]
 			duk_call_method(ctx, 3); duk_pop(ctx);					// [child]
+			if (sp != NULL) { ILibChain_EndContinue_ByTag(Duktape_GetChain(ctx), sp); }
 		}
 		else
 		{
@@ -823,6 +832,7 @@ public:
 	\exception Error Thrown when the timeout expires while the child is still running ("waitExit() timed out after Nms, child (pid=P) still running")
 	\exception Error Thrown when the nesting depth cap is exceeded ("waitExit() nesting depth limit reached")
 	\exception Error Thrown when a nested call finds too little C stack left ("waitExit() refused, not enough C stack left for a nested wait")
+	\exception Error Thrown when an enclosing waitExit() or wait() has already ended, because it cannot return until every inner wait ends ("waitExit() refused because an enclosing wait has already ended and is unwinding")
 	*/
 	void waitExit([timeout]);
 
