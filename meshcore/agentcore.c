@@ -924,16 +924,24 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_WriteSink(ILibDuktap
 	if (((RemoteDesktop_Ptrs*)user)->kvmPipe == NULL)
 	{
 		// Write to AF_UNIX Domain Socket
-		duk_push_external_buffer(stream->writableStream->ctx);														// [ext]
-		duk_config_buffer(stream->writableStream->ctx, -1, buffer, (duk_size_t)bufferLen);
-		duk_push_heapptr(stream->writableStream->ctx, stream->writableStream->obj);									// [ext][rd]
-		duk_get_prop_string(stream->writableStream->ctx, -1, KVM_IPC_SOCKET);										// [ext][rd][IPC]
-		duk_get_prop_string(stream->writableStream->ctx, -1, "write");												// [ext][rd][IPC][write]
-		duk_swap_top(stream->writableStream->ctx, -2);																// [ext][rd][write][this]
-		duk_push_buffer_object(stream->writableStream->ctx, -4, 0, (duk_size_t)bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);// [ext][rd][write][this][buffer]
-		if (duk_pcall_method(stream->writableStream->ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(stream->writableStream->ctx, "Error Writing Data"); }
-																													// [ext][rd][ret]
-		duk_pop_n(stream->writableStream->ctx, 3);																	// ...
+		duk_context *kctx = stream->writableStream->ctx;
+		duk_push_heapptr(kctx, stream->writableStream->obj);															// [rd]
+		duk_get_prop_string(kctx, -1, KVM_IPC_SOCKET);																// [rd][IPC]
+		if (!duk_is_object(kctx, -1))
+		{
+			// Return an error instead of exit if KVM_IPC_SOCKET is also not set. kvm_relay_setup() returns NULL when it cannot reach the user LaunchAgent, so kvmPipe is NULL too, and KVM_IPC_SOCKET is only set for the LoginWindow case.
+			// Prevents reading "write" from an undefined, which stopped the agent with: uncaught: 'cannot read property write of undefined'.
+			duk_pop_2(kctx);																						// ...
+			return ILibTransport_DoneState_ERROR;
+		}
+		duk_push_external_buffer(kctx);																				// [rd][IPC][ext]
+		duk_config_buffer(kctx, -1, buffer, (duk_size_t)bufferLen);
+		duk_get_prop_string(kctx, -2, "write");																		// [rd][IPC][ext][write]
+		duk_dup(kctx, -3);																							// [rd][IPC][ext][write][this]
+		duk_push_buffer_object(kctx, -3, 0, (duk_size_t)bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);						// [rd][IPC][ext][write][this][buffer]
+		if (duk_pcall_method(kctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(kctx, "Error Writing Data"); }
+																													// [rd][IPC][ext][ret]
+		duk_pop_n(kctx, 4);																							// ...
 	}
 	else
 #endif
@@ -1002,9 +1010,13 @@ void ILibDuktape_MeshAgent_RemoteDesktop_PauseSink(ILibDuktape_DuplexStream *sen
 	{
 		duk_push_heapptr(sender->writableStream->ctx, sender->writableStream->obj);									// [rd]
 		duk_get_prop_string(sender->writableStream->ctx, -1, KVM_IPC_SOCKET);										// [rd][IPC]
-		duk_get_prop_string(sender->writableStream->ctx, -1, "pause");												// [rd][IPC][pause]
-		duk_swap_top(sender->writableStream->ctx, -2);																// [rd][pause][this]
-		duk_pcall_method(sender->writableStream->ctx, 0);															// [rd][ret]
+		// Skip if KVM_IPC_SOCKET is also not set, because reading "pause" from an undefined stops the agent the same way as in the write sink.
+		if (duk_is_object(sender->writableStream->ctx, -1))
+		{
+			duk_get_prop_string(sender->writableStream->ctx, -1, "pause");											// [rd][IPC][pause]
+			duk_swap_top(sender->writableStream->ctx, -2);															// [rd][pause][this]
+			duk_pcall_method(sender->writableStream->ctx, 0);														// [rd][ret]
+		}
 		duk_pop_2(sender->writableStream->ctx);																		// ...
 	}
 #endif
@@ -1023,9 +1035,13 @@ void ILibDuktape_MeshAgent_RemoteDesktop_ResumeSink(ILibDuktape_DuplexStream *se
 	{
 		duk_push_heapptr(sender->writableStream->ctx, sender->writableStream->obj);									// [rd]
 		duk_get_prop_string(sender->writableStream->ctx, -1, KVM_IPC_SOCKET);										// [rd][IPC]
-		duk_get_prop_string(sender->writableStream->ctx, -1, "resume");												// [rd][IPC][resume]
-		duk_swap_top(sender->writableStream->ctx, -2);																// [rd][resume][this]
-		duk_pcall_method(sender->writableStream->ctx, 0);															// [rd][ret]
+		// Skip if KVM_IPC_SOCKET is also not set, because reading "resume" from an undefined stops the agent the same way as in the write sink.
+		if (duk_is_object(sender->writableStream->ctx, -1))
+		{
+			duk_get_prop_string(sender->writableStream->ctx, -1, "resume");											// [rd][IPC][resume]
+			duk_swap_top(sender->writableStream->ctx, -2);															// [rd][resume][this]
+			duk_pcall_method(sender->writableStream->ctx, 0);														// [rd][ret]
+		}
 		duk_pop_2(sender->writableStream->ctx);																		// ...
 	}
 #endif
@@ -1367,6 +1383,12 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		else
 		{
 			ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+			if (ptrs->kvmPipe == NULL)
+			{
+				// Only report the failure here. kvm_relay_setup() returns NULL when /tmp/meshagent-kvm-<uid>.sock is still on disk but the user LaunchAgent is stopped, so nothing accepts on it.
+				// The session object stays cached on purpose. The end sink already deletes REMOTE_DESKTOP_STREAM when the tunnel closes, and deleting it here makes that same end sink read a property off undefined and kill the agent the same way.
+				MeshAgent_sendConsoleText(ctx, "KVM: no connection to the user agent for uid %d, is the user service running?", console_uid);
+			}
 		}
 	#else
 		if (TSID != -1) 
