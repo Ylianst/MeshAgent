@@ -2189,6 +2189,9 @@ static void kvm_drm_wl_output_scale(void *data, struct wl_output *wl_output, int
 	(void)data; (void)wl_output; (void)factor;
 }
 
+// name/description are wl_output v4 (wayland 1.20); the listener struct lacks them on older
+// headers, so gate both the handlers and their listener slots on the generated version macro.
+#if defined(WL_OUTPUT_NAME_SINCE_VERSION)
 static void kvm_drm_wl_output_name(void *data, struct wl_output *wl_output, const char *name)
 {
 	kvm_drm_wayland_output *output = (kvm_drm_wayland_output *)data;
@@ -2204,6 +2207,7 @@ static void kvm_drm_wl_output_description(void *data, struct wl_output *wl_outpu
 {
 	(void)data; (void)wl_output; (void)description;
 }
+#endif
 
 static const struct wl_output_listener kvm_drm_wl_output_listener =
 {
@@ -2211,8 +2215,10 @@ static const struct wl_output_listener kvm_drm_wl_output_listener =
 	kvm_drm_wl_output_mode,
 	kvm_drm_wl_output_done,
 	kvm_drm_wl_output_scale,
+#if defined(WL_OUTPUT_NAME_SINCE_VERSION)
 	kvm_drm_wl_output_name,
 	kvm_drm_wl_output_description,
+#endif
 };
 
 static void kvm_drm_xdg_output_position(void *data, struct zxdg_output_v1 *xdg_output, int32_t x, int32_t y)
