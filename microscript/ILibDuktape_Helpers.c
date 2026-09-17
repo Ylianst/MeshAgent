@@ -429,7 +429,7 @@ char* Duktape_GetBuffer(duk_context *ctx, duk_idx_t i, duk_size_t *bufLen)
 	else if (duk_is_buffer(ctx, i))
 	{
 		retVal = (char*)duk_require_buffer(ctx, i, &len);
-		if (ILibMemory_CanaryOK(ILibMemory_FromRaw(retVal)) && ILibMemory_RawSize(ILibMemory_FromRaw(retVal)) == len)
+		if (retVal != NULL && len >= sizeof(ILibMemory_Header) && ILibMemory_CanaryOK(ILibMemory_FromRaw(retVal)) && ILibMemory_RawSize(ILibMemory_FromRaw(retVal)) == len)
 		{
 			retVal = ILibMemory_FromRaw(retVal);
 			if (bufLen != NULL) { *bufLen = ILibMemory_Size(retVal); }
@@ -442,7 +442,7 @@ char* Duktape_GetBuffer(duk_context *ctx, duk_idx_t i, duk_size_t *bufLen)
 	else if(duk_is_buffer_data(ctx, i))
 	{
 		retVal = (char*)duk_require_buffer_data(ctx, i, &len);
-		if (ILibMemory_CanaryOK(ILibMemory_FromRaw(retVal)) && ILibMemory_RawSize(ILibMemory_FromRaw(retVal)) == len)
+		if (retVal != NULL && len >= sizeof(ILibMemory_Header) && ILibMemory_CanaryOK(ILibMemory_FromRaw(retVal)) && ILibMemory_RawSize(ILibMemory_FromRaw(retVal)) == len)
 		{
 			retVal = ILibMemory_FromRaw(retVal);
 			if (bufLen != NULL) { *bufLen = ILibMemory_Size(retVal); }

@@ -3156,10 +3156,22 @@ void ILibWebClient_CancelRequestEx2(ILibWebClient_StateObject wcdo, void *userRe
 					&(_wcdo->PAUSE)); // Pause is also zero
 			}
 
+			if (_wcdo->IsWebSocket != 0)
+			{
+				free(((ILibWebClient_WebSocketState*)wr->Buffer[0])->WebSocketFragmentBuffer);
+			}
 			ILibWebClient_DestroyWebRequest(wr);
 			wr = (struct ILibWebRequest*)ILibQueue_DeQueue(PendingRequestQ);
 		}
 		ILibQueue_Destroy(PendingRequestQ);
+		if (HeadDeleted != 0 && _wcdo->IsOrphan != 0 && ILibQueue_IsEmpty(_wcdo->RequestQueue))
+		{
+			// WebSocket requests leave the manager's table before connecting.
+			ILibSpinLock_Lock(&(_wcdo->Parent->QLock));
+			ILibLinkedList_Remove_ByData(_wcdo->Parent->backlogQueue, _wcdo);
+			ILibSpinLock_UnLock(&(_wcdo->Parent->QLock));
+			ILibWebClient_DestroyWebClientDataObject(_wcdo);
+		}
 	}
 }
 

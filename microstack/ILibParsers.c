@@ -11167,12 +11167,24 @@ void* ILibSpawnNormalThreadEx(voidfp1 method, void* arg, int detached)
 	pthread_t newThread;
 	fptr = (void*(*)(void*))method;
 #if defined(ILIB_NO_TIMEDJOIN)
+	if (detached != 0)
+	{
+		result = (intptr_t)pthread_create(&newThread, NULL, fptr, arg);
+		if (result == 0) { pthread_detach(newThread); }
+		return(result == 0 ? (void*)newThread : NULL);
+	}
 	ILibThread_AppleThread *ret = (ILibThread_AppleThread*)ILibMemory_SmartAllocate(sizeof(ILibThread_AppleThread));
 	ret->method = method; ret->arg = arg;
-	if (detached != 0) { sem_init(&(ret->s), 0, 0); ret->joinable = 1; }
+	ret->joinable = 1;
+	sem_init(&(ret->s), 0, 0);
 	result = (intptr_t)pthread_create(&newThread, NULL, ILibThread_AppleThread_Start, ret);
+	if (result != 0)
+	{
+		sem_destroy(&(ret->s));
+		ILibMemory_Free(ret);
+		return(NULL);
+	}
 	ret->tid = newThread;
-	if (detached != 0) { pthread_detach(newThread); }
 	return(ret);
 #else
 	result = (intptr_t)pthread_create(&newThread, NULL, fptr, arg);
@@ -11198,8 +11210,12 @@ int ILibThread_TimedJoinEx(void *thr, struct timespec* timeout)
 	if (ILibMemory_CanaryOK(thr) && ((ILibThread_AppleThread*)thr)->joinable != 0)
 	{
 		ILibThread_AppleThread *ath = (ILibThread_AppleThread*)thr;
-		if ((ret = sem_timedwait(&(ath->s), timeout)) == 0) { sem_destroy(&(ath->s)); }
-		ILibMemory_Free(thr);
+		if ((ret = sem_timedwait(&(ath->s), timeout)) == 0)
+		{
+			pthread_join(ath->tid, NULL);
+			sem_destroy(&(ath->s));
+			ILibMemory_Free(thr);
+		}
 	}
 	return(ret);
 #else
@@ -11209,7 +11225,6 @@ int ILibThread_TimedJoinEx(void *thr, struct timespec* timeout)
 struct timespec *ILibThread_ms2ts(uint32_t ms, struct timespec *ts)
 {
 	struct timeval tv;
-	long lv;
 
 	gettimeofday(&tv, NULL);
 	ts->tv_sec = tv.tv_sec;
@@ -11217,12 +11232,8 @@ struct timespec *ILibThread_ms2ts(uint32_t ms, struct timespec *ts)
 
 	ts->tv_sec += (ms / 1000);
 	ts->tv_nsec += ((ms % 1000) * 1000000);
-
-	if ((lv = ts->tv_nsec % 1000000000) > 0)
-	{
-		ts->tv_sec += 1;
-		ts->tv_nsec = lv;
-	}
+	ts->tv_sec += ts->tv_nsec / 1000000000;
+	ts->tv_nsec %= 1000000000;
 
 	return(ts);
 }
@@ -11247,6 +11258,7 @@ void ILibThread_Join(void *thr)
 		if (ILibMemory_CanaryOK(thr) && ((ILibThread_AppleThread*)thr)->joinable!=0)
 		{
 			pthread_join(((ILibThread_AppleThread*)thr)->tid, NULL);
+			sem_destroy(&(((ILibThread_AppleThread*)thr)->s));
 			ILibMemory_Free(thr);
 		}
 	#else
@@ -11595,4 +11607,3 @@ void ILibSpinLock_Lock(ILibSpinLock *lock)
 	}
 }
 #endif
-
