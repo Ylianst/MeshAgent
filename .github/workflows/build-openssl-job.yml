@@ -1,0 +1,196 @@
+name: Build OpenSSL static lib (single target)
+run-name: Build ${{ inputs.jobname }}${{ inputs.force == true && ' (force)' || '' }}${{ inputs.version_suffix == true && format(' [suffix -{0}]', inputs.version) || '' }}
+
+# Selective counterpart to build-openssl-libs.yml: rebuilds one target (or 'all')
+# via the per-target reusable openssl-*.yml workflows below, skipping any target
+# whose committed archive already matches `version` unless force=true.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "OpenSSL release version"
+        required: true
+        default: "1.1.1w"
+      sha256:
+        description: "sha256 of openssl-<version>.tar.gz - see openssl/libstatic/openssl-versions-sha.txt"
+        required: true
+        default: "cf3098950cb4d853ad95c0841f1f9c6d3dc102dccfcacd521d93925208b76ac8"
+      jobname:
+        description: "Target to build ('all' for every target)"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - linux-native
+          - linux-cross
+          - linux-musl
+          - openwrt-mips
+          - openwrt-x86_64
+          - armada370-hf
+          - windows
+          - macos
+          - bsd
+      force:
+        description: "Rebuild and overwrite even if the committed archive already matches this version"
+        required: true
+        default: false
+        type: boolean
+      # Suffixed archives are inert: the makefile and the .vcxproj files link the
+      # unsuffixed names, so this stages a copy without changing any build.
+      version_suffix:
+        description: "Name the outputs libcrypto-<version>.a / libcrypto64MT-<version>.lib instead of overwriting the standard names, so several versions can coexist"
+        required: true
+        default: false
+        type: boolean
+      create_pr:
+        description: "Open a pull request with the rebuilt archives (unchecked: leave them as a downloadable artifact only)"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  linux-native:
+    if: ${{ inputs.jobname == 'all' || inputs.jobname == 'linux-native' }}
+    uses: ./.github/workflows/openssl-linux-native.yml
+    with:
+      version: ${{ inputs.version }}
+      sha256: ${{ inputs.sha256 }}
+      force: ${{ inputs.force }}
+      version_suffix: ${{ inputs.version_suffix }}
+
+  linux-cross:
+    if: ${{ inputs.jobname == 'all' || inputs.jobname == 'linux-cross' }}
+    uses: ./.github/workflows/openssl-linux-cross.yml
+    with:
+      version: ${{ inputs.version }}
+      sha256: ${{ inputs.sha256 }}
+      force: ${{ inputs.force }}
+      version_suffix: ${{ inputs.version_suffix }}
+
+  linux-musl:
+    if: ${{ inputs.jobname == 'all' || inputs.jobname == 'linux-musl' }}
+    uses: ./.github/workflows/openssl-linux-musl.yml
+    with:
+      version: ${{ inputs.version }}
+      sha256: ${{ inputs.sha256 }}
+      force: ${{ inputs.force }}
+      version_suffix: ${{ inputs.version_suffix }}
+
+  openwrt-mips:
+    if: ${{ inputs.jobname == 'all' || inputs.jobname == 'openwrt-mips' }}
+    uses: ./.github/workflows/openssl-openwrt-mips.yml
+    with:
+      version: ${{ inputs.version }}
+      sha256: ${{ inputs.sha256 }}
+      force: ${{ inputs.force }}
+      version_suffix: ${{ inputs.version_suffix }}
+
+  openwrt-x86_64:
+    if: ${{ inputs.jobname == 'all' || inputs.jobname == 'openwrt-x86_64' }}
+    uses: ./.github/workflows/openssl-openwrt-x86_64.yml
+    with:
+      version: ${{ inputs.version }}
+      sha256: ${{ inputs.sha256 }}
+      force: ${{ inputs.force }}
+      version_suffix: ${{ inputs.version_suffix }}
+
+  # Excluded from 'all' - dd-wrt's toolchain host aborts downloads often. Run it
+  # explicitly with jobname=armada370-hf when you actually need this target.
+  armada370-hf:
+    if: ${{ inputs.jobname == 'armada370-hf' }}
+    uses: ./.github/workflows/openssl-armada370-hf.yml
+    with:
+      version: ${{ inputs.version }}
+      sha256: ${{ inputs.sha256 }}
+      force: ${{ inputs.force }}
+      version_suffix: ${{ inputs.version_suffix }}
+
+  windows:
+    if: ${{ inputs.jobname == 'all' || inputs.jobname == 'windows' }}
+    uses: ./.github/workflows/openssl-windows.yml
+    with:
+      version: ${{ inputs.version }}
+      sha256: ${{ inputs.sha256 }}
+      force: ${{ inputs.force }}
+      version_suffix: ${{ inputs.version_suffix }}
+
+  macos:
+    if: ${{ inputs.jobname == 'all' || inputs.jobname == 'macos' }}
+    uses: ./.github/workflows/openssl-macos.yml
+    with:
+      version: ${{ inputs.version }}
+      sha256: ${{ inputs.sha256 }}
+      force: ${{ inputs.force }}
+      version_suffix: ${{ inputs.version_suffix }}
+
+  bsd:
+    if: ${{ inputs.jobname == 'all' || inputs.jobname == 'bsd' }}
+    uses: ./.github/workflows/openssl-bsd.yml
+    with:
+      version: ${{ inputs.version }}
+      sha256: ${{ inputs.sha256 }}
+      force: ${{ inputs.force }}
+      version_suffix: ${{ inputs.version_suffix }}
+
+  verify-summary:
+    needs: [linux-native, linux-cross, linux-musl, openwrt-mips, openwrt-x86_64, armada370-hf, windows, macos, bsd]
+    if: always()
+    runs-on: ubuntu-24.04
+    env:
+      # Audit and stale-check the filenames this run actually produced.
+      SFX: ${{ inputs.version_suffix && format('-{0}', inputs.version) || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+      - name: Overlay this run's freshly built archives onto the checkout
+        run: |
+          # actions/download-artifact nests under artifacts/<name>/ when the run has
+          # multiple artifacts, but extracts flat into artifacts/ when there's only
+          # one (e.g. a single-target dispatch) - search instead of assuming depth.
+          find artifacts -type d -path '*/openssl/libstatic' -print0 |
+            while IFS= read -r -d '' d; do
+              cp -rf "$d"/. openssl/libstatic/
+            done
+      - name: Audit every archive - version, object count, glibc-only symbols
+        run: |
+          chmod +x openssl/libstatic/verify
+          openssl/libstatic/verify
+      - name: Fail if any dispatched target did not succeed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          echo "One or more dispatched targets failed or were cancelled - their archives were NOT" >&2
+          echo "regenerated this run, and the overlay step silently left the old committed" >&2
+          echo "archive in place. See the failed job(s) above." >&2
+          exit 1
+      - name: Fail if a full ('all') rebuild left any linux/macos/bsd archive stale
+        if: inputs.jobname == 'all'
+        run: |
+          fail=0
+          for f in $(find openssl/libstatic/linux openssl/libstatic/macos openssl/libstatic/bsd -name "libcrypto${SFX}.a" 2>/dev/null | grep -v '/linux-armada370-hf/'); do
+            if ! strings "$f" | grep -qF "OpenSSL ${{ inputs.version }} "; then
+              v=$(strings "$f" | grep -oE 'OpenSSL [0-9]+\.[0-9]+\.[0-9]+[a-z]?' | sort -u | tr '\n' ' ')
+              echo "STALE: $f -> ${v:-none} (expected OpenSSL ${{ inputs.version }})" >&2
+              fail=1
+            fi
+          done
+          exit $fail
+      - name: Open a pull request with the rebuilt archives
+        if: inputs.create_pr
+        uses: peter-evans/create-pull-request@v7
+        with:
+          add-paths: openssl/libstatic
+          commit-message: "openssl: update static libs to ${{ inputs.version }} (${{ inputs.jobname }})${{ inputs.version_suffix == true && ' - suffixed filenames' || '' }}"
+          title: "openssl: update static libs to ${{ inputs.version }} (${{ inputs.jobname }})${{ inputs.version_suffix == true && ' - suffixed filenames' || '' }}"
+          body: |
+            Automated rebuild via `${{ github.workflow }}` (workflow_dispatch: jobname=${{ inputs.jobname }}, force=${{ inputs.force }}, version_suffix=${{ inputs.version_suffix }}).
+
+            No pull request is opened if the rebuilt archives are byte-identical to what's already committed.
+          branch: openssl-update-${{ inputs.version }}-${{ inputs.jobname }}${{ inputs.version_suffix == true && '-suffixed' || '' }}
+          base: ${{ github.ref_name }}

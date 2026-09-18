@@ -1,0 +1,109 @@
+name: openssl-openwrt-mips
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      sha256:
+        required: true
+        type: string
+      force:
+        required: true
+        type: boolean
+      version_suffix:
+        required: false
+        default: false
+        type: boolean
+
+env:
+  OSSL_FLAGS: >-
+    no-weak-ssl-ciphers no-srp no-psk no-comp no-zlib no-zlib-dynamic
+    no-hw no-dso no-shared -no-asm no-rc5 no-idea no-md4
+    no-rmd160 no-ssl no-ssl3 no-seed no-camellia no-bf no-cast no-md2
+    no-mdc2 no-engine no-ocsp no-cms
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    env:
+      # Set (to -<version>) writes this run's archives beside the committed ones
+      # instead of overwriting them, so several versions can coexist.
+      SFX: ${{ inputs.version_suffix && format('-{0}', inputs.version) || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ar71xx/generic: classic Atheros/Qualcomm AR71xx/AR9xxx routers, genuine MIPS 24Kc cores.
+          - { dir: mips24kc,   subtarget: ar71xx/generic, toolchain: toolchain-mips_24kc_gcc-7.3.0_musl,   ccbin: mips-openwrt-linux-musl-gcc }
+          # ramips/mt7621: MediaTek MT7621-family routers (Xiaomi, GL.iNet, EdgeRouter X, etc.)
+          - { dir: mipsel24kc, subtarget: ramips/mt7621,  toolchain: toolchain-mipsel_24kc_gcc-7.3.0_musl, ccbin: mipsel-openwrt-linux-musl-gcc }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check whether the archive already matches the requested version
+        id: check
+        run: |
+          f="openssl/libstatic/linux/${{ matrix.dir }}/libcrypto${SFX}.a"
+          skip=false
+          if [ -f "$f" ] && strings "$f" | grep -qF "OpenSSL ${{ inputs.version }} "; then
+            skip=true
+          fi
+          [ "${{ inputs.force }}" = "true" ] && skip=false
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          [ "$skip" = "true" ] && echo "::notice::${{ matrix.dir }} already at OpenSSL ${{ inputs.version }} and force=false - skipping rebuild."
+          true
+      - name: Download and extract OpenWrt 18.06.9 SDK (${{ matrix.dir }})
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          file="openwrt-sdk-18.06.9-$(echo ${{ matrix.subtarget }} | tr / -)_gcc-7.3.0_musl.Linux-x86_64.tar.xz"
+          curl -sSL --fail -o sdk.tar.xz "https://downloads.openwrt.org/releases/18.06.9/targets/${{ matrix.subtarget }}/$file"
+          mkdir sdk && tar xf sdk.tar.xz -C sdk --strip-components=1
+      - name: Download and verify source
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          # 1.x releases are tagged OpenSSL_1_1_1w; 3.x and later, openssl-3.5.7.
+          case "${{ inputs.version }}" in
+            1.*) tag="OpenSSL_$(echo "${{ inputs.version }}" | tr . _)" ;;
+            *)   tag="openssl-${{ inputs.version }}" ;;
+          esac
+          curl -sSL -o ossl.tar.gz \
+            "https://github.com/openssl/openssl/releases/download/$tag/openssl-${{ inputs.version }}.tar.gz"
+          echo "${{ inputs.sha256 }}  ossl.tar.gz" | sha256sum -c -
+          mkdir src && tar xzf ossl.tar.gz -C src --strip-components=1
+      - name: Build ${{ matrix.dir }} (musl, -Os, no asm module for linux-generic32)
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          cd src
+          sdk="$GITHUB_WORKSPACE/sdk/staging_dir/${{ matrix.toolchain }}"
+          export STAGING_DIR="$sdk"
+          CC="$sdk/bin/${{ matrix.ccbin }} --sysroot=$sdk" ./Configure linux-generic32 $OSSL_FLAGS
+          sed -i 's/ -O3 / -Os /g' Makefile
+          # build_libs only: this repo ships just the two archives, and 3.x's
+          # apps/fuzz link pulls 64-bit atomics that 32-bit targets lack.
+          make -j"$(nproc)" build_libs
+      - name: Verify version and target architecture
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          cd src
+          v=$(strings libcrypto.a | grep -oE 'OpenSSL [0-9]+\.[0-9]+\.[0-9]+[a-z]?' | sort -u | tr '\n' ' ')
+          echo "version: $v"
+          strings libcrypto.a | grep -qF "OpenSSL ${{ inputs.version }} "
+          obj=$(ar t libcrypto.a | grep -m1 '\.o$')
+          mkdir -p /tmp/probe && cd /tmp/probe && ar x "$GITHUB_WORKSPACE/src/libcrypto.a" "$obj"
+          file "$obj"
+          if file "$obj" | grep -q 'x86-64'; then
+            echo "ERROR: ${{ matrix.dir }} archive contains host x86-64 objects" >&2
+            exit 1
+          fi
+      - name: Stage repo layout
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          d="out/openssl/libstatic/linux/${{ matrix.dir }}"
+          mkdir -p "$d"
+          cp src/libcrypto.a "$d/libcrypto${SFX}.a"
+          cp src/libssl.a "$d/libssl${SFX}.a"
+      - uses: actions/upload-artifact@v7.0.1
+        if: ${{ steps.check.outputs.skip != 'true' }}
+        with:
+          name: openssl-linux-${{ matrix.dir }}
+          path: out/

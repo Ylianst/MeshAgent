@@ -1,0 +1,55 @@
+#!/bin/sh
+#
+# Read-only audit of every committed OpenSSL static archive: version, object
+# count, and (for musl/uClibc targets) glibc-only symbol references. Exits
+# non-zero only on the glibc-symbol check - that's an unambiguous bug
+# regardless of OpenSSL version. Version/object-count are reported, not
+# gated, since many archives here are legitimately still stale (see state.txt).
+#
+# Usage: [SFX=-<suffix>] openssl/libstatic/verify [dir ...]
+#   With no args, checks every libcrypto*.a under linux/, macos/, bsd/ - that
+#   includes suffixed archives (libcrypto-3.0.16.a). SFX narrows it to one
+#   suffix; SFX= (empty) to the unsuffixed archives only.
+
+cd "$(dirname "$0")" || exit 1
+
+# Targets whose deployed agent is musl or uClibc, not glibc. A glibc-linked
+# archive here builds and links fine and then fails to start on the real device.
+NONGLIBC_DIRS="linux/mips24kc linux/mipsel24kc linux/alpine-x86-64 linux/openwrt_x86_64 linux/armvirt32"
+
+# Symbols musl/uClibc genuinely lack. Do NOT add __stack_chk_fail/
+# __stack_chk_guard - both provide them, and SSP-enabled toolchains emit one
+# per object, so a higher-than-usual object count alone isn't a red flag.
+GLIBC_ONLY_RE='secure_getenv|__isoc99_[a-z]+|_IO_[a-z_]+|gnu_get_libc_version'
+
+if [ $# -gt 0 ]; then
+	files=""
+	for d in "$@"; do files="$files $d/libcrypto${SFX-*}.a"; done
+else
+	files=$(find linux macos bsd -maxdepth 2 -name "libcrypto${SFX-*}.a" 2>/dev/null | sort)
+fi
+
+rc=0
+printf '%-32s %-9s %-5s %-6s\n' TARGET VERSION OBJS GLIBC
+printf '%-32s %-9s %-5s %-6s\n' ------ ------- ---- -----
+for f in $files; do
+	[ -f "$f" ] || { echo "  MISSING: $f" >&2; rc=1; continue; }
+	d=$(dirname "$f")
+	# Label suffixed archives (libcrypto-3.0.16.a) so rows for the same target
+	# dir stay distinguishable; $d stays bare for the NONGLIBC_DIRS match below.
+	t=$d; b=$(basename "$f" .a)
+	[ "$b" = libcrypto ] || t="$d ${b#libcrypto}"
+	v=$(strings "$f" | grep -oE 'OpenSSL [0-9]+\.[0-9]+\.[0-9]+[a-z-]*' | sort -u | head -1)
+	n=$(ar t "$f" | wc -l)
+	g=$(nm --undefined-only "$f" 2>/dev/null | awk '{print $NF}' | grep -cE "$GLIBC_ONLY_RE")
+	printf '%-32s %-9s %-5s %-6s\n' "$t" "${v#OpenSSL }" "$n" "$g"
+	case " $NONGLIBC_DIRS " in
+	*" $d "*)
+		if [ "$g" -gt 0 ]; then
+			echo "  REJECT: $d references $g glibc-only symbol(s) but its agent is not glibc" >&2
+			rc=1
+		fi
+		;;
+	esac
+done
+exit $rc
