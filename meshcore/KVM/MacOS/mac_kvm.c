@@ -458,11 +458,6 @@ static int                   g_kvmSocketFD   = -1;
 static ILibKVM_WriteHandler  g_kvmSocketWriteHandler = NULL;
 static void                 *g_kvmSocketReserved     = NULL;
 
-// Not currently exported in ILibProcessPipe.h, but available from
-// ILibProcessPipe.c. We use it here so socket-mode sessions are fully
-// detached from the manager on KVM disconnect.
-extern void ILibProcessPipe_FreePipe(void *pipeObject);
-
 static void kvm_relay_socket_ResetState(int closePipe)
 {
 	if (closePipe != 0 && g_kvmSocketPipe != NULL)
