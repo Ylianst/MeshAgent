@@ -275,12 +275,16 @@ endif
 
 ifeq ($(ARCHID),32)
 ARCHNAME = aarch64
+# CROSS=1 uses the pinned Bootlin toolchain; unset builds with native gcc/strip (the aarch64
+# CI job runs in an arm64 container), so the default strip runs instead of being skipped.
+ifeq ($(CROSS),1)
 export PATH := $(PATH_AARCH64)bin:$(PATH_AARCH64)libexec/gcc/aarch64-buildroot-linux-gnu/5.4.0:$(PATH_AARCH64)aarch64-buildroot-linux-gnu/bin:$(PATH)
 export STAGING_DIR := $(PATH_AARCH64)
-CC = $(PATH_AARCH64)bin/aarch64-linux-gcc 
+CC = $(PATH_AARCH64)bin/aarch64-linux-gcc
 STRIP = $(PATH_AARCH64)bin/aarch64-linux-strip
-CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
 INCDIRS += -I$(PATH_AARCH64)include
+endif
+CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
 KVM = 1
 LMS = 0
 endif
@@ -514,7 +518,9 @@ ifeq ($(CROSS),1)
 endif
 KVM = 1
 LMS = 0
-CEXTRA = -fno-strict-aliasing 
+CEXTRA = -fno-strict-aliasing
+# Bind the pre-2.29 libm symbols so a bullseye-built binary still loads on Buster (glibc 2.28).
+CFLAGS += -include microstack/glibc_compat.h
 endif
 
 # Official Linux ARM 64bit
