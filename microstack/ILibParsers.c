@@ -2823,6 +2823,7 @@ void ILib_WindowsExceptionDebugEx(ILib_DumpEnabledContext *dumpEnabledExceptionC
 #elif defined(_POSIX) && !defined(__APPLE__)
 #ifndef _NOILIBSTACKDEBUG
 char ILib_POSIX_CrashParamBuffer[5 * sizeof(void*)];
+#define ILIB_POSIX_CRASHFRAME_MAXLEN 256
 void ILib_POSIX_CrashHandler(int code)
 {
 	struct rlimit r;
@@ -2855,18 +2856,19 @@ void ILib_POSIX_CrashHandler(int code)
 		msgLen += 30;
 	}
 
-	for (i = 1; i < sz; ++i)
+	for (i = 1; i < sz && msgLen < (int)sizeof(msgBuffer) - 600; ++i)
 	{
 		pid_t pid;
 		int fd[2];
 		size_t symlen = strnlen_s(strings[i], sizeof(msgBuffer));
+		size_t dispLen = symlen > ILIB_POSIX_CRASHFRAME_MAXLEN ? ILIB_POSIX_CRASHFRAME_MAXLEN : symlen;
 
-		memcpy_s(msgBuffer + msgLen, sizeof(msgBuffer) - msgLen, strings[i], symlen);
-		msgLen += symlen;
+		memcpy_s(msgBuffer + msgLen, sizeof(msgBuffer) - msgLen, strings[i], dispLen);
+		msgLen += (int)dispLen;
 		msgBuffer[msgLen] = '\n';
 		msgLen += 1;
 
-
+		
 		ptr = strings[i];
 		for (c = 0; c < (int)symlen; ++c)
 		{
@@ -2901,10 +2903,11 @@ void ILib_POSIX_CrashHandler(int code)
 				len = read(fd[0], tmp, 8192);
 				if (len > 0 && tmp[0] != '?')
 				{
+					size_t addrLen = (size_t)len > ILIB_POSIX_CRASHFRAME_MAXLEN ? ILIB_POSIX_CRASHFRAME_MAXLEN : (size_t)len;
 					memcpy_s(msgBuffer + msgLen, sizeof(msgBuffer) - msgLen, "=> ", 3);
 					msgLen += 3;
-					memcpy_s(msgBuffer + msgLen, sizeof(msgBuffer) - msgLen, tmp, len);
-					msgLen += len;
+					memcpy_s(msgBuffer + msgLen, sizeof(msgBuffer) - msgLen, tmp, addrLen);
+					msgLen += (int)addrLen;
 				}
 				close(fd[0]);
 			}
