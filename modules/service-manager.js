@@ -758,16 +758,25 @@ function serviceManager()
                             }
                         }
                     });
-                try
-                {
-                    Object.defineProperty(retVal, 'installedDate',
+                Object.defineProperty(retVal, 'installedDate',
+                    {
+                        get: function()
                         {
-                            value: require('win-registry').QueryKeyLastModified(require('win-registry').HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + name, 'ImagePath')
-                        });
-                }
-                catch(xx)
-                {
-                }
+                            if (this._installedDate === undefined)
+                            {
+                                var reg = require('win-registry');
+                                try
+                                {
+                                    this._installedDate = reg.QueryKeyLastModified(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + this.name, 'ImagePath');
+                                }
+                                catch(xx)
+                                {
+                                    this._installedDate = null;
+                                }
+                            }
+                            return (this._installedDate);
+                        }
+                    });
                 if (retVal.status.state != 'UNKNOWN')
                 {
                     require('events').EventEmitter.call(retVal);
