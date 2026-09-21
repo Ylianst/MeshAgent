@@ -48,6 +48,10 @@ limitations under the License.
 #include <unistd.h>
 #endif
 
+#if defined(__linux__)
+#include <malloc.h>		// malloc_trim: return GC-freed pages to the OS (see MeshAgent_HeapGcTimerSink)
+#endif
+
 #ifdef _OPENBSD
 extern char __agentExecPath[];
 #endif
@@ -6243,6 +6247,44 @@ int MeshAgent_System(char *cmd)
 
 #endif
 
+// Duktape's voluntary GC trigger scales with heap size, so a steady stream of short-lived
+// EventEmitter/child_process/ScriptContainer graphs climbs to ever higher plateaus before a
+// sweep runs. The worst offender is MeshCentral's once-a-second getclip clipboard poll during
+// a Desktop session: each poll spawns session-lookup children plus a clipboard read container,
+// all finalizable (so refcounting cannot reclaim them), and that churn outpaces voluntary GC,
+// growing the main agent RSS without bound. Force a mark-and-sweep once
+// the script heap grows past a fixed delta since the last one, so the churn is reclaimed
+// promptly and RSS stays bounded regardless of which object types are involved. The check is a
+// cheap counter comparison; the sweep only runs while the heap is actually growing.
+extern size_t ILibDuktape_ScriptContainer_TotalAllocations;
+static size_t g_meshCoreGcMark = 0;
+#define MESHAGENT_GC_GROWTH_BYTES (1024 * 1024)
+void MeshAgent_HeapGcTimerSink(void *object)
+{
+	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)object;
+	if (agent == NULL || agent->chain == NULL || ILibIsChainBeingDestroyed(agent->chain)) { return; }
+	if (agent->meshCoreCtx != NULL && duk_ctx_is_alive(agent->meshCoreCtx) && !duk_ctx_shutting_down(agent->meshCoreCtx))
+	{
+		size_t total = ILibDuktape_ScriptContainer_TotalAllocations;
+		if (total > g_meshCoreGcMark + MESHAGENT_GC_GROWTH_BYTES)
+		{
+			duk_gc(agent->meshCoreCtx, 0);
+			g_meshCoreGcMark = ILibDuktape_ScriptContainer_TotalAllocations;	// post-sweep baseline
+#if defined(__linux__)
+			// The finalizers duk_gc just ran free large native buffers (child pipe buffers,
+			// readable paused_data). glibc keeps those pages, so return them to the OS or RSS
+			// stays at the high-water mark and still looks like a leak.
+			malloc_trim(0);
+#endif
+		}
+		else if (total < g_meshCoreGcMark)
+		{
+			g_meshCoreGcMark = total;	// heap shrank (e.g. core restart); re-baseline downward
+		}
+	}
+	ILibLifeTime_AddEx(ILibGetBaseTimer(agent->chain), agent, 2000, MeshAgent_HeapGcTimerSink, NULL);
+}
+
 int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **param)
 {
 	char *startParms = NULL;
@@ -6343,6 +6385,10 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 #endif
 
 	void *reserved[] = { agentHost, &paramLen, param };
+
+	// Keep the script heap bounded against short-lived spawn churn (see MeshAgent_HeapGcTimerSink).
+	g_meshCoreGcMark = 0;
+	ILibLifeTime_AddEx(ILibGetBaseTimer(agentHost->chain), agentHost, 2000, MeshAgent_HeapGcTimerSink, NULL);
 
 	// Check to see if we are running as just a JavaScript Engine
 	if (agentHost->meshCoreCtx_embeddedScript != NULL || (paramLen >= 2 && ILibString_EndsWith(param[1], -1, ".js", 3) != 0) || (paramLen >= 2 && ILibString_EndsWith(param[1], -1, ".zip", 4) != 0))
