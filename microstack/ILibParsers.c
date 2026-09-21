@@ -7154,7 +7154,7 @@ void ILibSetVersion(struct packetheader *packet, char* Version, size_t VersionLe
 */
 void ILibSetStatusCode(struct packetheader *packet, int StatusCode, char *StatusData, size_t StatusDataLength)
 {
-	if (StatusDataLength < 0) { StatusDataLength = (int)strnlen_s(StatusData, 255); }
+	if (StatusDataLength == (size_t)(-1)) { StatusDataLength = strnlen_s(StatusData, 255); }
 	packet->StatusCode = StatusCode;
 	if (packet->StatusData != NULL) { free(packet->StatusData); }
 	if ((packet->StatusData = (char*)malloc(StatusDataLength+1)) == NULL) ILIBCRITICALEXIT(254);
@@ -7173,12 +7173,12 @@ void ILibSetStatusCode(struct packetheader *packet, int StatusCode, char *Status
 */
 void ILibSetDirective(struct packetheader *packet, char* Directive, size_t DirectiveLength, char* DirectiveObj, size_t DirectiveObjLength)
 {
-	if (DirectiveLength < 0)DirectiveLength = (int)strnlen_s(Directive, 255);
-	if (DirectiveObjLength < 0)DirectiveObjLength = (int)strnlen_s(DirectiveObj, 255);
+	if (DirectiveLength == (size_t)(-1)) { DirectiveLength = strnlen_s(Directive, 255); }
+	if (DirectiveObjLength == (size_t)(-1)) { DirectiveObjLength = strnlen_s(DirectiveObj, 255); }
 
 	if (packet->ReservedMemory != NULL)
 	{
-		if (ILibMemory_AllocateA_Size(packet->ReservedMemory) > (unsigned int)(DirectiveLength + DirectiveObjLength + 2))
+		if (ILibMemory_AllocateA_Size(packet->ReservedMemory) > DirectiveLength + DirectiveObjLength + 2)
 		{
 			packet->Directive = (char*)ILibMemory_AllocateA_Get(packet->ReservedMemory, (size_t)DirectiveLength + 1);
 			packet->DirectiveObj = (char*)ILibMemory_AllocateA_Get(packet->ReservedMemory, (size_t)DirectiveObjLength + 1);
@@ -9294,24 +9294,20 @@ int ILibString_StartsWith(const char *inString, size_t inStringLength, const cha
 */
 int ILibString_IndexOfEx(const char *inString, size_t inStringLength, const char *indexOf, size_t indexOfLength,  int caseSensitive)
 {
-	size_t *RetVal = NULL;
-	size_t index = 0;
+	size_t inLen = (inStringLength == (size_t)(-1)) ? strnlen_s(inString, sizeof(ILibScratchPad)) : inStringLength;
+	size_t searchLen = (indexOfLength == (size_t)(-1)) ? strnlen_s(indexOf, sizeof(ILibScratchPad)) : indexOfLength;
+	size_t index;
 
-	while (inStringLength-index >= indexOfLength)
+	if (searchLen > inLen) { return(-1); }
+
+	for (index = 0; index <= inLen - searchLen; ++index)
 	{
-		if (caseSensitive!=0 && memcmp(inString+index,indexOf,indexOfLength)==0)
+		if (caseSensitive != 0 ? memcmp(inString + index, indexOf, searchLen) == 0 : strncasecmp(inString + index, indexOf, searchLen) == 0)
 		{
-			RetVal = &index;
-			break;
+			return(index > INT32_MAX ? -1 : (int)index);
 		}
-		else if (caseSensitive==0 && strncasecmp(inString+index,indexOf,indexOfLength)==0)
-		{
-			RetVal = &index;
-			break;
-		}
-		++index;
 	}
-	return((RetVal == NULL || *RetVal > INT32_MAX) ? -1 : (int)*RetVal);
+	return(-1);
 }
 /*! \fn ILibString_IndexOf(const char *inString, int inStringLength, const char *indexOf, int indexOfLength)
 \brief Returns the position index of the first occurance of a given substring
@@ -9336,24 +9332,21 @@ int ILibString_IndexOf(const char *inString, size_t inStringLength, const char *
 */
 int ILibString_LastIndexOfEx(const char *inString, size_t inStringLength, const char *lastIndexOf, size_t lastIndexOfLength, int caseSensitive)
 {
-	size_t *RetVal = NULL;
-	size_t index = ((inStringLength == 0 || inStringLength == (size_t)(-1))? strnlen_s(inString, sizeof(ILibScratchPad)) : inStringLength) - (lastIndexOfLength < 0 ? strnlen_s(lastIndexOf, sizeof(ILibScratchPad)) : lastIndexOfLength);
+	size_t inLen = (inStringLength == 0 || inStringLength == (size_t)(-1)) ? strnlen_s(inString, sizeof(ILibScratchPad)) : inStringLength;
+	size_t searchLen = (lastIndexOfLength == (size_t)(-1)) ? strnlen_s(lastIndexOf, sizeof(ILibScratchPad)) : lastIndexOfLength;
+	size_t index;
 
-	while (index >= 0)
+	if (searchLen == 0 || searchLen > inLen) { return(-1); }
+
+	for (index = inLen - searchLen; ; --index)
 	{
-		if (caseSensitive!=0 && memcmp(inString+index,lastIndexOf,lastIndexOfLength)==0)
+		if (caseSensitive != 0 ? memcmp(inString + index, lastIndexOf, searchLen) == 0 : strncasecmp(inString + index, lastIndexOf, searchLen) == 0)
 		{
-			RetVal = &index;
-			break;
+			return(index > INT32_MAX ? -1 : (int)index);
 		}
-		else if (caseSensitive==0 && strncasecmp(inString+index,lastIndexOf,lastIndexOfLength)==0)
-		{
-			RetVal = &index;
-			break;
-		}
-		--index;
+		if (index == 0) { break; }
 	}
-	return((RetVal == NULL || *RetVal > INT32_MAX) ? -1 : (int)(*RetVal));
+	return(-1);
 }
 /*! \fn ILibString_LastIndexOf(const char *inString, int inStringLength, const char *lastIndexOf, int lastIndexOfLength)
 \brief Returns the position index of the last occurance of a given substring
