@@ -48,8 +48,8 @@ limitations under the License.
 #include <unistd.h>
 #endif
 
-#if defined(__linux__)
-#include <malloc.h>		// malloc_trim: return GC-freed pages to the OS (see MeshAgent_HeapGcTimerSink)
+#if defined(__linux__) && defined(__GLIBC__)
+#include <malloc.h>		// malloc_trim (glibc only; MUSL/Alpine has no such symbol): return GC-freed pages to the OS (see MeshAgent_HeapGcTimerSink)
 #endif
 
 #ifdef _OPENBSD
@@ -6270,10 +6270,11 @@ void MeshAgent_HeapGcTimerSink(void *object)
 		{
 			duk_gc(agent->meshCoreCtx, 0);
 			g_meshCoreGcMark = ILibDuktape_ScriptContainer_TotalAllocations;	// post-sweep baseline
-#if defined(__linux__)
+#if defined(__linux__) && defined(__GLIBC__)
 			// The finalizers duk_gc just ran free large native buffers (child pipe buffers,
 			// readable paused_data). glibc keeps those pages, so return them to the OS or RSS
-			// stays at the high-water mark and still looks like a leak.
+			// stays at the high-water mark and still looks like a leak. glibc only: MUSL (Alpine)
+			// has no malloc_trim and hands freed pages back on its own, so it just skips this.
 			malloc_trim(0);
 #endif
 		}
