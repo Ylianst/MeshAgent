@@ -1241,6 +1241,22 @@ function UserSessions()
             }
             else
             {
+                // The local directory node (".") only lists local accounts, so network
+                // accounts (LDAP / Open Directory / Active Directory) are not found above.
+                // Fall back to "id -un", which resolves both local and network users.
+                child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stderr.str = '';
+                child.stdout.str = '';
+                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stdin.write("id -un " + uid + " 2>/dev/null\nexit\n");
+                child.waitExit();
+                var netret = child.stdout.str.trim();
+                child = null;
+                if (netret != '')
+                {
+                    return (netret);
+                }
                 throw ('uid: ' + uid + ' not found');
             }
         };
