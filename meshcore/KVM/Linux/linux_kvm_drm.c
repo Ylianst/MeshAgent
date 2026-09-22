@@ -283,7 +283,6 @@ extern int master2slave[2];
 extern int slave2master[2];
 extern int CURRENT_DISPLAY_ID;
 extern int g_enableEvents;
-extern void *tilebuffer;
 extern unsigned char *jpeg_buffer;
 extern int jpeg_buffer_length;
 
@@ -3628,11 +3627,6 @@ void *kvm_server_mainloop_drm(void *parm)
 		}
 		free(g_tileInfo);
 		g_tileInfo = NULL;
-	}
-	if (tilebuffer != NULL)
-	{
-		free(tilebuffer);
-		tilebuffer = NULL;
 	}
 	kvm_events_evdev_shutdown();
 	g_enableEvents = 0;

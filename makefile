@@ -14,6 +14,9 @@
 #	Using YUM:
 #		sudo yum install libX11-devel libXtst-devel libXext-devel libjpeg-devel libXrandr-devel mesa-libEGL-devel mesa-libGLES-devel libdrm-devel wayland-devel pkgconf
 #
+# Optional WebP/AVIF encoding headers: libwebp-dev + libavif-dev (APT) or libwebp-devel + libavif-devel (YUM).
+# Builds detect usable headers by default; the runtime libraries remain optional (dlopen'd).
+#
 #	NOTE: If you install headers for jpeg8, you need to put the compiled .a in the v80 folder, and specify JPEGVER=v80 when building MeshAgent
 #		eg: make linux ARCHID=6 JPEGVER=v80
 #
@@ -170,6 +173,8 @@
 #	TLS_WRITE_TRACE							1 = Enable TLS Send Tracing			=> Default is tracing disabled
 #	WatchDog								WatchDog timer interval.			=> Default is 6000000
 #	WEBLOG									1 = Enable WebLogging Interface		=> Default is disabled
+#	WEBP									auto = Detect WebP headers, 1 = Require, 0 = Disable (default: auto)
+#	AVIF									auto = Detect libavif headers, 1 = Require, 0 = Disable (default: auto)
 #	WEBRTCDEBUG								1 = Enable WebRTC Instrumentation	=> Default is disabled
 #
 
@@ -572,6 +577,41 @@ ifeq ($(KVM),1)
 LINUXKVMSOURCES = meshcore/KVM/Linux/linux_kvm.c meshcore/KVM/Linux/linux_kvm_wayland.c meshcore/KVM/Linux/linux_kvm_drm.c meshcore/KVM/Linux/linux_kvm_drm_egl.c meshcore/KVM/Linux/linux_kvm_rotated.c meshcore/KVM/Linux/linux_kvm_xkb.c meshcore/KVM/Linux/linux_events.c meshcore/KVM/Linux/linux_events_evdev.c meshcore/KVM/Linux/linux_tile.c meshcore/KVM/Linux/linux_compression.c
 MACOSKVMSOURCES = meshcore/KVM/MacOS/mac_kvm.c meshcore/KVM/MacOS/mac_events.c meshcore/KVM/MacOS/mac_tile.c meshcore/KVM/Linux/linux_compression.c
 CFLAGS += -D_LINKVM
+WEBP ?= auto
+CWEBP =
+ifeq ($(filter $(WEBP),auto 0 1),)
+$(error WEBP must be auto, 0 or 1)
+endif
+ifneq ($(WEBP),0)
+WEBP_CFLAGS ?= $(shell pkg-config --cflags libwebp 2>/dev/null)
+ifeq ($(WEBP),auto)
+# Check headers with the target compiler and its architecture flags.
+WEBP_AVAILABLE := $(shell printf '\043include <webp/encode.h>\nint main(void) { WebPConfig c; WebPPicture p; return WebPConfigLosslessPreset(&c, 1) && WebPPictureInit(&p); }\n' | $(CC) $(CPPFLAGS) $(CFLAGS) $(CEXTRA) $(MACOSARCH) $(WEBP_CFLAGS) -Werror=implicit-function-declaration -x c -fsyntax-only - >/dev/null 2>&1 && echo 1)
+else
+WEBP_AVAILABLE := 1
+endif
+ifeq ($(WEBP_AVAILABLE),1)
+CWEBP = -DKVM_WEBP $(WEBP_CFLAGS)
+CFLAGS += $(CWEBP)
+endif
+endif
+AVIF ?= auto
+CAVIF =
+ifeq ($(filter $(AVIF),auto 0 1),)
+$(error AVIF must be auto, 0 or 1)
+endif
+ifneq ($(AVIF),0)
+AVIF_CFLAGS ?= $(shell pkg-config --cflags libavif 2>/dev/null)
+ifeq ($(AVIF),auto)
+AVIF_AVAILABLE := $(shell printf '\043include <avif/avif.h>\nint main(void) { avifEncoder e; e.quality = 60; e.speed = 6; return AVIF_VERSION_MAJOR < 1; }\n' | $(CC) $(CPPFLAGS) $(CFLAGS) $(CEXTRA) $(MACOSARCH) $(AVIF_CFLAGS) -Werror=implicit-function-declaration -x c -fsyntax-only - >/dev/null 2>&1 && echo 1)
+else
+AVIF_AVAILABLE := 1
+endif
+ifeq ($(AVIF_AVAILABLE),1)
+CAVIF = -DKVM_AVIF $(AVIF_CFLAGS)
+CFLAGS += $(CAVIF)
+endif
+endif
 DRMLIBS =
 # The DRM/Wayland header probes only make sense on Linux goals; macOS/BSD also set KVM=1 but a
 # parse-time $(error) here would kill e.g. 'make macos' on hosts without wayland-client.
@@ -847,7 +887,7 @@ $(LIBNAME): $(OBJECTS) $(SOURCES)
 
 # Compile on Raspberry Pi 2/3 with KVM
 pi:
-	$(MAKE) EXENAME="meshagent_pi" CFLAGS="-std=gnu99 -g -Wall -D_POSIX -DMICROSTACK_PROXY -DMICROSTACK_TLS_DETECT -D_LINKVM $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DMESH_AGENTID=25 -D_NOFSWATCHER -D_NOHECI" ADDITIONALSOURCES="$(LINUXKVMSOURCES)" LDFLAGS="-Lopenssl/libstatic/linux/pi -lrt $(LINUXSSL) $(LINUXFLAGS) $(LDFLAGS) $(LDEXTRA) $(DRMLIBS) -ldl"
+	$(MAKE) EXENAME="meshagent_pi" CFLAGS="-std=gnu99 -g -Wall -D_POSIX -DMICROSTACK_PROXY -DMICROSTACK_TLS_DETECT -D_LINKVM $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DMESH_AGENTID=25 -D_NOFSWATCHER -D_NOHECI $(CWEBP) $(CAVIF)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)" LDFLAGS="-Lopenssl/libstatic/linux/pi -lrt $(LINUXSSL) $(LINUXFLAGS) $(LDFLAGS) $(LDEXTRA) $(DRMLIBS) -ldl"
 	strip meshagent_pi
 
 linux:

@@ -159,17 +159,24 @@ static void kvm_slave_send(const void *buffer, size_t len)
 {
 	if (g_kvmBackendDRM != 0)
 	{
-		ignore_result(kvm_drm_slave_write(buffer, len));
+		if (kvm_drm_slave_write(buffer, len) != 0) g_shutdown = 1;
 	}
 	else
 	{
-		ignore_result(write(slave2master[1], buffer, len));
+		const char *cursor = buffer;
+		while (len > 0)
+		{
+			ssize_t written = write(slave2master[1], cursor, len);
+			if (written < 0 && errno == EINTR) continue;
+			if (written <= 0) { g_shutdown = 1; break; }
+			cursor += written;
+			len -= written;
+		}
 	}
 }
 
 int remoteMouseX = 0, remoteMouseY = 0;
 
-extern void* tilebuffer;
 extern char **environ;
 struct timespec inputtime;
 uint32_t inputcounter = 0;
@@ -945,8 +952,28 @@ int kvm_server_inputdata(char* block, int blocklen)
 		{
 			if (size >= 10) { int fr = ((int)ntohs(ILibUnaligned_Read16(block + 8))); if (fr >= 20 && fr <= 5000) FRAME_RATE_TIMER = fr; }
 			if (size >= 8) { int ns = ((int)ntohs(ILibUnaligned_Read16(block + 6))); if (ns >= 64 && ns <= 4096) SCALING_FACTOR_NEW = ns; }
-			if (size >= 6) { set_tile_compression((int)block[4], (int)block[5]); }
+			if (size >= 6)
+			{
+				int automatic = size == 16 && block[4] == 1 && memcmp(block + 10, "AUTO", 4) == 0 && block[14] == 1;
+				int formats = image_auto_configure(automatic ? (unsigned char)block[15] & 7 : 0, (unsigned char)block[5]);
+				set_tile_compression(automatic ? 0 : (unsigned char)block[4], (unsigned char)block[5]);
+				if (automatic)
+				{
+					// Advertise only the image formats this agent can actually encode; the viewer hides the rest.
+					char reply[12] = { 0, 5, 0, 12, 'A', 'U', 'T', 'O', 1, (char)formats, 0, 0 };
+					kvm_slave_send(reply, 12);
+				}
+			}
 			COMPRESSION_RATIO = 100;
+			break;
+		}
+	case MNG_KVM_ENCODING_FEEDBACK:
+		{
+			// Client-reported throughput and per-codec decode cost reprice the adaptive image selector.
+			if (size == 12 || size == 14 || size == 16)
+			{
+				image_auto_feedback(ntohl(ILibUnaligned_Read32(block + 4)), ntohs(ILibUnaligned_Read16(block + 8)), ntohs(ILibUnaligned_Read16(block + 10)), size >= 14 ? ntohs(ILibUnaligned_Read16(block + 12)) : 0);
+			}
 			break;
 		}
 	case MNG_KVM_REFRESH: // Refresh
@@ -1617,7 +1644,6 @@ void* kvm_server_mainloop_x11(void* parm)
 		free(g_tileInfo);
 		g_tileInfo = NULL;
 	}
-	if(tilebuffer != NULL) { free(tilebuffer); tilebuffer = NULL; }
 	return (void*)0;
 }
 

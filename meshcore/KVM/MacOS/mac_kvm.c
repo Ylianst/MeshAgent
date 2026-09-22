@@ -119,7 +119,6 @@ int kvm_clientProcessId = 0;
 int g_restartcount = 0;
 int g_totalRestartCount = 0;
 int restartKvm = 0;
-extern void* tilebuffer;
 pid_t g_slavekvm = 0;
 pthread_t kvmthread = (pthread_t)NULL;
 ILibProcessPipe_Process gChildProcess;
@@ -801,10 +800,6 @@ void* kvm_server_mainloop(void* param)
 
 	if (g_tileInfo != NULL) { for (r = 0; r < TILE_HEIGHT_COUNT; r++) { free(g_tileInfo[r]); } }
 	g_tileInfo = NULL;
-	if(tilebuffer != NULL) {
-		free(tilebuffer);
-		tilebuffer = NULL;
-	}
 
 	KvmDebugLog("Exiting...\n");
 	ILibQueue_Destroy(g_messageQ);
