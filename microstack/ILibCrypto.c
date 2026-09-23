@@ -144,11 +144,7 @@ int   __fastcall util_sha384file(char* filename, char* result)
 	char *buf = NULL;
 
 	if (filename == NULL) return -1;
-#ifdef WIN32 
-	_wfopen_s(&pFile, ILibUTF8ToWide(filename, -1), L"rbN");
-#else
-	pFile = fopen(filename, "rb");
-#endif
+	pFile = ILibFile_Open(filename, "rb");
 	if (pFile == NULL) goto error;
 	SHA384_Init(&c);
 	if ((buf = (char*)malloc(4096)) == NULL) goto error;
@@ -284,11 +280,7 @@ size_t __fastcall util_writefile(char* filename, char* data, int datalen)
 	FILE * pFile = NULL;
 	size_t count = 0;
 
-#ifdef WIN32 
-	_wfopen_s(&pFile, ILibUTF8ToWide(filename, -1), L"wbN");
-#else
-	pFile = fopen(filename, "wb");
-#endif
+	pFile = ILibFile_Open(filename, "wb");
 
 	if (pFile != NULL)
 	{
@@ -303,11 +295,7 @@ size_t __fastcall util_appendfile(char* filename, char* data, int datalen)
 	FILE * pFile = NULL;
 	size_t count = 0;
 
-#ifdef WIN32 
-	_wfopen_s(&pFile, ILibUTF8ToWide(filename, -1), L"abN");
-#else
-	pFile = fopen(filename, "ab");
-#endif
+	pFile = ILibFile_Open(filename, "ab");
 
 	if (pFile != NULL)
 	{
@@ -326,11 +314,7 @@ size_t __fastcall util_readfile(char* filename, char** data, size_t maxlen)
 	size_t r = 1;
 	if (filename == NULL) return 0;
 
-#ifdef WIN32 
-	_wfopen_s(&pFile, ILibUTF8ToWide(filename, -1), L"rbN");
-#else
-	pFile = fopen(filename, "rb");
-#endif
+	pFile = ILibFile_Open(filename, "rb");
 
 	if (pFile != NULL)
 	{
@@ -366,7 +350,7 @@ int __fastcall util_readfile2(char* filename, char** data)
 	*data = NULL;
 	if (filename == NULL) return 0;
 
-	pFile = fopen(filename, "rb");
+	pFile = ILibFile_Open(filename, "rb");
 	if (pFile != NULL)
 	{
 		*data = malloc(1024);
@@ -503,7 +487,7 @@ void __fastcall util_openssl_init()
 	// Add more random seeding in Linux (May be overkill since OpenSSL already uses /dev/urandom)
 #ifdef _POSIX
 	// Under Linux we use "/dev/urandom" if available. This is the best source of random on Linux & variants
-	FILE *pFile = fopen("/dev/urandom", "rb");
+	FILE *pFile = ILibFile_Open("/dev/urandom", "rb");
 	if (pFile != NULL)
 	{
 		l = (int)fread(tbuf, 1, 64, pFile);
@@ -1050,11 +1034,7 @@ int __fastcall util_from_pem(char* filename, struct util_cert* cert)
 	FILE *pFile = NULL;
 
 	if (filename == NULL) return -1;
-#ifdef WIN32 
-	_wfopen_s(&pFile, ILibUTF8ToWide(filename, -1), L"rbN");
-#else
-	pFile = fopen(filename, "rb");
-#endif
+	pFile = ILibFile_Open(filename, "rb");
 	if (pFile == NULL) goto error;
 
 	if ((cert->pkey = PEM_read_PrivateKey(pFile, NULL, 0, NULL)) == NULL) goto error;
