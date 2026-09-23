@@ -422,18 +422,78 @@ void need_stop_chain(duk_context *ctx, void *user)
 	ILibStopChain(chain);
 }
 
+// Background-only packages (InstallFlags=2 in the embedded .msh) install as soon as they
+// are run, instead of waiting for someone to press "Install" in the setup dialog. The only
+// prompt left is the Windows elevation (UAC) prompt, which a program cannot skip.
+// The installer itself runs with its console hidden, while our own console window shows a
+// one-line status. It must still be open when elevating: UAC only shows its prompt straight
+// away for a window that is in the foreground, otherwise it just flashes in the taskbar.
+// Returns 0 if this is not a background-only package (show the setup dialog), 1 if there
+// is nothing more to do (installed, or elevation declined), -1 if the agent did not end up
+// running.
+int BackgroundOnlyInstall(duk_context *ctx)
+{
+	WCHAR self[_MAX_PATH + 100];
+	WCHAR *status;
+	char svc[255];
+	char *autoproxy, *displayName;
+	SHELLEXECUTEINFOW sei = { sizeof(sei) };
+	DWORD written;
+	int state;
+
+	if (duk_peval_string(ctx, "_MSH();") != 0) { duk_pop(ctx); return(0); }			// [msh]
+	if ((atoi(Duktape_GetStringPropertyValue(ctx, -1, "InstallFlags", "0")) & 3) != 2) { duk_pop(ctx); return(0); }
+	strncpy_s(svc, sizeof(svc), Duktape_GetStringPropertyValue(ctx, -1, "meshServiceName", serviceFile), _TRUNCATE);
+	autoproxy = Duktape_GetStringPropertyValue(ctx, -1, "autoproxy", NULL);
+	displayName = Duktape_GetStringPropertyValue(ctx, -1, "displayName", "Mesh Agent");
+	sprintf_s(ILibScratchPad2, sizeof(ILibScratchPad2), "Installing %.200s...\r\n", displayName);
+	sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "-fullinstall%s%.1000s", autoproxy != NULL ? " --autoproxy=" : "", autoproxy != NULL ? autoproxy : "");
+	duk_pop(ctx);																		// ...
+
+	status = ILibUTF8ToWide(ILibScratchPad2, -1);
+	WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), status, (DWORD)wcslen(status), &written, NULL);
+
+	if (GetModuleFileNameW(NULL, self, sizeof(self) / 2) == 0) { return(-1); }
+	sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
+	sei.hwnd = GetConsoleWindow();
+	sei.lpVerb = IsAdmin() ? L"open" : L"runas";
+	sei.lpFile = self;
+	sei.lpParameters = ILibUTF8ToWide(ILibScratchPad, -1);
+	sei.nShow = SW_HIDE;
+	if (!ShellExecuteExW(&sei)) { return(GetLastError() == ERROR_CANCELLED ? 1 : -1); }	// Declining UAC means "don't install"
+	if (sei.hProcess != NULL)
+	{
+		WaitForSingleObject(sei.hProcess, 300000);
+		CloseHandle(sei.hProcess);
+	}
+
+	state = GetServiceState(svc);
+	return((state == SERVICE_RUNNING || state == SERVICE_START_PENDING) ? 1 : -1);
+}
+
 duk_ret_t _start(duk_context *ctx)
 {
+	int installed = 0;
+	DWORD session = 0;
+
 	duk_push_global_object(ctx);
 	if (Duktape_GetBooleanProperty(ctx, -1, "_OK", 0))
 	{
 		duk_get_prop_string(ctx, -1, "_start_data");
+		installed = BackgroundOnlyInstall(ctx);
 		FreeConsole();
-		GdiPlusFlat_Init();
-		DialogBoxW(NULL, MAKEINTRESOURCEW(IDD_INSTALLDIALOG), NULL, DialogHandler);
-		GdiPlusFlat_Release();
+
+		// If a background-only install failed, the setup dialog shows the agent state and lets the
+		// install be retried. Not in session 0 (run by a deployment tool as SYSTEM): nobody could see it.
+		ProcessIdToSessionId(GetCurrentProcessId(), &session);
+		if (installed == 0 || (installed < 0 && session != 0))
+		{
+			GdiPlusFlat_Init();
+			DialogBoxW(NULL, MAKEINTRESOURCEW(IDD_INSTALLDIALOG), NULL, DialogHandler);
+			GdiPlusFlat_Release();
+		}
 	}
-	duk_eval_string_noresult(ctx, "process._exit();");
+	duk_eval_string_noresult(ctx, installed < 0 ? "process._exit(1);" : "process._exit();");
 
 	return(0);
 }
