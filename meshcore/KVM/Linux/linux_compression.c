@@ -138,6 +138,7 @@ static int write_WEBP_buffer(JSAMPLE *pixels, int width, int height, size_t stri
 static struct
 {
 	int initialized, available, codec_svt, codec_aom, screen_checked, screen_ok;
+	char reason[128];
 	__typeof__(&avifVersion) version;
 	__typeof__(&avifCodecName) codec_name;
 	__typeof__(&avifImageCreate) image_create;
@@ -155,6 +156,7 @@ static int load_avif(void)
 {
 	if (avif.initialized) return avif.available;
 	avif.initialized = 1;
+	snprintf(avif.reason, sizeof(avif.reason), "libavif is not installed");
 #ifdef __APPLE__
 	const char *names[] = { "libavif.16.dylib", "libavif.15.dylib", "libavif.13.dylib", "libavif.dylib" };
 #else
@@ -164,18 +166,18 @@ static int load_avif(void)
 	{
 		void *library = dlopen(names[i], RTLD_NOW | RTLD_LOCAL);
 		if (library == NULL) continue;
-#define AVIF_LOAD(member, symbol) avif.member = (__typeof__(avif.member))dlsym(library, #symbol); if (avif.member == NULL) { dlclose(library); continue; }
+#define AVIF_LOAD(member, symbol) avif.member = (__typeof__(avif.member))dlsym(library, #symbol); if (avif.member == NULL) { snprintf(avif.reason, sizeof(avif.reason), "missing %s", #symbol); dlclose(library); continue; }
 		AVIF_LOAD(version, avifVersion);
 		char version[48];
 		snprintf(version, sizeof(version), "%d.%d.%d", AVIF_VERSION_MAJOR, AVIF_VERSION_MINOR, AVIF_VERSION_PATCH);
 		// libavif exposes structs without the versioned initialization used by libwebp.
-		if (strcmp(avif.version(), version) != 0) { dlclose(library); continue; }
+		if (strcmp(avif.version(), version) != 0) { snprintf(avif.reason, sizeof(avif.reason), "runtime %.48s does not match build %s", avif.version(), version); dlclose(library); continue; }
 		AVIF_LOAD(codec_name, avifCodecName);
 		// libaom is faster and smaller than SVT-AV1 on still tiles (measured), so it is preferred below;
 		// SVT is only a fallback when a libavif build ships without libaom.
 		avif.codec_svt = avif.codec_name(AVIF_CODEC_CHOICE_SVT, AVIF_CODEC_FLAG_CAN_ENCODE) != NULL;
 		avif.codec_aom = avif.codec_name(AVIF_CODEC_CHOICE_AOM, AVIF_CODEC_FLAG_CAN_ENCODE) != NULL;
-		if (!avif.codec_svt && !avif.codec_aom) { dlclose(library); continue; }
+		if (!avif.codec_svt && !avif.codec_aom) { snprintf(avif.reason, sizeof(avif.reason), "libavif has no AOM or SVT encoder"); dlclose(library); continue; }
 		AVIF_LOAD(image_create, avifImageCreate);
 		AVIF_LOAD(image_destroy, avifImageDestroy);
 		AVIF_LOAD(rgb_defaults, avifRGBImageSetDefaults);
@@ -187,8 +189,10 @@ static int load_avif(void)
 		AVIF_LOAD(data_free, avifRWDataFree);
 #undef AVIF_LOAD
 		avif.available = 1;
+		avif.reason[0] = 0;
 		return 1;
 	}
+	fprintf(stderr, "KVM AVIF unavailable: %s\n", avif.reason);
 	return 0;
 }
 
@@ -218,7 +222,7 @@ static int avif_screen_content_ok(void)
 		encoder->codecChoice = AVIF_CODEC_CHOICE_AOM;
 		encoder->speed = 10;
 		encoder->maxThreads = 1;
-		avif.set_option(encoder, "tune-content", "screen");
+		(void)avif.set_option(encoder, "tune-content", "screen");
 		avif.screen_ok = avif.encode(encoder, image, &output) == AVIF_RESULT_OK;
 	}
 	avif.data_free(&output);
@@ -256,7 +260,7 @@ static int write_AVIF_buffer(JSAMPLE *pixels, int width, int height, size_t stri
 	encoder->speed = quality < 100 ? 8 : 6;
 	encoder->maxThreads = threads < 1 ? 1 : threads > 4 ? 4 : (int)threads;
 	// AV1 screen-content tools (palette, intra block copy) cut desktop-tile size ~11%; lossy libaom only.
-	if (!use_svt && quality < 100 && avif_screen_content_ok()) avif.set_option(encoder, "tune-content", "screen");
+	if (!use_svt && quality < 100 && avif_screen_content_ok()) (void)avif.set_option(encoder, "tune-content", "screen");
 	if (avif.encode(encoder, image, &output) != AVIF_RESULT_OK || output.size == 0 || output.size > INT_MAX - 16) goto done;
 	unsigned char *buffer = malloc(output.size);
 	if (buffer == NULL) goto done;
@@ -280,6 +284,9 @@ static struct
 {
 	int formats, quality, selected, wins;
 	int avif_active, avif_wins;
+	int frame_rate, tile_type, tile_quality;
+	unsigned int sequence, tile_bytes, tile_pixels;
+	double frame_bytes, frame_encode, frame_decode, quality_time;
 	double rate, decode[3], feedback_time, probe_time;
 	double avif_probe_time, avif_retry_time, large_time, baseline_time;
 } automatic;
@@ -291,24 +298,76 @@ static double image_time(void)
 	return now.tv_sec * 1000.0 + now.tv_nsec / 1000000.0;
 }
 
-int image_auto_configure(int formats, int quality)
+int image_available_formats(void)
 {
 	int available = 1;
 #ifdef KVM_WEBP
 	if (load_webp()) available |= 2;
 #endif
 #ifdef KVM_AVIF
-	if (avif.available || ((formats & 4) && load_avif())) available |= 4;
+	if (load_avif()) available |= 4;
 #endif
+	return available;
+}
+
+int image_auto_configure(int formats, int quality)
+{
+	int available = image_available_formats();
 	formats &= available;
-	if (automatic.formats != formats || automatic.quality != quality)
+	(void)quality;
+	if (!formats || !automatic.formats)
 	{
 		memset(&automatic, 0, sizeof(automatic));
-		automatic.formats = formats;
-		automatic.quality = quality;
+		automatic.quality = 60;
+		automatic.frame_rate = 50;
 		automatic.selected = 1;
 	}
+	if (!(formats & 2)) automatic.selected = 1;
+	if (!(formats & 4)) automatic.avif_active = automatic.avif_wins = 0;
+	automatic.formats = formats;
 	return available;
+}
+
+int image_auto_frame_rate(int manual)
+{
+	return automatic.formats ? automatic.frame_rate : manual;
+}
+
+void image_auto_frame_end(void)
+{
+	double now = image_time();
+	if (automatic.formats && automatic.frame_bytes > 0 && automatic.rate > 0 && now - automatic.feedback_time <= 60000)
+	{
+		double cost = automatic.frame_encode + automatic.frame_decode + automatic.frame_bytes * 1000.0 / automatic.rate;
+		int interval = (int)(cost * 1.2);
+		if (interval < 50) interval = 50;
+		if (interval > 2000) interval = 2000;
+		// Slow down promptly; recover gradually so a small update cannot flood the next frame.
+		automatic.frame_rate = interval > automatic.frame_rate ? (automatic.frame_rate + interval * 3) / 4 : (automatic.frame_rate * 3 + interval) / 4;
+		if (now - automatic.quality_time >= 2000)
+		{
+			if (cost > 350 && automatic.quality > 30) { automatic.quality -= 5; automatic.quality_time = now; }
+			else if (cost < 100 && automatic.quality < 75) { automatic.quality += 5; automatic.quality_time = now; }
+		}
+	}
+	automatic.frame_bytes = automatic.frame_encode = automatic.frame_decode = 0;
+}
+
+int image_tile_metadata(char packet[24], int frame_rate)
+{
+	if (!automatic.formats) return 0;
+	memset(packet, 0, 24);
+	packet[1] = 90; packet[3] = 24;
+	memcpy(packet + 4, "TILE", 4);
+	unsigned int values[] = { ++automatic.sequence, automatic.tile_bytes, automatic.tile_pixels };
+	for (int i = 0; i < 3; ++i) {
+		for (int j = 0; j < 4; ++j) packet[8 + i * 4 + j] = (char)(values[i] >> (24 - j * 8));
+	}
+	packet[20] = (char)automatic.tile_type;
+	packet[21] = (char)automatic.tile_quality;
+	int interval = image_auto_frame_rate(frame_rate);
+	packet[22] = (char)(interval >> 8); packet[23] = (char)interval;
+	return 24;
 }
 
 void image_auto_feedback(unsigned int bytes_per_second, unsigned short jpeg_ms, unsigned short webp_ms, unsigned short avif_ms)
@@ -348,7 +407,7 @@ static int select_image_type(JSAMPLE *pixels, int width, int height, size_t stri
 	if (!(automatic.formats & 2) || width > WEBP_MAX_DIMENSION || height > WEBP_MAX_DIMENSION) return 1;
 	// Quality 100 retains WebP's lossless policy; it is not a JPEG/WebP race.
 	if (quality == 100) return 4;
-	if (automatic.rate == 0 || now - automatic.feedback_time > 10000) { automatic.selected = 1; automatic.wins = 0; return 1; }
+	if (automatic.rate == 0 || now - automatic.feedback_time > 60000) { automatic.selected = 1; automatic.wins = 0; return 1; }
 	if (automatic.probe_time != 0 && now - automatic.probe_time < 3000) return automatic.selected;
 	automatic.probe_time = now;
 	double cost[2] = { 0, 0 };
@@ -399,7 +458,7 @@ static void image_auto_avif(JSAMPLE *pixels, int width, int height, size_t strid
 	if (area < 262144) return;
 	double interval = automatic.large_time == 0 ? 1000 : now - automatic.large_time;
 	automatic.large_time = now;
-	if (!(automatic.formats & 4) || quality >= 100 || area > 2097152 || automatic.rate == 0 || automatic.rate > 250000 || now - automatic.feedback_time > 10000)
+	if (!(automatic.formats & 4) || quality >= 100 || area > 2097152 || automatic.rate == 0 || automatic.rate > 250000 || now - automatic.feedback_time > 60000)
 	{
 		automatic.avif_active = automatic.avif_wins = 0;
 		automatic.baseline_time = now;
@@ -439,6 +498,8 @@ static void image_auto_avif(JSAMPLE *pixels, int width, int height, size_t strid
 int write_image_buffer(JSAMPLE *image_buffer, int image_width, int image_height, size_t row_stride, int type, int quality)
 {
 	int is_auto = type == 0;
+	double frame_started = image_time();
+	if (is_auto && automatic.formats) quality = automatic.quality;
 #ifdef KVM_WEBP
 	if (type == 0) type = select_image_type(image_buffer, image_width, image_height, row_stride, quality);
 #endif
@@ -460,6 +521,17 @@ int write_image_buffer(JSAMPLE *image_buffer, int image_width, int image_height,
 	(void)is_auto;
 	(void)started;
 #endif
+	if (is_auto && jpeg_buffer != NULL)
+	{
+		int codec = jpeg_buffer_length >= 12 && jpeg_buffer[4] == 'f' && jpeg_buffer[5] == 't' ? 5 : jpeg_buffer[0] == 'R' ? 4 : 1;
+		automatic.tile_type = codec;
+		automatic.tile_quality = codec == 5 ? (quality < 90 ? quality + 10 : 99) : quality;
+		automatic.tile_bytes = jpeg_buffer_length;
+		automatic.tile_pixels = (unsigned int)image_width * (unsigned int)image_height;
+		automatic.frame_bytes += jpeg_buffer_length;
+		automatic.frame_encode += image_time() - frame_started;
+		automatic.frame_decode += automatic.decode[codec == 5 ? 2 : codec == 4 ? 1 : 0] * automatic.tile_pixels / 1000000.0;
+	}
 	return 0;
 }
 

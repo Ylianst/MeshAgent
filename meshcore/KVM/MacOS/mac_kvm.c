@@ -15,6 +15,7 @@ limitations under the License.
 */
 
 #include "mac_kvm.h"
+#include "../Linux/linux_compression.h"
 #include "../../meshdefines.h"
 #include "../../meshinfo.h"
 #include "../../../microstack/ILibParsers.h"
@@ -402,9 +403,23 @@ int kvm_server_inputdata(char* block, int blocklen)
 			}
 			break;
 		}
+		case MNG_KVM_ENCODING_FEEDBACK:
+		{
+			if (size == 8 && memcmp(block + 4, "CAPS", 4) == 0)
+			{
+				int formats = image_available_formats();
+				char *reply = ILibMemory_SmartAllocate(12);
+				memcpy(reply, "\x00\x05\x00\x0c" "CAPS\x01\x01\x00\x00", 12);
+				reply[9] = (char)(1 | ((formats & 6) << 2));
+				ILibQueue_Lock(g_messageQ);
+				ILibQueue_EnQueue(g_messageQ, reply);
+				ILibQueue_UnLock(g_messageQ);
+			}
+			break;
+		}
 		case MNG_KVM_COMPRESSION: // Compression
 		{
-			if (size != 6) break;
+			if (size < 6) break;
 			set_tile_compression((int)block[4], (int)block[5]);
 			COMPRESSION_RATIO = 100;
 			break;

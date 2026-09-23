@@ -34,6 +34,10 @@ typedef void(*JPEG_error_handler)(char *msg);
 extern int write_JPEG_buffer(JSAMPLE *image_buffer, int image_width, int image_height, size_t row_stride, int quality);
 extern int write_image_buffer(JSAMPLE *image_buffer, int image_width, int image_height, size_t row_stride, int type, int quality);
 extern int image_auto_configure(int formats, int quality);
+extern int image_available_formats(void);
+extern int image_auto_frame_rate(int manual);
+extern void image_auto_frame_end(void);
+extern int image_tile_metadata(char packet[24], int frame_rate);
 extern void image_auto_feedback(unsigned int bytes_per_second, unsigned short jpeg_ms, unsigned short webp_ms, unsigned short avif_ms);
 extern JPEG_error_handler default_JPEG_error_handler;
 

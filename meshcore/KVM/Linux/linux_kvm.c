@@ -175,6 +175,14 @@ static void kvm_slave_send(const void *buffer, size_t len)
 	}
 }
 
+int kvm_send_image(const void *buffer, size_t len)
+{
+	char metadata[24];
+	if (image_tile_metadata(metadata, FRAME_RATE_TIMER)) kvm_slave_send(metadata, sizeof(metadata));
+	if (!g_shutdown) kvm_slave_send(buffer, len);
+	return g_shutdown ? -1 : 0;
+}
+
 int remoteMouseX = 0, remoteMouseY = 0;
 
 extern char **environ;
@@ -960,7 +968,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 				if (automatic)
 				{
 					// Advertise only the image formats this agent can actually encode; the viewer hides the rest.
-					char reply[12] = { 0, 5, 0, 12, 'A', 'U', 'T', 'O', 1, (char)formats, 0, 0 };
+					char reply[12] = { 0, 5, 0, 12, 'A', 'U', 'T', 'O', 1, (char)formats, (char)(1 | ((formats & 6) << 2)), 3 };
 					kvm_slave_send(reply, 12);
 				}
 			}
@@ -969,6 +977,13 @@ int kvm_server_inputdata(char* block, int blocklen)
 		}
 	case MNG_KVM_ENCODING_FEEDBACK:
 		{
+			if (size == 8 && memcmp(block + 4, "CAPS", 4) == 0)
+			{
+				int formats = image_available_formats();
+				char reply[12] = { 0, 5, 0, 12, 'C', 'A', 'P', 'S', 1, (char)(1 | ((formats & 6) << 2)), (char)formats, 3 };
+				kvm_slave_send(reply, sizeof(reply));
+				break;
+			}
 			// Client-reported throughput and per-codec decode cost reprice the adaptive image selector.
 			if (size == 12 || size == 14 || size == 16)
 			{
@@ -1580,8 +1595,7 @@ void* kvm_server_mainloop_x11(void* parm)
 					{
 						// Write the reply to the pipe.
 						//fprintf(logFile, "Writing to master in kvm_server_mainloop\n");
-						written = write(slave2master[1], buf, tilesize);
-						fsync(slave2master[1]);
+						written = kvm_send_image(buf, (size_t)tilesize);
 						//fprintf(logFile, "Wrote %d bytes to master in kvm_server_mainloop\n", written);
 						free(buf);
 						if (written == -1) { /*ILIBMESSAGE("KVMBREAK-K2\r\n");*/ g_shutdown = 1; height = SCREEN_HEIGHT; width = SCREEN_WIDTH; break; }
@@ -1602,7 +1616,8 @@ void* kvm_server_mainloop_x11(void* parm)
 		}
 
 		// We can't go full speed here, we need to slow this down.
-		height = FRAME_RATE_TIMER;
+		image_auto_frame_end();
+		height = image_auto_frame_rate(FRAME_RATE_TIMER);
 		while (!g_shutdown && height > 0)
 		{
 			if (height > 50)

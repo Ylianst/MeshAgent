@@ -499,7 +499,7 @@ static int kvm_drm_send_dirty_tiles(const unsigned char *rgbBuffer, size_t rgbSi
 			getTileAt(width, height, &tilePacket, &tilePacketSize, *desktopBuffer, *desktopBufferSize, y, x);
 			if (tilePacket != NULL && tilePacketSize > 0)
 			{
-				if (kvm_drm_write_all(slave2master[1], (char *)tilePacket, (size_t)tilePacketSize) != 0)
+				if (kvm_send_image(tilePacket, (size_t)tilePacketSize) != 0)
 				{
 					free(tilePacket);
 					return -1;
@@ -3267,7 +3267,9 @@ void *kvm_server_mainloop_drm(void *parm)
 		}
 
 		uint64_t nowMs = kvm_drm_now_ms();
-		uint64_t frameInterval = FRAME_RATE_TIMER < 20 ? 20 : (uint64_t)FRAME_RATE_TIMER;
+		image_auto_frame_end();
+		uint64_t frameInterval = (uint64_t)image_auto_frame_rate(FRAME_RATE_TIMER);
+		if (frameInterval < 20) frameInterval = 20;
 		if (nowMs == 0 || (lastFrameTimeMs != 0 && nowMs - lastFrameTimeMs < frameInterval))
 		{
 			continue;
