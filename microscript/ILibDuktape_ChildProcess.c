@@ -60,6 +60,24 @@ void ILibDuktape_ChildProcess_DeleteBackReferences(duk_context *ctx, duk_idx_t i
 		duk_pop(ctx);								// ...
 	}
 }
+// After the child exits, the subProcess and its stdio objects still carry the finalizer
+// that every ILibDuktape emitter installs, and a finalizable object is not freed by
+// refcounting; it waits for a mark-and-sweep. Under a rapid spawn/exit workload (the
+// session lookups MeshCentral's 1s getclip poll runs during a Desktop session) that
+// garbage outpaces GC. The finalizers are moot once the child has exited (the subProcess
+// one only kills a still-running child), so clearing them lets refcounting reclaim the
+// graph at once. Readable streams are only detached when nothing is buffered or piped, so
+// their finalizer still runs to release native paused_data / a pending pipe immediate.
+static void ILibDuktape_ChildProcess_DetachFinalizer(duk_context *ctx, duk_idx_t i, char *name, ILibDuktape_readableStream *rs)
+{
+	if (rs != NULL && (rs->paused_data != NULL || rs->pipeImmediate != NULL)) { return; }
+	if (duk_has_prop_string(ctx, i, name))
+	{
+		duk_get_prop_string(ctx, i, name);			// [sub]
+		duk_push_undefined(ctx); duk_set_finalizer(ctx, -2);
+		duk_pop(ctx);								// ...
+	}
+}
 
 void ILibDuktape_ChildProcess_SubProcess_StdOut_OnPause(ILibDuktape_readableStream *sender, void *user)
 {
@@ -173,6 +191,13 @@ void ILibDuktape_ChildProcess_SubProcess_ExitHandler(ILibProcessPipe_Process sen
 	ILibDuktape_ChildProcess_DeleteBackReferences(p->ctx, -1, "stdin");
 	ILibDuktape_ChildProcess_DeleteBackReferences(p->ctx, -1, "stdout");
 	ILibDuktape_ChildProcess_DeleteBackReferences(p->ctx, -1, "stderr");
+
+	// Drop the now-moot finalizers so the exited child's graph is reclaimed by refcounting
+	// instead of lingering as finalizable garbage until the next mark-and-sweep.
+	ILibDuktape_ChildProcess_DetachFinalizer(p->ctx, -1, "stdout", p->stdOut);
+	ILibDuktape_ChildProcess_DetachFinalizer(p->ctx, -1, "stderr", p->stdErr);
+	ILibDuktape_ChildProcess_DetachFinalizer(p->ctx, -1, "stdin", NULL);
+	duk_push_undefined(p->ctx); duk_set_finalizer(p->ctx, -2);	// subProcess itself
 	duk_pop(p->ctx);								// ...
 }
 void ILibDuktape_ChildProcess_SubProcess_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, size_t bufferLen, size_t* bytesConsumed, void* user)

@@ -138,7 +138,7 @@ typedef struct ILibDuktape_fs_readStreamData
 	int autoClose;
 	ILibDuktape_readableStream *stream;
 	int bytesRead;							// Number of bytes read
-	int bytesLeft;							// Number of bytes left
+	int64_t bytesLeft;						// Number of bytes left, -1 for the whole file
 	int readLoopActive;						// Event Dispatch thread is actively reading
 	int unshiftedBytes;						// Number of bytes to mark as unread
 	char buffer[FS_READSTREAM_BUFFERSIZE];
@@ -210,6 +210,22 @@ char* ILibDuktape_fs_fixLinuxPath(char *path)
 }
 #endif
 
+int ILibDuktape_fs_seek64(FILE *f, int64_t position)
+{
+#ifdef WIN32
+	return(_fseeki64(f, position, SEEK_SET));
+#else
+	return(fseeko(f, (off_t)position, SEEK_SET));
+#endif
+}
+int64_t ILibDuktape_fs_tell64(FILE *f)
+{
+#ifdef WIN32
+	return(_ftelli64(f));
+#else
+	return((int64_t)ftello(f));
+#endif
+}
 // Helper method to retrive FILE* from supplied integer value
 FILE* ILibDuktape_fs_getFilePtr(duk_context *ctx, int fd)
 {
@@ -451,14 +467,14 @@ duk_ret_t ILibDuktape_fs_readSync(duk_context *ctx)
 	char *buffer = Duktape_GetBuffer(ctx, 1, &bufferSize);
 	int offset = narg > 2 ? Duktape_GetIntPropertyValue(ctx, 2, "offset", 0) : 0;
 	int length = narg > 2 ? Duktape_GetIntPropertyValue(ctx, 2, "length", (int)bufferSize) : (int)bufferSize;
-	int position = narg > 2 ? Duktape_GetIntPropertyValue(ctx, 2, "position", -1) : -1;
+	int64_t position = narg > 2 ? Duktape_GetInt64PropertyValue(ctx, 2, "position", -1) : -1;
 	int bytesRead;
 	FILE *f = ILibDuktape_fs_getFilePtr(ctx, duk_require_int(ctx, 0));
 
 	if (length > (int)bufferSize) { return(ILibDuktape_Error(ctx, "fs.readSync(): Buffer of size: %llu bytes, but attempting to read %d bytes", (uint64_t)bufferSize, length)); }
 	if (f != NULL)
 	{
-		if (position >= 0) { fseek(f, position, SEEK_SET); }
+		if (position >= 0 && ILibDuktape_fs_seek64(f, position) != 0) { return(ILibDuktape_Error(ctx, "Unable to seek to Position")); }
 		bytesRead = (int)fread(buffer + offset, 1, length, f);
 		duk_push_int(ctx, bytesRead);
 		return 1;
@@ -636,14 +652,14 @@ duk_ret_t ILibDuktape_fs_write(duk_context *ctx)
 	char *buffer = Duktape_GetBuffer(ctx, 1, &bufferLen);
 	int cbx = 2;
 	int offset = 0, length = (int)bufferLen;
-	int position = -1;
+	int64_t position = -1;
 
 	// If offset and length are specified, use those values
 	if (duk_is_number(ctx, 2)) { offset = (int)duk_require_int(ctx, 2); cbx++; }
 	if (duk_is_number(ctx, 3)) { length = (int)duk_require_int(ctx, 3); cbx++; }
 	if (duk_is_number(ctx, 4))
 	{
-		position = (int)duk_require_int(ctx, 4);
+		position = (int64_t)duk_require_number(ctx, 4);
 		cbx++;
 	}
 	if (!duk_is_function(ctx, cbx)) { return(ILibDuktape_Error(ctx, "Invalid Parameters")); }
@@ -669,12 +685,12 @@ duk_ret_t ILibDuktape_fs_write(duk_context *ctx)
 
 	if (position >= 0)
 	{
-		// If position was specified, we need to set the current position in a 64bit manner
-		DWORD highorder = 0;
-		DWORD loworder = SetFilePointer(data->H, (LONG)position, (LONG*)&highorder, FILE_BEGIN);
-		if (loworder == INVALID_SET_FILE_POINTER && GetLastError() != NO_ERROR) { return(ILibDuktape_Error(ctx, "Unable to seek to Position")); }
-		data->write_p.Offset = loworder;
-		data->write_p.OffsetHigh = highorder;
+		// The overlapped write takes its file offset from write_p, so the 64-bit position is split into it directly.
+		LARGE_INTEGER li;
+		li.QuadPart = position;
+		if (!SetFilePointerEx(data->H, li, NULL, FILE_BEGIN)) { return(ILibDuktape_Error(ctx, "Unable to seek to Position")); }
+		data->write_p.Offset = li.LowPart;
+		data->write_p.OffsetHigh = (DWORD)li.HighPart;
 	}
 
 	data->write_buffer = buffer + offset;
@@ -927,15 +943,16 @@ duk_ret_t ILibDuktape_fs_read(duk_context *ctx)
 	char *buffer = Duktape_GetBufferPropertyEx(ctx, 1, "buffer", &bufferLen);
 	duk_size_t offset = (duk_size_t)Duktape_GetIntPropertyValue(ctx, 1, "offset", 0);
 	duk_size_t length = (duk_size_t)Duktape_GetIntPropertyValue(ctx, 1, "length", (int)bufferLen);
-	int position = Duktape_GetIntPropertyValue(ctx, 1, "position", -1);
+	int64_t position = Duktape_GetInt64PropertyValue(ctx, 1, "position", -1);
 	if (position >= 0)
 	{
 #ifdef WIN32
-		DWORD highorder = 0;
-		DWORD loworder = SetFilePointer(data->H, (LONG)position, (LONG*)&highorder, FILE_BEGIN);
-		if (loworder == INVALID_SET_FILE_POINTER && GetLastError() != NO_ERROR) { return(ILibDuktape_Error(ctx, "Unable to seek to Position")); }
-		data->p.Offset = loworder;
-		data->p.OffsetHigh = highorder;
+		// The overlapped read takes its file offset from p, so the 64-bit position is split into it directly.
+		LARGE_INTEGER li;
+		li.QuadPart = position;
+		if (!SetFilePointerEx(data->H, li, NULL, FILE_BEGIN)) { return(ILibDuktape_Error(ctx, "Unable to seek to Position")); }
+		data->p.Offset = li.LowPart;
+		data->p.OffsetHigh = (DWORD)li.HighPart;
 #else
 		if (lseek(fd, (off_t)position, SEEK_SET) < 0) { return(ILibDuktape_Error(ctx, "Unable to seek to Position")); }
 #endif
@@ -1021,7 +1038,7 @@ duk_ret_t ILibDuktape_fs_writeSync(duk_context *ctx)
 	f = ILibDuktape_fs_getFilePtr(ctx, duk_require_int(ctx, 0));
 	if (f != NULL)
 	{
-		if (nargs > 4) { fseek(f, duk_require_int(ctx, 4), SEEK_SET); printf("Write: Seeking to %d\n", duk_require_int(ctx, 4)); }
+		if (nargs > 4 && ILibDuktape_fs_seek64(f, (int64_t)duk_require_number(ctx, 4)) != 0) { return(ILibDuktape_Error(ctx, "Unable to seek to Position")); }
 		bytesWritten = (int)fwrite(buffer, 1, length, f);
 		duk_push_int(ctx, bytesWritten);
 		return 1;
@@ -1210,7 +1227,7 @@ void ILibDuktape_fs_readStream_Resume(struct ILibDuktape_readableStream *sender,
 	while (sender->paused == 0 && data->bytesRead > 0 && (data->bytesLeft < 0 || data->bytesLeft > 0))
 	{
 		// The main read processing loop. we'll read as much as we can until we can't read anymore
-		bytesToRead = data->bytesLeft < 0 ? (int)sizeof(data->buffer) : (data->bytesLeft > ((int)sizeof(data->buffer) - data->unshiftedBytes) ? (int)sizeof(data->buffer) - data->unshiftedBytes : data->bytesLeft);
+		bytesToRead = data->bytesLeft < 0 ? (int)sizeof(data->buffer) : (data->bytesLeft > (int64_t)((int)sizeof(data->buffer) - data->unshiftedBytes) ? (int)sizeof(data->buffer) - data->unshiftedBytes : (int)data->bytesLeft);
 		data->bytesRead = (int)fread(data->buffer + data->unshiftedBytes, 1, bytesToRead, data->fPtr);
 		if (data->bytesRead > 0)
 		{
@@ -1298,8 +1315,8 @@ duk_ret_t ILibDuktape_fs_createReadStream(duk_context *ctx)
 	FILE *f;
 	ILibDuktape_fs_readStreamData *data;
 	int autoClose = 1;
-	int start = 0;
-	int end = -1;
+	int64_t start = 0;
+	int64_t end = -1;
 
 	// If an options object was specified, fetch some properties
 	if (nargs > 1)
@@ -1311,8 +1328,8 @@ duk_ret_t ILibDuktape_fs_createReadStream(duk_context *ctx)
 			duk_get_prop_string(ctx, 1, "autoClose");
 			autoClose = (int)duk_get_boolean(ctx, -1);
 		}
-		start = Duktape_GetIntPropertyValue(ctx, 1, "start", 0);
-		end = Duktape_GetIntPropertyValue(ctx, 1, "end", -1);
+		start = Duktape_GetInt64PropertyValue(ctx, 1, "start", 0);
+		end = Duktape_GetInt64PropertyValue(ctx, 1, "end", -1);
 	}
 
 	if (fd == 0)
@@ -1354,7 +1371,7 @@ duk_ret_t ILibDuktape_fs_createReadStream(duk_context *ctx)
 	if (start != 0)
 	{
 		// If a starting position was specified, we need to seek to it
-		fseek(f, start, SEEK_SET);
+		if (ILibDuktape_fs_seek64(f, start) != 0) { return(ILibDuktape_Error(ctx, "Unable to seek to Position")); }
 	}
 
 	return 1;
@@ -2451,12 +2468,65 @@ duk_ret_t ILibDuktape_fs_mkdirSync(duk_context *ctx)
 	return 0;
 }
 
+// Copy of duktape's own DUK_HBUFFER_MAX_BYTELEN, which sits inside the duktape.c file and is not exported by duktape.h or duk_config.h.
+#if defined(DUK_USE_BUFLEN16)
+#define ILibDuktape_MaxBufferBytes 0x0000ffffLL
+#else
+#define ILibDuktape_MaxBufferBytes 0x7ffffffeLL
+#endif
+
+typedef struct ILibDuktape_fs_readFileSyncState
+{
+	FILE *f;
+	int64_t fileLen;
+}ILibDuktape_fs_readFileSyncState;
+
+// Runs under duk_safe_call so the caller keeps ownership of the FILE* and can close it on every path. Prevents leak
+duk_ret_t ILibDuktape_fs_readFileSync_read(duk_context *ctx, void *udata)
+{
+	ILibDuktape_fs_readFileSyncState *state = (ILibDuktape_fs_readFileSyncState*)udata;
+	if (state->fileLen > 0)
+	{
+		// If the filesystem gives us the file length, we'll allocate the buffer first, and then fill it up
+		duk_push_fixed_buffer(ctx, (duk_size_t)state->fileLen);
+		size_t got = fread(Duktape_GetBuffer(ctx, -1, NULL), 1, (size_t)state->fileLen, state->f);	// Report what was actually read
+		if (ferror(state->f)) { return(ILibDuktape_Error(ctx, "fs.readFileSync(): read error")); }
+		duk_push_buffer_object(ctx, -1, 0, (duk_size_t)got, DUK_BUFOBJ_NODEJS_BUFFER);
+	}
+	else
+	{
+		// No usable length (pipes, /proc), use a dynamic growing buffer
+		duk_size_t bufferSize = 4096;
+		char *buffer = (char*)duk_push_dynamic_buffer(ctx, bufferSize);				// [dynamicBuffer]
+		size_t bytesRead = 0;
+		size_t len = 0;
+		while ((bytesRead = fread(buffer + len, 1, bufferSize - len, state->f)) > 0)
+		{
+			len += bytesRead;
+			if (len == bufferSize)
+			{
+				// Double the buffer until 8MB, from then on add 8MB. Prevents many re-allocations
+				bufferSize += bufferSize < (8 * 1024 * 1024) ? bufferSize : (8 * 1024 * 1024);
+				buffer = duk_resize_buffer(ctx, -1, bufferSize);
+			}
+		}
+		// A short count with ferror set is an interrupted read (handlers here have no SA_RESTART), not the end of the data.
+		if (ferror(state->f)) { return(ILibDuktape_Error(ctx, "fs.readFileSync(): read error")); }
+		// Reduce buffer to actual used size as it is referenced, not copied
+		if (len != bufferSize) { duk_resize_buffer(ctx, -1, len); }
+		duk_push_buffer_object(ctx, -1, 0, (duk_size_t)len, DUK_BUFOBJ_NODEJS_BUFFER);
+	}
+	return(1);	// one buffer object on the stack (this is not what duk_safe_call returns)
+}
+
 // fs.readFileSync() to read an entire file into a buffer
 duk_ret_t ILibDuktape_fs_readFileSync(duk_context *ctx)
 {
 	char *filePath = (char*)duk_require_string(ctx, 0);
 	FILE *f;
-	long fileLen;
+	int64_t fileLen;
+	ILibDuktape_fs_readFileSyncState state;
+	duk_int_t rc;
 #ifdef WIN32
 	char binFlags[8];
 #endif
@@ -2487,35 +2557,16 @@ duk_ret_t ILibDuktape_fs_readFileSync(duk_context *ctx)
 	if (f == NULL) { return(ILibDuktape_Error(ctx, "fs.readFileSync(): File [%s] not found", filePath)); }
 
 	fseek(f, 0, SEEK_END);
-	fileLen = ftell(f);
+	fileLen = ILibDuktape_fs_tell64(f);
 	fseek(f, 0, SEEK_SET);
-	if(fileLen > 0)
-	{
-		// If the filesystem gives us the file length, we'll allocate the buffer first, and then fill it up
-		duk_push_fixed_buffer(ctx, (duk_size_t)fileLen);
-		ignore_result(fread(Duktape_GetBuffer(ctx, -1, NULL), 1, (size_t)fileLen, f));
-		fclose(f);
-		duk_push_buffer_object(ctx, -1, 0, (duk_size_t)fileLen, DUK_BUFOBJ_NODEJS_BUFFER);
-	}
-	else
-	{
-		// If the filesystem can't tell us the file length, we'll need to use a dynamic buffer, so it will just realloc as we go along
-		duk_size_t bufferSize = 1024;
-		char *buffer = (char*)duk_push_dynamic_buffer(ctx, bufferSize);				// [dynamicBuffer]
-		size_t bytesRead = 0;
-		size_t len = 0;
-		while ((bytesRead = fread(buffer + len, 1,(bufferSize-len)>1024?1024:(bufferSize-len), f)) > 0)
-		{
-			len += bytesRead;
-			if (bytesRead == 1024)
-			{
-				buffer = duk_resize_buffer(ctx, -1, bufferSize + 1024);
-				bufferSize += 1024;
-			}
-		}
-		fclose(f);
-		duk_push_buffer_object(ctx, -1, 0, (duk_size_t)len, DUK_BUFOBJ_NODEJS_BUFFER);
-	}
+	// duktape refuses the buffer past ILibDuktape_MaxBufferBytes, and on a 32-bit build (duk_size_t)fileLen would wrap and silently read the wrong length.
+	if (fileLen > ILibDuktape_MaxBufferBytes || fileLen > (int64_t)(SIZE_MAX / 2)) { fclose(f); return(ILibDuktape_Error(ctx, "fs.readFileSync(): File [%s] is too large to read into memory", filePath)); }
+
+	state.f = f;
+	state.fileLen = fileLen;
+	rc = duk_safe_call(ctx, ILibDuktape_fs_readFileSync_read, &state, 0, 1);
+	fclose(f);
+	if (rc != DUK_EXEC_SUCCESS) { return(duk_throw(ctx)); }		// The error object the read left on the stack is what gets thrown
 
 	return(1);
 }
