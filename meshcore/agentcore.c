@@ -839,15 +839,19 @@ void ILibDuktape_MeshAgent_Ready(ILibDuktape_EventEmitter *sender, char *eventNa
 }
 #ifdef _LINKVM
 #ifdef WIN32
+typedef struct RemoteDesktop_KVM_WriteState
+{
+	RemoteDesktop_Ptrs *ptrs;
+	size_t bufferLen;
+} RemoteDesktop_KVM_WriteState;
+
 void ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink_Chain(void *chain, void *user)
 {
 	if (user == NULL) { return; }
 
-	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)((void**)ILibMemory_Extra(user))[0];
-	char *buffer = (char*)user;
-	size_t bufferLen = ILibMemory_Size(user);
+	RemoteDesktop_KVM_WriteState *state = (RemoteDesktop_KVM_WriteState*)ILibMemory_Extra(user);
 
-	ILibDuktape_DuplexStream_WriteData(ptrs->stream, buffer, bufferLen);
+	ILibDuktape_DuplexStream_WriteData(state->ptrs->stream, (char*)user, state->bufferLen);
 	ILibMemory_Free(user);
 }
 #endif
@@ -883,9 +887,12 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(char *
 	{
 		if (!ILibIsRunningOnChainThread(duk_ctx_chain(ptrs->ctx)))
 		{
-			char *bstate = ILibMemory_SmartAllocateEx(bufferLen, sizeof(void*));
+			char *bstate = ILibMemory_SmartAllocateEx(bufferLen, sizeof(RemoteDesktop_KVM_WriteState));
+			RemoteDesktop_KVM_WriteState *state = (RemoteDesktop_KVM_WriteState*)ILibMemory_Extra(bstate);
 			memcpy_s(bstate, (size_t)bufferLen, buffer, (size_t)bufferLen);
-			((void**)ILibMemory_Extra(bstate))[0] = ptrs;
+			state->ptrs = ptrs;
+			// Allocation sizes include alignment padding, which is not part of the KVM packet.
+			state->bufferLen = (size_t)bufferLen;
 			ILibChain_RunOnMicrostackThreadEx3(duk_ctx_chain(ptrs->ctx), ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink_Chain, NULL, bstate);
 			return ILibTransport_DoneState_COMPLETE;		// Always returning complete, because we'll let the stream object handle flow control
 		}
