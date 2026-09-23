@@ -76,6 +76,7 @@ void kvm_set_listener_path(const char *path)
 
 
 int KVM_AGENT_FD = -1;
+int KVM_STDOUT_IS_LOG = 0;
 int KVM_SEND(char *buffer, int bufferLen)
 {
 	int retVal = -1;
@@ -124,17 +125,26 @@ pthread_t kvmthread = (pthread_t)NULL;
 ILibProcessPipe_Process gChildProcess;
 ILibQueue g_messageQ;
 
-//int logenabled = 1;
-//FILE *logfile = NULL;
-//#define MASTERLOGFILE "/dev/null"
-//#define SLAVELOGFILE "/dev/null"
-//#define LOGFILE "/dev/null"
+// #define KVMDEBUGENABLED 1
+#ifdef KVMDEBUGENABLED
+static void KvmDebugLog(const char *format, ...)
+{
+	char tmp[255];
+	int len;
+	va_list args;
 
-
+	if (KVM_STDOUT_IS_LOG == 0) { return; }
+	va_start(args, format);
+	len = vsnprintf(tmp, sizeof(tmp), format, args);
+	va_end(args);
+	if (len <= 0) { return; }
+	if (len > (int)sizeof(tmp) - 1) { len = (int)sizeof(tmp) - 1; }
+	write(STDOUT_FILENO, tmp, len);
+	fsync(STDOUT_FILENO);
+}
+#else
 #define KvmDebugLog(...)
-//#define KvmDebugLog(...) printf(__VA_ARGS__); if (logfile != NULL) fprintf(logfile, __VA_ARGS__);
-//#define KvmDebugLog(x) if (logenabled) printf(x);
-//#define KvmDebugLog(x) if (logenabled) fprintf(logfile, "Writing from slave in kvm_send_resolution\n");
+#endif
 
 void senddebug(int val)
 {
@@ -448,11 +458,6 @@ static int                   g_kvmSocketFD   = -1;
 static ILibKVM_WriteHandler  g_kvmSocketWriteHandler = NULL;
 static void                 *g_kvmSocketReserved     = NULL;
 
-// Not currently exported in ILibProcessPipe.h, but available from
-// ILibProcessPipe.c. We use it here so socket-mode sessions are fully
-// detached from the manager on KVM disconnect.
-extern void ILibProcessPipe_FreePipe(void *pipeObject);
-
 static void kvm_relay_socket_ResetState(int closePipe)
 {
 	if (closePipe != 0 && g_kvmSocketPipe != NULL)
@@ -503,9 +508,6 @@ void* kvm_mainloopinput(void* param)
 	char* pchRequest2[30000];
 	int cbBytesRead = 0;
 
-	char tmp[255];
-	int tmpLen;
-
 	if (KVM_AGENT_FD == -1)
 	{
 		int flags;
@@ -515,23 +517,9 @@ void* kvm_mainloopinput(void* param)
 
 	while (!g_shutdown)
 	{
-		if (KVM_AGENT_FD != -1)
-		{
-			tmpLen = sprintf_s(tmp, sizeof(tmp), "About to read from IPC Socket\n");
-			write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
-		}
-
-		KvmDebugLog("Reading from master in kvm_mainloopinput\n");
+		KvmDebugLog("About to read from IPC Socket\n");
 		cbBytesRead = read(KVM_AGENT_FD == -1 ? STDIN_FILENO: KVM_AGENT_FD, pchRequest2 + len, 30000 - len);
-		KvmDebugLog("Read %d bytes from master in kvm_mainloopinput\n", cbBytesRead);
-
-		if (KVM_AGENT_FD != -1)
-		{
-			tmpLen = sprintf_s(tmp, sizeof(tmp), "Read %d bytes from IPC-xx-Socket\n", cbBytesRead);
-			write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
-		}
+		KvmDebugLog("Read %d bytes from IPC Socket\n", cbBytesRead);
 
 		if (cbBytesRead == -1 || cbBytesRead == 0) 
 		{ 
@@ -549,20 +537,9 @@ void* kvm_mainloopinput(void* param)
 		len += cbBytesRead;
 		ptr2 = 0;
 		
-		if (KVM_AGENT_FD != -1)
-		{
-			tmpLen = sprintf_s(tmp, sizeof(tmp), "enter while\n");
-			write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
-		}
+		KvmDebugLog("enter while\n");
 		while ((ptr2 = kvm_server_inputdata((char*)pchRequest2 + ptr, cbBytesRead - ptr)) != 0) { ptr += ptr2; }
-
-		if (KVM_AGENT_FD != -1)
-		{
-			tmpLen = sprintf_s(tmp, sizeof(tmp), "exited while\n");
-			write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
-		}
+		KvmDebugLog("exited while\n");
 
 		if (ptr == len) { len = 0; ptr = 0; }
 		// TODO: else move the reminder.
@@ -606,6 +583,7 @@ void* kvm_server_mainloop(void* param)
 	else
 	{
 		// this is doing I/O via a Unix Domain Socket
+		KVM_STDOUT_IS_LOG = 1;
 		if ((KVM_Listener_FD = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
 		{
 			char tmp[255];
@@ -620,8 +598,7 @@ void* kvm_server_mainloop(void* param)
 		flags = fcntl(KVM_Listener_FD, F_GETFL, 0);
 		if (fcntl(KVM_Listener_FD, F_SETFL, (O_NONBLOCK | flags) ^ O_NONBLOCK) == -1) { }
 
-		written = write(STDOUT_FILENO, "Set FCNTL2\n", 11);
-		fsync(STDOUT_FILENO);
+		KvmDebugLog("Set FCNTL2\n");
 
 		memset(&serveraddr, 0, sizeof(serveraddr));
 		serveraddr.sun_family = AF_UNIX;
@@ -673,16 +650,7 @@ void* kvm_server_mainloop(void* param)
 	pthread_create(&kvmthread, NULL, kvm_mainloopinput, param);
 
 
-	if (KVM_AGENT_FD != -1)
-	{
-		written = write(STDOUT_FILENO, "Starting Loop []\n", 14);
-		fsync(STDOUT_FILENO);
-
-		char stmp[255];
-		int stmpLen = sprintf_s(stmp, sizeof(stmp), "TILE_HEIGHT_COUNT=%d, TILE_WIDTH_COUNT=%d\n", TILE_HEIGHT_COUNT, TILE_WIDTH_COUNT);
-		written = write(STDOUT_FILENO, stmp, stmpLen);
-		fsync(STDOUT_FILENO);
-	}
+	KvmDebugLog("Starting Loop [] TILE_HEIGHT_COUNT=%d, TILE_WIDTH_COUNT=%d\n", TILE_HEIGHT_COUNT, TILE_WIDTH_COUNT);
 
 	while (!g_shutdown) 
 	{
@@ -775,13 +743,7 @@ void* kvm_server_mainloop(void* param)
 			//senddebug(100);
 			getScreenBuffer((unsigned char **)&desktop, &desktopsize, image);
 
-			if (KVM_AGENT_FD != -1)
-			{
-				char tmp[255];
-				int tmpLen = sprintf_s(tmp, sizeof(tmp), "...Enter for loop\n");
-				written = write(STDOUT_FILENO, tmp, tmpLen);
-				fsync(STDOUT_FILENO);
-			}
+			KvmDebugLog("...Enter for loop\n");
 
 			for (y = 0; y < TILE_HEIGHT_COUNT; y++) 
 			{
@@ -828,13 +790,7 @@ void* kvm_server_mainloop(void* param)
 				}
 			}
 
-			if (KVM_AGENT_FD != -1)
-			{
-				char tmp[255];
-				int tmpLen = sprintf_s(tmp, sizeof(tmp), "...exit for loop\n");
-				written = write(STDOUT_FILENO, tmp, tmpLen);
-				fsync(STDOUT_FILENO);
-			}
+			KvmDebugLog("...exit for loop\n");
 
 		}
 		CGImageRelease(image);
@@ -850,11 +806,7 @@ void* kvm_server_mainloop(void* param)
 		tilebuffer = NULL;
 	}
 
-	if (KVM_AGENT_FD != -1)
-	{
-		written = write(STDOUT_FILENO, "Exiting...\n", 11);
-		fsync(STDOUT_FILENO);
-	}
+	KvmDebugLog("Exiting...\n");
 	ILibQueue_Destroy(g_messageQ);
 	return (void*)0;
 }

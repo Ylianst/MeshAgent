@@ -132,8 +132,9 @@ int g_totalRestartCount = 0;
 int g_shutdown = 0;
 int change_display = 0;
 pid_t g_slavekvm = 0;
-int master2slave[2];
-int slave2master[2];
+int master2slave[2] = { -1, -1 };
+int slave2master[2] = { -1, -1 };
+static void *g_kvmChain = NULL;
 char CURRENT_XDISPLAY[256];
 int CURRENT_DISPLAY_ID = -1;
 
@@ -1014,6 +1015,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 int kvm_relay_feeddata(char* buf, int len)
 {
 	ssize_t written = 0;
+	if (g_slavekvm <= 0 || master2slave[1] < 0) { return 0; }
 
 	// Write the reply to the pipe.
 	//fprintf(logFile, "Writing to slave in kvm_relay_feeddata\n");
@@ -1677,8 +1679,12 @@ void kvm_relay_readSink(ILibProcessPipe_Pipe sender, char *buffer, size_t buffer
 #define KVM_AUTORECOVER_DELAY_MS   1500		// let the session settle before re-deriving the uid
 #define KVM_AUTORECOVER_MAX_BURST  5		// consecutive quick re-forks before we give up
 #define KVM_AUTORECOVER_RESET_MS   30000	// a child that ran at least this long was healthy: reset the burst
+#define KVM_FORK_RETRY_DELAY_MS     2000
+#define KVM_FORK_RETRY_MAX          10
 
 static uint64_t g_lastKvmForkMs = 0;		// monotonic ms when the current child was forked
+static int g_kvmForkRetryCount = 0;
+static int g_kvmForkRetryDispatch = 0;
 
 // Implemented in agentcore.c: re-derive consoleUid()/X env and re-fork the capture child (reuses the
 // same path as a live user-sessions 'changed' event).
@@ -1689,6 +1695,56 @@ static uint64_t kvm_relay_now_ms(void)
 	struct timespec ts;
 	if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) { return 0; }
 	return (((uint64_t)ts.tv_sec) * 1000ULL) + (((uint64_t)ts.tv_nsec) / 1000000ULL);
+}
+
+typedef struct kvm_child_reaper
+{
+	void *chain;
+	pid_t pid;
+	uint64_t killDeadline;
+} kvm_child_reaper;
+
+static void kvm_relay_reap_shutdown(void *object)
+{
+	kvm_child_reaper *child = (kvm_child_reaper*)object;
+	kill(child->pid, SIGKILL);
+	while (waitpid(child->pid, NULL, 0) < 0 && errno == EINTR) {}
+	free(child);
+}
+
+static void kvm_relay_reap(void *object)
+{
+	kvm_child_reaper *child = (kvm_child_reaper*)object;
+	pid_t result = waitpid(child->pid, NULL, WNOHANG);
+	if (result == 0 || (result < 0 && errno == EINTR))
+	{
+		// EOF can arrive before exit; a stuck capture must not block the agent chain.
+		if (kvm_relay_now_ms() >= child->killDeadline)
+		{
+			kill(child->pid, SIGKILL);
+			child->killDeadline = UINT64_MAX;
+		}
+		ILibLifeTime_AddEx(ILibGetBaseTimer(child->chain), child, 100, kvm_relay_reap, kvm_relay_reap_shutdown);
+		return;
+	}
+	free(child);
+}
+
+static void kvm_relay_stop_child(int signalNumber)
+{
+	if (master2slave[1] >= 0) { close(master2slave[1]); master2slave[1] = -1; }
+	if (g_slavekvm > 0)
+	{
+		kvm_child_reaper *child = (kvm_child_reaper*)malloc(sizeof(kvm_child_reaper));
+		if (child == NULL) { ILIBCRITICALEXIT(254); }
+		child->chain = g_kvmChain;
+		child->pid = g_slavekvm;
+		child->killDeadline = kvm_relay_now_ms() + 1000;
+		g_slavekvm = 0;
+		if (signalNumber != 0) { kill(child->pid, signalNumber); }
+		if (child->chain == NULL || ILibIsChainBeingDestroyed(child->chain)) { kvm_relay_reap_shutdown(child); }
+		else { kvm_relay_reap(child); }
+	}
 }
 
 // Decide whether an unexpected child exit should trigger an automatic re-fork. Reuses g_restartcount
@@ -1714,6 +1770,16 @@ static void kvm_relay_autoRecoverSink(void *sender)
 	ILibDuktape_MeshAgent_RemoteDesktop_KvmAutoRecover(((void**)ILibMemory_Extra(sender))[1]);
 }
 
+static void kvm_relay_forkRetrySink(void *sender)
+{
+	void *reserved;
+	if (!ILibMemory_CanaryOK(sender)) { return; }
+	reserved = ((void**)ILibMemory_Extra(sender))[1];
+	g_kvmForkRetryDispatch = 1;
+	ILibDuktape_MeshAgent_RemoteDesktop_KvmAutoRecover(reserved);
+	g_kvmForkRetryDispatch = 0;
+}
+
 void kvm_relay_brokenPipeSink_2(void *sender)
 {
 	if (!ILibMemory_CanaryOK(sender)) { return; } // pipe was freed before this 4s timer fired
@@ -1731,13 +1797,7 @@ void kvm_relay_brokenPipeSink_2(void *sender)
 void kvm_relay_brokenPipeSink(ILibProcessPipe_Pipe sender)
 {
 	void *chain = ((void**)ILibMemory_Extra(sender))[2];
-
-	if (g_slavekvm != 0)
-	{
-		int r;
-		waitpid(g_slavekvm, &r, WNOHANG);
-		g_slavekvm = 0;
-	}
+	kvm_relay_stop_child(0);
 
 	// The child exited without a deliberate teardown (teardown clears this handler first). Try to
 	// auto-recover the session (logout / user-switch) rather than just reporting the child death.
@@ -1754,19 +1814,19 @@ void kvm_relay_brokenPipeSink(ILibProcessPipe_Pipe sender)
 
 void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid, char* authToken, char *dispid)
 {
-	int r;
-	int count = 0;
 	ILibProcessPipe_Pipe slave_out;
 
-	if (g_slavekvm != 0)
-	{
-		kill(g_slavekvm, SIGKILL);
-		waitpid(g_slavekvm, &r, 0);
-		g_slavekvm = 0;
-	}
+	g_kvmChain = ((ILibChain_Link*)processPipeMgr)->ParentChain;
+	if (paused != 0 || !g_kvmForkRetryDispatch) { g_kvmForkRetryCount = 0; }
+	kvm_relay_stop_child(SIGKILL);
 
-	r = pipe(slave2master);
-	r = pipe(master2slave);
+	if (pipe(slave2master) != 0) { return NULL; }
+	if (pipe(master2slave) != 0)
+	{
+		close(slave2master[0]); close(slave2master[1]);
+		slave2master[0] = slave2master[1] = -1;
+		return NULL;
+	}
 
 	// Two Phase is ok here, because all our fork/vfork calls always happen on the same thread
 	fcntl(slave2master[0], F_SETFD, FD_CLOEXEC);
@@ -1779,14 +1839,22 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 	((void**)ILibMemory_Extra(slave_out))[1] = reserved;
 	((void**)ILibMemory_Extra(slave_out))[2] = ((ILibChain_Link*)processPipeMgr)->ParentChain;
 
-	UNREFERENCED_PARAMETER(r);
-	do
+	g_slavekvm = fork();
+	if (g_slavekvm < 0)
 	{
-		g_slavekvm = fork();
-		if (g_slavekvm == -1 && paused == 0) sleep(2); // If we can't launch the child process, retry in a little while.
+		close(slave2master[1]);
+		close(master2slave[0]); close(master2slave[1]);
+		slave2master[0] = slave2master[1] = master2slave[0] = master2slave[1] = -1;
+		g_slavekvm = 0;
+		if (paused == 0 && ++g_kvmForkRetryCount < KVM_FORK_RETRY_MAX)
+		{
+			ILibLifeTime_AddEx(ILibGetBaseTimer(g_kvmChain), slave_out, KVM_FORK_RETRY_DELAY_MS, kvm_relay_forkRetrySink, NULL);
+			return slave_out;
+		}
+		g_kvmForkRetryCount = 0;
+		ILibProcessPipe_FreePipe(slave_out);
+		return NULL;
 	}
-	while (g_slavekvm == -1 && paused == 0 && ++count < 10);
-	if (g_slavekvm == -1) return(NULL);
 
 	if (g_slavekvm == 0) //slave
 	{
@@ -1813,7 +1881,7 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 		if (dispid != NULL) { setenv("DISPLAY", dispid, 1); }
 
 		kvm_server_mainloop((void*)(intptr_t)uid);
-		exit(0);
+		_exit(0);
 		return(NULL);
 	}
 	else
@@ -1822,9 +1890,11 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 		// path, and stamp the fork time so the auto-recovery burst gate can tell a healthy child (ran a
 		// while) from a fork storm (dies immediately).
 		g_shutdown = 0;
+		g_kvmForkRetryCount = 0;
 		g_lastKvmForkMs = kvm_relay_now_ms();
 		close(slave2master[1]);
 		close(master2slave[0]);
+		slave2master[0] = slave2master[1] = master2slave[0] = -1;
 		if (SLAVELOG != 0) { logFile = fopen("/tmp/master", "w"); }
 		char tmp[255];
 		sprintf_s(tmp, sizeof(tmp), "Child KVM (pid=%d)", g_slavekvm);
@@ -1858,14 +1928,7 @@ void kvm_relay_reset()
 // Clean up the KVM session.
 void kvm_cleanup()
 {
-	int code;
 	g_shutdown = 1;
-
-	if (master2slave[1] != 0 && g_slavekvm != 0) 
-	{ 
-		kill(g_slavekvm, SIGTERM); 
-		waitpid(g_slavekvm, &code, 0);
-		g_slavekvm = 0; 
-	}
+	kvm_relay_stop_child(SIGTERM);
 	g_totalRestartCount = 0;
 }

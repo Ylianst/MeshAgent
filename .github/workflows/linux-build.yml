@@ -49,3 +49,56 @@ jobs:
         with:
           name: meshagent-binaries-arm
           path: ${{ github.workspace }}/meshagent_*
+
+  linux-build-aarch64-glibc:
+    name: aarch64 glibc (ARCHID=32, meshagent_aarch64)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7.0.0
+      # ARCHID=32 is MeshCentral's distributed 64-bit ARM slot (meshagent_aarch64); ARCHID=26
+      # above (meshagent_arm64) is the legacy twin the server marks "replaced by ARCHID 32".
+      # The makefile now gates the Bootlin cross-toolchain behind CROSS=1, so a plain build uses
+      # the container's native gcc and strip (an arm64 container, so the binary is aarch64).
+      # bookworm (glibc 2.36) runs on Pi OS Bookworm and Trixie; Debian 11 bullseye is EOL and 404s.
+      - name: Build aarch64 (ARCHID=32) in an older-glibc container
+        run: |
+          docker run --rm -v "${{ github.workspace }}":/src -w /src debian:bookworm bash -c '
+            apt-get update &&
+            apt-get install -y git build-essential pkg-config libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev &&
+            git config --global --add safe.directory /src &&
+            make -j4 linux ARCHID=32
+          '
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: meshagent-binaries-aarch64
+          path: ${{ github.workspace }}/meshagent_aarch64
+
+  linux-build-armhf-glibc:
+    name: armhf glibc (ARCHID=25, meshagent_armhf, armv6)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7.0.0
+      - name: Enable 32-bit ARM emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm
+      # 32-bit Raspberry Pi (meshagent_armhf). Built armv6 hardfloat in a Raspbian container
+      # under QEMU so the one armhf binary runs on every 32-bit Pi, Zero/1 (armv6) through
+      # 2/3/4 (armv7); a Debian armhf image would be armv7 and skip Pi Zero/1. ARCHID=25
+      # defaults to native gcc when CROSS is unset. bullseye keeps the glibc floor at 2.31.
+      - name: Build armhf (ARCHID=25) in an armv6 container
+        run: |
+          docker run --rm --platform linux/arm/v6 --entrypoint /bin/bash -v "${{ github.workspace }}":/src -w /src balenalib/rpi-raspbian:bullseye -c '
+            apt-get update &&
+            apt-get install -y git build-essential pkg-config libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev &&
+            git config --global --add safe.directory /src &&
+            make -j4 linux ARCHID=25
+          '
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: meshagent-binaries-armhf
+          path: ${{ github.workspace }}/meshagent_armhf

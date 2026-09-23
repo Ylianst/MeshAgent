@@ -971,8 +971,8 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_SignalListener_Immediate(duk_conte
 	switch (((int*)sigbuffer)[1])
 	{
 	case SIGCHLD:
-		s = 0;
-		waitpid(((pid_t*)sigbuffer)[2], &s, 0);
+		// The process owner reaps its child; consuming status here races pipe cleanup.
+		s = ((int*)sigbuffer)[4];
 		ILibDuktape_EventEmitter_SetupEmit(ctx, h, "SIGCHLD");	// [emit][this][SIGCHLD]
 		duk_push_string(ctx, signame);	// [emit][this][SIGTERM][name]
 		duk_push_int(ctx, s);									// [emit][this][SIGCHLD][name][code]
@@ -1038,10 +1038,12 @@ void ILibDuktape_ScriptContainer_Process_SignalListener(int signum, siginfo_t *i
 		switch (signum)
 		{
 			case SIGCHLD:
-				((int*)tmp)[0] = (sizeof(int) * 4);
+				if (info->si_code != CLD_EXITED && info->si_code != CLD_KILLED && info->si_code != CLD_DUMPED) { return; }
+				((int*)tmp)[0] = (sizeof(int) * 5);
 				((int*)tmp)[1] = signum;
 				((pid_t*)tmp)[2] = info->si_pid;
 				((uid_t*)tmp)[3] = info->si_uid;
+				((int*)tmp)[4] = info->si_code == CLD_EXITED ? ((info->si_status & 0xff) << 8) : ((info->si_status & 0x7f) | (info->si_code == CLD_DUMPED ? 0x80 : 0));
 				break;
 			case SIGTERM:
 			default:
@@ -1457,7 +1459,7 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 			ILibChain_Link *k = ILibChain_Link_Allocate(sizeof(ILibChain_Link), 2 * sizeof(void*));
 			((void**)k->ExtraMemoryPtr)[0] = ctx;
 			((void**)k->ExtraMemoryPtr)[1] = emitter->object;
-			k->MetaData = "Signal_Listener";
+			k->MetaData = ILibMemory_SmartAllocate_FromString("Signal_Listener");
 			k->PreSelectHandler = ILibDuktape_ScriptContainer_Process_SignalListener_PreSelect;
 			k->PostSelectHandler = ILibDuktape_ScriptContainer_Process_SignalListener_PostSelect;
 			ILibAddToChain(chain, k);
@@ -1587,47 +1589,26 @@ duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx2(SCRIPT_EN
 size_t ILibDuktape_ScriptContainer_TotalAllocations = 0;
 void *ILibDuktape_ScriptContainer_Engine_malloc(void *udata, duk_size_t size)
 {
-	ILibDuktape_ScriptContainer_TotalAllocations += size;
 	void *ptr = ILibMemory_SmartAllocateEx(size, sizeof(void*));
+	ILibDuktape_ScriptContainer_TotalAllocations += ILibMemory_Size(ptr);
 	((void**)ILibMemory_Extra(ptr))[0] = udata;
 	return(ptr);
 }
 void *ILibDuktape_ScriptContainer_Engine_realloc(void *udata, void *ptr, duk_size_t size)
 {
-	size_t difference = 0;
+	size_t oldSize = ptr == NULL ? 0 : ILibMemory_Size(ptr);
 	if (ptr != NULL) 
 	{ 
-		if (ILibMemory_Size(ptr) > size)
-		{
-			// Memory Shrink
-			difference = ILibMemory_Size(ptr) - size;
-			ILibDuktape_ScriptContainer_TotalAllocations -= difference;
-		}
-		else
-		{
-			difference = size - ILibMemory_Size(ptr);
-			ILibDuktape_ScriptContainer_TotalAllocations += difference;
-		}
-		//if (size == 0)
-		//{
-		//	ILibMemory_Free(ptr);
-		//	ptr = NULL;
-		//}
-		//else
-		{
-			ptr = ILibMemory_SmartReAllocate(ptr, size);
-		}
+		ptr = ILibMemory_SmartReAllocate(ptr, size);
 	}
 	else
 	{
-		//if (size > 0)
-		{
-			ptr = ILibMemory_SmartAllocateEx(size, sizeof(void*));
-			((void**)ILibMemory_Extra(ptr))[0] = udata;
-			ILibDuktape_ScriptContainer_TotalAllocations += size;
-		}
+		ptr = ILibMemory_SmartAllocateEx(size, sizeof(void*));
+		((void**)ILibMemory_Extra(ptr))[0] = udata;
 	}
-
+	// The allocator rounds sizes up for alignment; frees use those rounded sizes.
+	ILibDuktape_ScriptContainer_TotalAllocations -= oldSize;
+	ILibDuktape_ScriptContainer_TotalAllocations += ILibMemory_Size(ptr);
 	return(ptr);
 }
 void ILibDuktape_ScriptContainer_Engine_free(void *udata, void *ptr)
@@ -3493,7 +3474,6 @@ duk_ret_t ILibDuktape_ScriptContainer_Exit2(duk_context *ctx)
 	if (ILibIsChainBeingDestroyed(duk_ctx_chain(ctx)) == 0 && master->child != NULL)
 	{
 		ILibProcessPipe_Process p = (ILibProcessPipe_Process)master->child;
-		master->child = NULL;
 		ILibProcessPipe_Process_SoftKill(p);
 	}
 
@@ -3565,26 +3545,29 @@ duk_ret_t ILibDuktape_ScriptContainer_ExecuteString(duk_context *ctx)
 void ILibDuktape_ScriptContainer_ExitSink(ILibProcessPipe_Process sender, int exitCode, void* user)
 {
 	ILibDuktape_ScriptContainer_Master *master = (ILibDuktape_ScriptContainer_Master*)user;
-	if (ILibMemory_CanaryOK(master))
+	if (!ILibMemory_CanaryOK(master)) { return; }
+	master->child = NULL;
+	if (duk_ctx_is_alive(master->ctx) && !duk_ctx_shutting_down(master->ctx))
 	{
 		duk_context *ctx = master->ctx;
+		void *object = master->emitter->object;
 
-		ILibDuktape_EventEmitter_SetupEmit(master->ctx, master->emitter->object, "exit");			// [emit][this][exit]
-		duk_push_int(master->ctx, exitCode);														// [emit][this][exit][code]
-		if (duk_pcall_method(master->ctx, 2) != 0)
+		// Keep the container alive if an exit listener releases its last JavaScript reference.
+		duk_push_heapptr(ctx, object);														// [container]
+		ILibDuktape_EventEmitter_SetupEmit(ctx, object, "exit");						// [container][emit][this][exit]
+		duk_push_int(ctx, exitCode);														// [container][emit][this][exit][code]
+		if (duk_pcall_method(ctx, 2) != 0)
 		{
-			ILibDuktape_Process_UncaughtException(master->ctx);
+			ILibDuktape_Process_UncaughtException(ctx);
 		}
 
-		duk_pop(ctx);
-
-		if (ILibMemory_CanaryOK(master)) { master->child = NULL; }
+		duk_pop_2(ctx);
 	}
 }
 void ILibDuktape_ScriptContainer_StdOutSink_Chain(void *chain, void *user)
 {
 	ILibDuktape_ScriptContainer_Master *master = (ILibDuktape_ScriptContainer_Master*)((void**)user)[0];
-	if (ILibMemory_CanaryOK(master))
+	if (ILibMemory_CanaryOK(master) && duk_ctx_is_alive(master->ctx) && !duk_ctx_shutting_down(master->ctx))
 	{
 		char *buffer = ILibMemory_Extra(user);
 		duk_push_global_object(master->ctx);								// [g]
@@ -3600,10 +3583,8 @@ void ILibDuktape_ScriptContainer_StdOutSink_Chain(void *chain, void *user)
 }
 void ILibDuktape_ScriptContainer_StdOutSink(ILibProcessPipe_Process sender, char *buffer, size_t bufferLen, size_t* bytesConsumed, void* user)
 {
-	buffer[bufferLen] = 0;
-
 	ILibDuktape_ScriptContainer_Master *master = (ILibDuktape_ScriptContainer_Master*)user;
-	if (ILibMemory_CanaryOK(master))
+	if (ILibMemory_CanaryOK(master) && duk_ctx_is_alive(master->ctx) && !duk_ctx_shutting_down(master->ctx))
 	{
 		void *tmp = ILibMemory_SmartAllocateEx(sizeof(void*), bufferLen + 1);
 		((void**)tmp)[0] = master;
@@ -3619,6 +3600,7 @@ void ILibDuktape_ScriptContainer_SendOkSink(ILibProcessPipe_Process sender, void
 void ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread(void *chain, void *user)
 {
 	ILibDuktape_ScriptContainer_Master *master = (ILibDuktape_ScriptContainer_Master*)((void**)user)[0];
+	if (!ILibMemory_CanaryOK(master) || !duk_ctx_is_alive(master->ctx) || duk_ctx_shutting_down(master->ctx)) { return; }
 	char *buffer = (char*)((void**)user)[1];
 	int bufferLen = (int)ILibUnaligned_Read32(buffer);
 	void *ptr;
@@ -3716,6 +3698,11 @@ void ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread(void *chain, void *
 void ILibDuktape_ScriptContainer_StdErrSink(ILibProcessPipe_Process sender, char *buffer, size_t bufferLen, size_t* bytesConsumed, void* user)
 {
 	ILibDuktape_ScriptContainer_Master* master = (ILibDuktape_ScriptContainer_Master*)user;
+	if (!ILibMemory_CanaryOK(master) || !duk_ctx_is_alive(master->ctx) || duk_ctx_shutting_down(master->ctx))
+	{
+		*bytesConsumed = bufferLen;
+		return;
+	}
 	
 	if (bufferLen < 4 || bufferLen < (size_t)(int)ILibUnaligned_Read32(buffer)) { return; }
 	
@@ -3744,10 +3731,13 @@ duk_ret_t ILibDuktape_ScriptContainer_Finalizer(duk_context *ctx)
 	ILibDuktape_ScriptContainer_Master *master = (ILibDuktape_ScriptContainer_Master*)Duktape_GetBuffer(ctx, -1, NULL);
 	if (master->child != NULL)
 	{
+		// Pipe output can still be pending after the JavaScript owner is collected.
+		ILibProcessPipe_Process_UpdateUserObject(master->child, NULL);
 #ifdef WIN32
 		ILibProcessPipe_Process_RemoveHandlers(master->child);
 #endif
 		ILibProcessPipe_Process_SoftKill(master->child);
+		master->child = NULL;
 	}
 	else if (master->PeerChain != NULL)
 	{

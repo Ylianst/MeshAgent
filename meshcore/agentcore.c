@@ -48,6 +48,10 @@ limitations under the License.
 #include <unistd.h>
 #endif
 
+#if defined(__linux__) && defined(__GLIBC__)
+#include <malloc.h>		// malloc_trim (glibc only; MUSL/Alpine has no such symbol): return GC-freed pages to the OS (see MeshAgent_HeapGcTimerSink)
+#endif
+
 #ifdef _OPENBSD
 extern char __agentExecPath[];
 #endif
@@ -371,10 +375,6 @@ char ContainerContextGUID[sizeof(JS_ENGINE_CONTEXT) + 1];
 void MeshServer_ConnectEx(MeshAgentHostContainer *agent);
 int agent_VerifyMeshCertificates(MeshAgentHostContainer *agent);
 void MeshServer_SendJSON(MeshAgentHostContainer* agent, ILibWebClient_StateObject WebStateObject, char *JSON, int JSONLength);
-
-#if defined(_LINKVM) && defined(_POSIX) && !defined(__APPLE__)
-extern void ILibProcessPipe_FreePipe(ILibProcessPipe_Pipe pipeObject);
-#endif
 
 void MeshAgent_sendConsoleText(duk_context *ctx, char *format, ...)
 {
@@ -843,15 +843,19 @@ void ILibDuktape_MeshAgent_Ready(ILibDuktape_EventEmitter *sender, char *eventNa
 }
 #ifdef _LINKVM
 #ifdef WIN32
+typedef struct RemoteDesktop_KVM_WriteState
+{
+	RemoteDesktop_Ptrs *ptrs;
+	size_t bufferLen;
+} RemoteDesktop_KVM_WriteState;
+
 void ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink_Chain(void *chain, void *user)
 {
 	if (user == NULL) { return; }
 
-	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)((void**)ILibMemory_Extra(user))[0];
-	char *buffer = (char*)user;
-	size_t bufferLen = ILibMemory_Size(user);
+	RemoteDesktop_KVM_WriteState *state = (RemoteDesktop_KVM_WriteState*)ILibMemory_Extra(user);
 
-	ILibDuktape_DuplexStream_WriteData(ptrs->stream, buffer, bufferLen);
+	ILibDuktape_DuplexStream_WriteData(state->ptrs->stream, (char*)user, state->bufferLen);
 	ILibMemory_Free(user);
 }
 #endif
@@ -887,9 +891,12 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(char *
 	{
 		if (!ILibIsRunningOnChainThread(duk_ctx_chain(ptrs->ctx)))
 		{
-			char *bstate = ILibMemory_SmartAllocateEx(bufferLen, sizeof(void*));
+			char *bstate = ILibMemory_SmartAllocateEx(bufferLen, sizeof(RemoteDesktop_KVM_WriteState));
+			RemoteDesktop_KVM_WriteState *state = (RemoteDesktop_KVM_WriteState*)ILibMemory_Extra(bstate);
 			memcpy_s(bstate, (size_t)bufferLen, buffer, (size_t)bufferLen);
-			((void**)ILibMemory_Extra(bstate))[0] = ptrs;
+			state->ptrs = ptrs;
+			// Allocation sizes include alignment padding, which is not part of the KVM packet.
+			state->bufferLen = (size_t)bufferLen;
 			ILibChain_RunOnMicrostackThreadEx3(duk_ctx_chain(ptrs->ctx), ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink_Chain, NULL, bstate);
 			return ILibTransport_DoneState_COMPLETE;		// Always returning complete, because we'll let the stream object handle flow control
 		}
@@ -924,16 +931,24 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_WriteSink(ILibDuktap
 	if (((RemoteDesktop_Ptrs*)user)->kvmPipe == NULL)
 	{
 		// Write to AF_UNIX Domain Socket
-		duk_push_external_buffer(stream->writableStream->ctx);														// [ext]
-		duk_config_buffer(stream->writableStream->ctx, -1, buffer, (duk_size_t)bufferLen);
-		duk_push_heapptr(stream->writableStream->ctx, stream->writableStream->obj);									// [ext][rd]
-		duk_get_prop_string(stream->writableStream->ctx, -1, KVM_IPC_SOCKET);										// [ext][rd][IPC]
-		duk_get_prop_string(stream->writableStream->ctx, -1, "write");												// [ext][rd][IPC][write]
-		duk_swap_top(stream->writableStream->ctx, -2);																// [ext][rd][write][this]
-		duk_push_buffer_object(stream->writableStream->ctx, -4, 0, (duk_size_t)bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);// [ext][rd][write][this][buffer]
-		if (duk_pcall_method(stream->writableStream->ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(stream->writableStream->ctx, "Error Writing Data"); }
-																													// [ext][rd][ret]
-		duk_pop_n(stream->writableStream->ctx, 3);																	// ...
+		duk_context *kctx = stream->writableStream->ctx;
+		duk_push_heapptr(kctx, stream->writableStream->obj);															// [rd]
+		duk_get_prop_string(kctx, -1, KVM_IPC_SOCKET);																// [rd][IPC]
+		if (!duk_is_object(kctx, -1))
+		{
+			// Return an error instead of exit if KVM_IPC_SOCKET is also not set. kvm_relay_setup() returns NULL when it cannot reach the user LaunchAgent, so kvmPipe is NULL too, and KVM_IPC_SOCKET is only set for the LoginWindow case.
+			// Prevents reading "write" from an undefined, which stopped the agent with: uncaught: 'cannot read property write of undefined'.
+			duk_pop_2(kctx);																						// ...
+			return ILibTransport_DoneState_ERROR;
+		}
+		duk_push_external_buffer(kctx);																				// [rd][IPC][ext]
+		duk_config_buffer(kctx, -1, buffer, (duk_size_t)bufferLen);
+		duk_get_prop_string(kctx, -2, "write");																		// [rd][IPC][ext][write]
+		duk_dup(kctx, -3);																							// [rd][IPC][ext][write][this]
+		duk_push_buffer_object(kctx, -3, 0, (duk_size_t)bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);						// [rd][IPC][ext][write][this][buffer]
+		if (duk_pcall_method(kctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(kctx, "Error Writing Data"); }
+																													// [rd][IPC][ext][ret]
+		duk_pop_n(kctx, 4);																							// ...
 	}
 	else
 #endif
@@ -1002,9 +1017,13 @@ void ILibDuktape_MeshAgent_RemoteDesktop_PauseSink(ILibDuktape_DuplexStream *sen
 	{
 		duk_push_heapptr(sender->writableStream->ctx, sender->writableStream->obj);									// [rd]
 		duk_get_prop_string(sender->writableStream->ctx, -1, KVM_IPC_SOCKET);										// [rd][IPC]
-		duk_get_prop_string(sender->writableStream->ctx, -1, "pause");												// [rd][IPC][pause]
-		duk_swap_top(sender->writableStream->ctx, -2);																// [rd][pause][this]
-		duk_pcall_method(sender->writableStream->ctx, 0);															// [rd][ret]
+		// Skip if KVM_IPC_SOCKET is also not set, because reading "pause" from an undefined stops the agent the same way as in the write sink.
+		if (duk_is_object(sender->writableStream->ctx, -1))
+		{
+			duk_get_prop_string(sender->writableStream->ctx, -1, "pause");											// [rd][IPC][pause]
+			duk_swap_top(sender->writableStream->ctx, -2);															// [rd][pause][this]
+			duk_pcall_method(sender->writableStream->ctx, 0);														// [rd][ret]
+		}
 		duk_pop_2(sender->writableStream->ctx);																		// ...
 	}
 #endif
@@ -1023,9 +1042,13 @@ void ILibDuktape_MeshAgent_RemoteDesktop_ResumeSink(ILibDuktape_DuplexStream *se
 	{
 		duk_push_heapptr(sender->writableStream->ctx, sender->writableStream->obj);									// [rd]
 		duk_get_prop_string(sender->writableStream->ctx, -1, KVM_IPC_SOCKET);										// [rd][IPC]
-		duk_get_prop_string(sender->writableStream->ctx, -1, "resume");												// [rd][IPC][resume]
-		duk_swap_top(sender->writableStream->ctx, -2);																// [rd][resume][this]
-		duk_pcall_method(sender->writableStream->ctx, 0);															// [rd][ret]
+		// Skip if KVM_IPC_SOCKET is also not set, because reading "resume" from an undefined stops the agent the same way as in the write sink.
+		if (duk_is_object(sender->writableStream->ctx, -1))
+		{
+			duk_get_prop_string(sender->writableStream->ctx, -1, "resume");											// [rd][IPC][resume]
+			duk_swap_top(sender->writableStream->ctx, -2);															// [rd][resume][this]
+			duk_pcall_method(sender->writableStream->ctx, 0);														// [rd][ret]
+		}
 		duk_pop_2(sender->writableStream->ctx);																		// ...
 	}
 #endif
@@ -1367,6 +1390,12 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		else
 		{
 			ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+			if (ptrs->kvmPipe == NULL)
+			{
+				// Only report the failure here. kvm_relay_setup() returns NULL when /tmp/meshagent-kvm-<uid>.sock is still on disk but the user LaunchAgent is stopped, so nothing accepts on it.
+				// The session object stays cached on purpose. The end sink already deletes REMOTE_DESKTOP_STREAM when the tunnel closes, and deleting it here makes that same end sink read a property off undefined and kill the agent the same way.
+				MeshAgent_sendConsoleText(ctx, "KVM: no connection to the user agent for uid %d, is the user service running?", console_uid);
+			}
 		}
 	#else
 		if (TSID != -1) 
@@ -3899,8 +3928,8 @@ void MeshServer_ConnectEx_NetworkError(void *j)
 
 	printf("Network Timeout occurred...\n");
 
+	// OnResponse schedules the retry; a second attempt can reenter proxy discovery.
 	ILibWebClient_CancelRequest(request);
-	MeshServer_ConnectEx(agent);
 }
 void MeshServer_ConnectEx_NetworkError_Cleanup(void *j)
 {
@@ -6215,6 +6244,45 @@ int MeshAgent_System(char *cmd)
 
 #endif
 
+// Duktape's voluntary GC trigger scales with heap size, so a steady stream of short-lived
+// EventEmitter/child_process/ScriptContainer graphs climbs to ever higher plateaus before a
+// sweep runs. The worst offender is MeshCentral's once-a-second getclip clipboard poll during
+// a Desktop session: each poll spawns session-lookup children plus a clipboard read container,
+// all finalizable (so refcounting cannot reclaim them), and that churn outpaces voluntary GC,
+// growing the main agent RSS without bound. Force a mark-and-sweep once
+// the script heap grows past a fixed delta since the last one, so the churn is reclaimed
+// promptly and RSS stays bounded regardless of which object types are involved. The check is a
+// cheap counter comparison; the sweep only runs while the heap is actually growing.
+extern size_t ILibDuktape_ScriptContainer_TotalAllocations;
+static size_t g_meshCoreGcMark = 0;
+#define MESHAGENT_GC_GROWTH_BYTES (1024 * 1024)
+void MeshAgent_HeapGcTimerSink(void *object)
+{
+	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)object;
+	if (agent == NULL || agent->chain == NULL || ILibIsChainBeingDestroyed(agent->chain)) { return; }
+	if (agent->meshCoreCtx != NULL && duk_ctx_is_alive(agent->meshCoreCtx) && !duk_ctx_shutting_down(agent->meshCoreCtx))
+	{
+		size_t total = ILibDuktape_ScriptContainer_TotalAllocations;
+		if (total > g_meshCoreGcMark + MESHAGENT_GC_GROWTH_BYTES)
+		{
+			duk_gc(agent->meshCoreCtx, 0);
+			g_meshCoreGcMark = ILibDuktape_ScriptContainer_TotalAllocations;	// post-sweep baseline
+#if defined(__linux__) && defined(__GLIBC__)
+			// The finalizers duk_gc just ran free large native buffers (child pipe buffers,
+			// readable paused_data). glibc keeps those pages, so return them to the OS or RSS
+			// stays at the high-water mark and still looks like a leak. glibc only: MUSL (Alpine)
+			// has no malloc_trim and hands freed pages back on its own, so it just skips this.
+			malloc_trim(0);
+#endif
+		}
+		else if (total < g_meshCoreGcMark)
+		{
+			g_meshCoreGcMark = total;	// heap shrank (e.g. core restart); re-baseline downward
+		}
+	}
+	ILibLifeTime_AddEx(ILibGetBaseTimer(agent->chain), agent, 2000, MeshAgent_HeapGcTimerSink, NULL);
+}
+
 int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **param)
 {
 	char *startParms = NULL;
@@ -6315,6 +6383,10 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 #endif
 
 	void *reserved[] = { agentHost, &paramLen, param };
+
+	// Keep the script heap bounded against short-lived spawn churn (see MeshAgent_HeapGcTimerSink).
+	g_meshCoreGcMark = 0;
+	ILibLifeTime_AddEx(ILibGetBaseTimer(agentHost->chain), agentHost, 2000, MeshAgent_HeapGcTimerSink, NULL);
 
 	// Check to see if we are running as just a JavaScript Engine
 	if (agentHost->meshCoreCtx_embeddedScript != NULL || (paramLen >= 2 && ILibString_EndsWith(param[1], -1, ".js", 3) != 0) || (paramLen >= 2 && ILibString_EndsWith(param[1], -1, ".zip", 4) != 0))

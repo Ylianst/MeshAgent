@@ -74,97 +74,98 @@ function windows_registry()
         {
             throw ('Opening Registry Key: ' + path + ' => Returned Error: ' + err);
         }
-  
 
-        if (this._AdvApi.RegQueryValueExW(h.Deref(), key ? key : 0, 0, 0, 0, len).Val == 0)
+        try
         {
-            var data = this._marshal.CreateVariable(len.toBuffer().readUInt32LE());
-            if (this._AdvApi.RegQueryValueExW(h.Deref(), key ? key : 0, 0, valType, data, len).Val == 0)
+            if (this._AdvApi.RegQueryValueExW(h.Deref(), key ? key : 0, 0, 0, 0, len).Val == 0)
             {
-                switch (valType.toBuffer().readUInt32LE())
+                var data = this._marshal.CreateVariable(len.toBuffer().readUInt32LE());
+                if (this._AdvApi.RegQueryValueExW(h.Deref(), key ? key : 0, 0, valType, data, len).Val == 0)
                 {
-                    //
-                    // Registry Value Types can be found at:
-                    // https://learn.microsoft.com/en-us/windows/win32/sysinfo/registry-value-types
-                    //
-                    case KEY_DATA_TYPES.REG_DWORD:
-                        retVal = data.toBuffer().readUInt32LE();
-                        break;
-                    case KEY_DATA_TYPES.REG_DWORD_BIG_ENDIAN:
-                        retVal = data.toBuffer().readUInt32BE();
-                        break;
-                    case KEY_DATA_TYPES.REG_SZ:
-                    case KEY_DATA_TYPES.REG_EXPAND_SZ:
-                        retVal = data.Wide2UTF8;
-                        break;
-                    case KEY_DATA_TYPES.REG_BINARY:
-                    default:
-                        retVal = data.toBuffer();
-                        retVal._data = data;
-                        retVal._type = valType.toBuffer().readUInt32LE();
-                        break;
+                    switch (valType.toBuffer().readUInt32LE())
+                    {
+                        //
+                        // Registry Value Types can be found at:
+                        // https://learn.microsoft.com/en-us/windows/win32/sysinfo/registry-value-types
+                        //
+                        case KEY_DATA_TYPES.REG_DWORD:
+                            retVal = data.toBuffer().readUInt32LE();
+                            break;
+                        case KEY_DATA_TYPES.REG_DWORD_BIG_ENDIAN:
+                            retVal = data.toBuffer().readUInt32BE();
+                            break;
+                        case KEY_DATA_TYPES.REG_SZ:
+                        case KEY_DATA_TYPES.REG_EXPAND_SZ:
+                            retVal = data.Wide2UTF8;
+                            break;
+                        case KEY_DATA_TYPES.REG_BINARY:
+                        default:
+                            retVal = data.toBuffer();
+                            retVal._data = data;
+                            retVal._type = valType.toBuffer().readUInt32LE();
+                            break;
+                    }
                 }
             }
+            else
+            {
+                if (key)    // Only throw an exception if an explicit key was specified, becuase it wasn't found. Otherwise, all we know is that a default value wasn't set
+                {
+                    throw ('Not Found');
+                }
+            }
+
+            if (!key)
+            {
+                var result = { subkeys: [], values: [], default: retVal };
+                if (!key && !retVal) { delete result.default; }
+
+                // Enumerate  keys
+                var achClass = this._marshal.CreateVariable(1024);
+                var achKey = this._marshal.CreateVariable(1024);
+                var achValue = this._marshal.CreateVariable(32768);
+                var achValueSize = this._marshal.CreateVariable(4);
+                var nameSize = this._marshal.CreateVariable(4);
+                var achClassSize = this._marshal.CreateVariable(4); achClassSize.toBuffer().writeUInt32LE(1024);
+                var numSubKeys = this._marshal.CreateVariable(4);
+                var numValues = this._marshal.CreateVariable(4);
+                var longestSubkeySize = this._marshal.CreateVariable(4);
+                var longestClassString = this._marshal.CreateVariable(4);
+                var longestValueName = this._marshal.CreateVariable(4);
+                var longestValueData = this._marshal.CreateVariable(4);
+                var securityDescriptor = this._marshal.CreateVariable(4);
+                var lastWriteTime = this._marshal.CreateVariable(8);
+
+                retVal = this._AdvApi.RegQueryInfoKeyW(h.Deref(), achClass, achClassSize, 0,
+                    numSubKeys, longestSubkeySize, longestClassString, numValues,
+                    longestValueName, longestValueData, securityDescriptor, lastWriteTime);
+                if (retVal.Val != 0) { throw ('RegQueryInfoKeyW() returned error: ' + retVal.Val); }
+                for(var i = 0; i < numSubKeys.toBuffer().readUInt32LE(); ++i)
+                {
+                    nameSize.toBuffer().writeUInt32LE(1024);
+                    retVal = this._AdvApi.RegEnumKeyExW(h.Deref(), i, achKey, nameSize, 0, 0, 0, lastWriteTime);
+                    if(retVal.Val == 0)
+                    {
+                        result.subkeys.push(achKey.Wide2UTF8);
+                    }
+                }
+                for (var i = 0; i < numValues.toBuffer().readUInt32LE() ; ++i)
+                {
+                    achValueSize.toBuffer().writeUInt32LE(32768);
+                    if(this._AdvApi.RegEnumValueW(h.Deref(), i, achValue, achValueSize, 0, 0, 0, 0).Val == 0)
+                    {
+                        result.values.push(achValue.Wide2UTF8);
+                    }
+                }
+                return (result);
+            }
+
+            return (retVal);
         }
-        else
+        finally
         {
-            if (key)    // Only throw an exception if an explicit key was specified, becuase it wasn't found. Otherwise, all we know is that a default value wasn't set
-            {
-                this._AdvApi.RegCloseKey(h.Deref());
-                throw ('Not Found');
-            }
-        }
-
-
-
-        if ((path == '' && !key) || !key)
-        {
-            var result = { subkeys: [], values: [], default: retVal };
-            if (!key && !retVal) { delete result.default; }
-
-            // Enumerate  keys
-            var achClass = this._marshal.CreateVariable(1024);
-            var achKey = this._marshal.CreateVariable(1024);
-            var achValue = this._marshal.CreateVariable(32768);
-            var achValueSize = this._marshal.CreateVariable(4);
-            var nameSize = this._marshal.CreateVariable(4); 
-            var achClassSize = this._marshal.CreateVariable(4); achClassSize.toBuffer().writeUInt32LE(1024);
-            var numSubKeys = this._marshal.CreateVariable(4);
-            var numValues = this._marshal.CreateVariable(4);
-            var longestSubkeySize = this._marshal.CreateVariable(4);
-            var longestClassString = this._marshal.CreateVariable(4);
-            var longestValueName = this._marshal.CreateVariable(4);
-            var longestValueData = this._marshal.CreateVariable(4);
-            var securityDescriptor = this._marshal.CreateVariable(4);
-            var lastWriteTime = this._marshal.CreateVariable(8);
-
-            retVal = this._AdvApi.RegQueryInfoKeyW(h.Deref(), achClass, achClassSize, 0,
-                numSubKeys, longestSubkeySize, longestClassString, numValues,
-                longestValueName, longestValueData, securityDescriptor, lastWriteTime);
-            if (retVal.Val != 0) { throw ('RegQueryInfoKeyW() returned error: ' + retVal.Val); }
-            for(var i = 0; i < numSubKeys.toBuffer().readUInt32LE(); ++i)
-            {
-                nameSize.toBuffer().writeUInt32LE(1024);
-                retVal = this._AdvApi.RegEnumKeyExW(h.Deref(), i, achKey, nameSize, 0, 0, 0, lastWriteTime);
-                if(retVal.Val == 0)
-                {
-                    result.subkeys.push(achKey.Wide2UTF8);
-                }
-            }
-            for (var i = 0; i < numValues.toBuffer().readUInt32LE() ; ++i)
-            {
-                achValueSize.toBuffer().writeUInt32LE(32768);
-                if(this._AdvApi.RegEnumValueW(h.Deref(), i, achValue, achValueSize, 0, 0, 0, 0).Val == 0)
-                {
-                    result.values.push(achValue.Wide2UTF8);
-                }
-            }
             this._AdvApi.RegCloseKey(h.Deref());
-            return (result);
         }
-
-        this._AdvApi.RegCloseKey(h.Deref());
-        return (retVal);
     };
 
     // Query the last time the key was modified
@@ -185,10 +186,6 @@ function windows_registry()
         }
 
         var achClass = this._marshal.CreateVariable(1024);
-        var achKey = this._marshal.CreateVariable(1024);
-        var achValue = this._marshal.CreateVariable(32768);
-        var achValueSize = this._marshal.CreateVariable(4);
-        var nameSize = this._marshal.CreateVariable(4);
         var achClassSize = this._marshal.CreateVariable(4); achClassSize.toBuffer().writeUInt32LE(1024);
         var numSubKeys = this._marshal.CreateVariable(4);
         var numValues = this._marshal.CreateVariable(4);
@@ -203,6 +200,7 @@ function windows_registry()
         v = this._AdvApi.RegQueryInfoKeyW(h.Deref(), achClass, achClassSize, 0,
             numSubKeys, longestSubkeySize, longestClassString, numValues,
             longestValueName, longestValueData, securityDescriptor, lastWriteTime);
+        this._AdvApi.RegCloseKey(h.Deref());
         if (v.Val != 0) { throw ('RegQueryInfoKeyW() returned error: ' + v.Val); }
 
         // Convert the time format
@@ -213,63 +211,74 @@ function windows_registry()
 
     this.WriteKey = function WriteKey(hkey, path, key, value)
     {
-        var result;
+        var err;
         var h = this._marshal.CreatePointer();
-
-        // Create the registry key
-        if (this._AdvApi.RegCreateKeyExW(this._marshal.CreatePointer(hkey), this._marshal.CreateVariable(path, { wide: true }), 0, 0, 0, KEY_WRITE, 0, h, 0).Val != 0)
-        {
-            throw ('Error Opening Registry Key: ' + path);
-        }
-
         var data;
         var dataType;
 
-        // Create the value entry
-        switch(typeof(value))
+        try
         {
-            //
-            // Registry Value Types can be found at:
-            // https://learn.microsoft.com/en-us/windows/win32/sysinfo/registry-value-types
-            //
-            case 'boolean':
-                dataType = KEY_DATA_TYPES.REG_DWORD;
-                data = this._marshal.CreateVariable(4);
-                data.toBuffer().writeUInt32LE(value ? 1 : 0);
-                break;
-            case 'number':
-                dataType = KEY_DATA_TYPES.REG_DWORD;
-                data = this._marshal.CreateVariable(4);
-                data.toBuffer().writeUInt32LE(value);
-                break;
-            case 'string':
-                dataType = KEY_DATA_TYPES.REG_SZ;
-                data = this._marshal.CreateVariable(value, { wide: true });
-                break;
-            default:
-                dataType = KEY_DATA_TYPES.REG_BINARY;
-                data = this._marshal.CreateVariable(value.length);
-                value.copy(data.toBuffer());
-                break;
+            switch(typeof(value))
+            {
+                //
+                // Registry Value Types can be found at:
+                // https://learn.microsoft.com/en-us/windows/win32/sysinfo/registry-value-types
+                //
+                case 'boolean':
+                    dataType = KEY_DATA_TYPES.REG_DWORD;
+                    data = this._marshal.CreateVariable(4);
+                    data.toBuffer().writeUInt32LE(value ? 1 : 0);
+                    break;
+                case 'number':
+                    dataType = KEY_DATA_TYPES.REG_DWORD;
+                    data = this._marshal.CreateVariable(4);
+                    data.toBuffer().writeUInt32LE(value);
+                    break;
+                case 'string':
+                    dataType = KEY_DATA_TYPES.REG_SZ;
+                    data = this._marshal.CreateVariable(value, { wide: true });
+                    break;
+                default:
+                    dataType = KEY_DATA_TYPES.REG_BINARY;
+                    data = this._marshal.CreateVariable(value.length);
+                    value.copy(data.toBuffer());
+                    break;
+            }
+        }
+        catch (e)
+        {
+            throw ('Invalid value: ' + e);
         }
 
-        // Save the registry value
-        if (this._AdvApi.RegSetValueExW(h.Deref(), key?this._marshal.CreateVariable(key, { wide: true }):0, 0, dataType, data, data._size).Val != 0)
-        {           
-            this._AdvApi.RegCloseKey(h.Deref());
-            throw ('Error writing reg key: ' + key);
+        // Create the registry key
+        if ((err = this._AdvApi.RegCreateKeyExW(this._marshal.CreatePointer(hkey), this._marshal.CreateVariable(path, { wide: true }), 0, 0, 0, KEY_WRITE, 0, h, 0).Val) != 0)
+        {
+            throw ('Error Opening Registry Key: ' + path + ', error: ' + err);
         }
-        this._AdvApi.RegCloseKey(h.Deref());
+
+        try
+        {
+            // Save the registry value
+            if ((err = this._AdvApi.RegSetValueExW(h.Deref(), key ? this._marshal.CreateVariable(key, { wide: true }) : 0, 0, dataType, data, data._size).Val) != 0)
+            {
+                throw ('Error writing reg key: ' + key + ', error: ' + err);
+            }
+        }
+        finally
+        {
+            this._AdvApi.RegCloseKey(h.Deref());
+        }
     };
 
     // Delete a registry entry
     this.DeleteKey = function DeleteKey(hkey, path, key)
     {
+        var err;
         if(!key)
         {
-            if (this._AdvApi.RegDeleteKeyW(this._marshal.CreatePointer(hkey), this._marshal.CreateVariable(path, { wide: true })).Val != 0)
+            if ((err = this._AdvApi.RegDeleteKeyW(this._marshal.CreatePointer(hkey), this._marshal.CreateVariable(path, { wide: true })).Val) != 0)
             {
-                throw ('Error Deleting Key: ' + path);
+                throw ('Error Deleting Key: ' + path + ', error: ' + err);
             }
         }
         else
@@ -280,12 +289,14 @@ function windows_registry()
             {
                 throw ('Error Opening Registry Key: ' + path);
             }
-            if ((result = this._AdvApi.RegDeleteValueW(h.Deref(), this._marshal.CreateVariable(key, { wide: true })).Val) != 0)
-            {
+            try {
+                if ((err = this._AdvApi.RegDeleteValueW(h.Deref(), this._marshal.CreateVariable(key, { wide: true })).Val) != 0)
+                {
+                    throw ('Error Deleting Value: ' + path + '.' + key + ', error: ' + err);
+                }
+            } finally {
                 this._AdvApi.RegCloseKey(h.Deref());
-                throw ('Error[' + result + '] Deleting Key: ' + path + '.' + key);
             }
-            this._AdvApi.RegCloseKey(h.Deref());
         }
     };
 
@@ -294,6 +305,7 @@ function windows_registry()
     //
     this.usernameToUserKey = function usernameToUserKey(user)
     {
+        var i;
         var domain = null
         if (typeof (user) == 'object' && user.user)
         {

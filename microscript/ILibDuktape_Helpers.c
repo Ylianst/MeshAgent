@@ -345,15 +345,28 @@ char *Duktape_Duplicate_GetStringEx(duk_context *ctx, duk_idx_t i, duk_size_t *l
 }
 int Duktape_GetIntPropertyValue(duk_context *ctx, duk_idx_t i, char* propertyName, int defaultValue)
 {
-	int retVal = defaultValue;
-	if (ctx!=NULL && duk_has_prop_string(ctx, i, propertyName))
+	// Use the int64 function, fixes NaN returning defaultValue instead of 0
+	int64_t v = Duktape_GetInt64PropertyValue(ctx, i, propertyName, defaultValue);
+	return (int)(v > INT_MAX ? INT_MAX : (v < INT_MIN ? INT_MIN : v));
+}
+
+// Duktape_GetIntPropertyValue() restricts to 32 bits, which limits to max 2147483647, while a JS number can be MAX_SAFE_INTEGER=9007199254740991
+// Certain functions (seeking, file position in fs) need larger numbers, so implement the INT64 version for this. Restrict to 64 bits by hand since there is no duk_to_int 64
+int64_t Duktape_GetInt64PropertyValue(duk_context *ctx, duk_idx_t i, char* propertyName, int64_t defaultValue)
+{
+	int64_t retVal = defaultValue;
+	if (ctx != NULL && duk_has_prop_string(ctx, i, propertyName))
 	{
-		duk_get_prop_string(ctx, i, propertyName);
-		if (!duk_is_null_or_undefined(ctx, -1))
+		duk_get_prop_string(ctx, i, propertyName);	// push obj[propertyName] on the stack
+		if (!duk_is_null_or_undefined(ctx, -1))		// -1=stack top
 		{
-			retVal = duk_to_int(ctx, -1);
+			double v = duk_to_number(ctx, -1);		// force string to number
+			if (v != v) { retVal = defaultValue; }	// NaN test, NaN is the only value not equal to itself
+			else if (v >= 9223372036854775808.0) { retVal = INT64_MAX; }	// INT64_MAX+1 as a double to prevent rounding/conversion issues
+			else if (v < INT64_MIN) { retVal = INT64_MIN; }
+			else { retVal = (int64_t)v; }
 		}
-		duk_pop(ctx);
+		duk_pop(ctx);	// remove property from stack
 	}
 	return retVal;
 }
@@ -429,7 +442,7 @@ char* Duktape_GetBuffer(duk_context *ctx, duk_idx_t i, duk_size_t *bufLen)
 	else if (duk_is_buffer(ctx, i))
 	{
 		retVal = (char*)duk_require_buffer(ctx, i, &len);
-		if (ILibMemory_CanaryOK(ILibMemory_FromRaw(retVal)) && ILibMemory_RawSize(ILibMemory_FromRaw(retVal)) == len)
+		if (retVal != NULL && len >= sizeof(ILibMemory_Header) && ILibMemory_CanaryOK(ILibMemory_FromRaw(retVal)) && ILibMemory_RawSize(ILibMemory_FromRaw(retVal)) == len)
 		{
 			retVal = ILibMemory_FromRaw(retVal);
 			if (bufLen != NULL) { *bufLen = ILibMemory_Size(retVal); }
@@ -442,7 +455,7 @@ char* Duktape_GetBuffer(duk_context *ctx, duk_idx_t i, duk_size_t *bufLen)
 	else if(duk_is_buffer_data(ctx, i))
 	{
 		retVal = (char*)duk_require_buffer_data(ctx, i, &len);
-		if (ILibMemory_CanaryOK(ILibMemory_FromRaw(retVal)) && ILibMemory_RawSize(ILibMemory_FromRaw(retVal)) == len)
+		if (retVal != NULL && len >= sizeof(ILibMemory_Header) && ILibMemory_CanaryOK(ILibMemory_FromRaw(retVal)) && ILibMemory_RawSize(ILibMemory_FromRaw(retVal)) == len)
 		{
 			retVal = ILibMemory_FromRaw(retVal);
 			if (bufLen != NULL) { *bufLen = ILibMemory_Size(retVal); }

@@ -205,6 +205,8 @@ typedef struct ILibProcessPipe_Process_Object
 #else
 	pid_t PID;
 	int PTY;
+	int reaped;
+	int exitCode;
 #endif
 	void *userObject;
 	
@@ -383,8 +385,9 @@ ILibProcessPipe_Manager ILibProcessPipe_Manager_Create(void *chain)
 	return retVal;
 }
 
-void ILibProcessPipe_FreePipe(ILibProcessPipe_PipeObject *pipeObject)
+void ILibProcessPipe_FreePipe(ILibProcessPipe_Pipe pipe)
 {
+	ILibProcessPipe_PipeObject *pipeObject = (ILibProcessPipe_PipeObject*)pipe;
 	if (!ILibMemory_CanaryOK(pipeObject)) { return; }
 	ILibMemory_Free(pipeObject->metadata);
 #ifdef WIN32
@@ -537,6 +540,9 @@ void ILibProcessPipe_Process_Destroy(ILibProcessPipe_Process_Object *p)
 	if (!ILibMemory_CanaryOK(p)) { return; }
 
 	if (p->exiting != 0) { return; }
+#ifndef WIN32
+	ILibLifeTime_Remove(ILibGetBaseTimer(p->parent->ChainLink.ParentChain), p);
+#endif
 	if (p->stdIn != NULL) { ILibProcessPipe_FreePipe(p->stdIn); }
 	if (p->stdOut != NULL) { ILibProcessPipe_FreePipe(p->stdOut); }
 	if (p->stdErr != NULL) { ILibProcessPipe_FreePipe(p->stdErr); }
@@ -549,24 +555,40 @@ void ILibProcessPipe_Process_Destroy(ILibProcessPipe_Process_Object *p)
 #ifndef WIN32
 void ILibProcessPipe_Process_BrokenPipeSink_DestroyHandler(void *object)
 {
-	ILibProcessPipe_Process_Destroy((ILibProcessPipe_Process_Object*)object);
+	ILibProcessPipe_Process_Object *p = (ILibProcessPipe_Process_Object*)object;
+	if (!p->reaped)
+	{
+		int status;
+		pid_t result = waitpid(p->PID, &status, WNOHANG);
+		if (result == 0 || (result < 0 && errno == EINTR))
+		{
+			// Closing stdout does not imply the child has finished writing stderr.
+			ILibLifeTime_AddEx(ILibGetBaseTimer(p->parent->ChainLink.ParentChain), p, 50, ILibProcessPipe_Process_BrokenPipeSink_DestroyHandler, NULL);
+			return;
+		}
+		p->reaped = 1;
+		p->exitCode = result < 0 ? -1 : (WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status));
+	}
+	if (p->stdOut != NULL && !p->stdOut->PAUSED) { ILibProcessPipe_Process_ReadHandler(p->stdOut); }
+	if (p->stdErr != NULL && !p->stdErr->PAUSED) { ILibProcessPipe_Process_ReadHandler(p->stdErr); }
+	if (p->exitHandler != NULL) { p->exitHandler(p, p->exitCode, p->userObject); }
+	p->exiting = 0;
+	ILibProcessPipe_Process_Destroy(p);
+}
+void ILibProcessPipe_Process_CheckExit(ILibProcessPipe_Process process)
+{
+	ILibProcessPipe_Process_Object *p = (ILibProcessPipe_Process_Object*)process;
+	if (ILibMemory_CanaryOK(p) && !p->exiting)
+	{
+		p->exiting = 1;
+		ILibLifeTime_Add(ILibGetBaseTimer(p->parent->ChainLink.ParentChain), p, 0, ILibProcessPipe_Process_BrokenPipeSink_DestroyHandler, NULL);
+	}
 }
 void ILibProcessPipe_Process_BrokenPipeSink(ILibProcessPipe_Pipe sender)
 {
-	ILibProcessPipe_Process_Object *p = ((ILibProcessPipe_PipeObject*)sender)->mProcess;
-	int status;
 	if (ILibIsRunningOnChainThread(((ILibProcessPipe_PipeObject*)sender)->manager->ChainLink.ParentChain) != 0)
 	{
-		// This was called from the Reader
-		if (p->exitHandler != NULL)
-		{
-
-			waitpid((pid_t)p->PID, &status, 0);
-			p->exitHandler(p, WEXITSTATUS(status), p->userObject);
-		}
-
-		// Unwind the stack, and destroy the process object
-		ILibLifeTime_Add(ILibGetBaseTimer(p->parent->ChainLink.ParentChain), p, 0, ILibProcessPipe_Process_BrokenPipeSink_DestroyHandler, NULL);
+		ILibProcessPipe_Process_CheckExit(((ILibProcessPipe_PipeObject*)sender)->mProcess);
 	}
 }
 #endif
@@ -580,8 +602,14 @@ void ILibProcessPipe_Process_SoftKill(ILibProcessPipe_Process p)
 	TerminateProcess(j->hProcess, 1067);
 #else
 	int code;
-	kill((pid_t)j->PID, SIGKILL);
-	waitpid((pid_t)j->PID, &code, 0);
+	pid_t result;
+	if (!j->reaped)
+	{
+		kill(j->PID, SIGKILL);
+		do { result = waitpid(j->PID, &code, 0); } while (result < 0 && errno == EINTR);
+		j->reaped = 1;
+		j->exitCode = result < 0 ? -1 : (WIFEXITED(code) ? WEXITSTATUS(code) : 128 + WTERMSIG(code));
+	}
 #endif
 }
 
@@ -1598,7 +1626,7 @@ BOOL ILibProcessPipe_Process_OnExit(void *chain, HANDLE event, ILibWaitHandle_Er
 #endif
 void ILibProcessPipe_Process_UpdateUserObject(ILibProcessPipe_Process module, void *userObj)
 {
-	((ILibProcessPipe_Process_Object*)module)->userObject = userObj;
+	if (ILibMemory_CanaryOK(module)) { ((ILibProcessPipe_Process_Object*)module)->userObject = userObj; }
 }
 #ifdef WIN32
 void ILibProcessPipe_Process_RemoveHandlers(ILibProcessPipe_Process module)
@@ -1619,9 +1647,9 @@ void ILibProcessPipe_Process_AddHandlers(ILibProcessPipe_Process module, int buf
 		j->userObject = user;
 		j->exitHandler = exitHandler;
 
-		if (j->stdOut->metadata == NULL) { j->stdOut->metadata = "process_handle_stdout"; }
-		if (j->stdErr->metadata == NULL) { j->stdOut->metadata = "process_handle_stderr"; }
-		if (j->metadata == NULL) { j->metadata = "process_handle_exit"; }
+		if (j->stdOut->metadata == NULL) { j->stdOut->metadata = ILibMemory_SmartAllocate_FromString("process_handle_stdout"); }
+		if (j->stdErr->metadata == NULL) { j->stdErr->metadata = ILibMemory_SmartAllocate_FromString("process_handle_stderr"); }
+		if (j->metadata == NULL) { j->metadata = ILibMemory_SmartAllocate_FromString("process_handle_exit"); }
 
 		ILibProcessPipe_Process_StartPipeReaderEx(j->stdOut, bufferSize, &ILibProcessPipe_Process_PipeHandler_StdOut, j, stdOut, NULL);
 		ILibProcessPipe_Process_StartPipeReaderEx(j->stdErr, bufferSize, &ILibProcessPipe_Process_PipeHandler_StdOut, j, stdErr, NULL);
@@ -1906,4 +1934,3 @@ DWORD ILibProcessPipe_Process_GetPID(ILibProcessPipe_Process p) { return(p != NU
 pid_t ILibProcessPipe_Process_GetPID(ILibProcessPipe_Process p) { return(p != NULL ? (pid_t)((ILibProcessPipe_Process_Object*)p)->PID : 0); }
 int ILibProcessPipe_Process_GetPTY(ILibProcessPipe_Process p) { return(p != NULL ? ((ILibProcessPipe_Process_Object*)p)->PTY : 0); }
 #endif
-

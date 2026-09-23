@@ -161,6 +161,7 @@
 #	IFADDR_DISABLE							1 = Don't use ifaddrs.h				=> Default is use IFADDR
 #	KVM										1 = KVM Enabled, 0 = KVM Disabled   => Default depends on ARCHID
 #	KVM_ALL_TILES							0 = Normal, 1 = All Tiles			=> Default is Normal Tiling Algorithm
+#	KVMDEBUG								1 = KVM helper trace log			=> Default is disabled (Windows and macOS KVM only)
 #	LEGACY_LD								0 = Standard, 1 = Legacy			=> Default is Standard (CentOS 5.11 requires Legacy)
 #	NET_SEND_FORCE_FRAGMENT					1 = net.send() fragments sends		=> Default is normal send operation
 #	NOTLS									1 = TLS Support Compiled Out		=> Default is TLS Support Compiled In
@@ -236,7 +237,7 @@ MUSL_CC ?= $(shell gcc -dumpmachine 2>/dev/null | grep -q musl && echo gcc || ec
 INCDIRS = -I. -Iopenssl/include -Imicrostack -Imicroscript -Imeshcore -Imeshconsole
 
 # Compiler and linker flags
-CFLAGS ?= -std=gnu99 -g -Wall -D_POSIX -DMICROSTACK_PROXY $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DDUK_USE_DEBUGGER_SUPPORT -DDUK_USE_INTERRUPT_COUNTER -DDUK_USE_DEBUGGER_INSPECT -DDUK_USE_DEBUGGER_PAUSE_UNCAUGHT
+CFLAGS ?= -std=gnu99 -g -Wall -D_POSIX -D_FILE_OFFSET_BITS=64 -DMICROSTACK_PROXY $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DDUK_USE_DEBUGGER_SUPPORT -DDUK_USE_INTERRUPT_COUNTER -DDUK_USE_DEBUGGER_INSPECT -DDUK_USE_DEBUGGER_PAUSE_UNCAUGHT
 LDFLAGS ?= -L. -lpthread -lutil -lm
 CEXTRA = -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -fstack-protector -fno-strict-aliasing
 LDEXTRA = 
@@ -274,12 +275,16 @@ endif
 
 ifeq ($(ARCHID),32)
 ARCHNAME = aarch64
+# CROSS=1 uses the pinned Bootlin toolchain; unset builds with native gcc/strip (the aarch64
+# CI job runs in an arm64 container), so the default strip runs instead of being skipped.
+ifeq ($(CROSS),1)
 export PATH := $(PATH_AARCH64)bin:$(PATH_AARCH64)libexec/gcc/aarch64-buildroot-linux-gnu/5.4.0:$(PATH_AARCH64)aarch64-buildroot-linux-gnu/bin:$(PATH)
 export STAGING_DIR := $(PATH_AARCH64)
-CC = $(PATH_AARCH64)bin/aarch64-linux-gcc 
+CC = $(PATH_AARCH64)bin/aarch64-linux-gcc
 STRIP = $(PATH_AARCH64)bin/aarch64-linux-strip
-CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
 INCDIRS += -I$(PATH_AARCH64)include
+endif
+CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
 KVM = 1
 LMS = 0
 endif
@@ -513,7 +518,9 @@ ifeq ($(CROSS),1)
 endif
 KVM = 1
 LMS = 0
-CEXTRA = -fno-strict-aliasing 
+CEXTRA = -fno-strict-aliasing
+# Bind the pre-2.29 libm symbols so a bullseye-built binary still loads on Buster (glibc 2.28).
+CFLAGS += -include microstack/glibc_compat.h
 endif
 
 # Official Linux ARM 64bit
@@ -698,6 +705,9 @@ endif
 ifeq ($(KVM_ALL_TILES),1)
 CFLAGS += -DKVM_ALL_TILES
 endif
+ifeq ($(KVMDEBUG),1)
+CFLAGS += -DKVMDEBUGENABLED
+endif
 
 ifeq ($(BIGCHAINLOCK),1)
 CFLAGS += -DILIBCHAIN_GLOBAL_LOCK
@@ -837,7 +847,7 @@ $(LIBNAME): $(OBJECTS) $(SOURCES)
 
 # Compile on Raspberry Pi 2/3 with KVM
 pi:
-	$(MAKE) EXENAME="meshagent_pi" CFLAGS="-std=gnu99 -g -Wall -D_POSIX -DMICROSTACK_PROXY -DMICROSTACK_TLS_DETECT -D_LINKVM $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DMESH_AGENTID=25 -D_NOFSWATCHER -D_NOHECI" ADDITIONALSOURCES="$(LINUXKVMSOURCES)" LDFLAGS="-Lopenssl/libstatic/linux/pi -lrt $(LINUXSSL) $(LINUXFLAGS) $(LDFLAGS) $(LDEXTRA) $(DRMLIBS) -ldl"
+	$(MAKE) EXENAME="meshagent_pi" CFLAGS="-std=gnu99 -g -Wall -D_POSIX -D_FILE_OFFSET_BITS=64 -DMICROSTACK_PROXY -DMICROSTACK_TLS_DETECT -D_LINKVM $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DMESH_AGENTID=25 -D_NOFSWATCHER -D_NOHECI" ADDITIONALSOURCES="$(LINUXKVMSOURCES)" LDFLAGS="-Lopenssl/libstatic/linux/pi -lrt $(LINUXSSL) $(LINUXFLAGS) $(LDFLAGS) $(LDEXTRA) $(DRMLIBS) -ldl"
 	strip meshagent_pi
 
 linux:
