@@ -7847,7 +7847,7 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 			node = ILibLinkedList_Remove(node);
 			continue;
 		}
-		if (Temp->ExpirationTick == 0 || Temp->ExpirationTick < CurrentTick)
+		if (Temp->ExpirationTick == 0 || Temp->ExpirationTick <= CurrentTick)
 		{
 			ILibQueue_EnQueue(EventQueue, Temp);
 			node = ILibLinkedList_Remove(node);
@@ -7878,11 +7878,12 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 	}
 	LifeTimeMonitor->ActiveList = NULL;
 
-	// Compute how much time until next trigger
+	// Compute how much time until next trigger. Reread the clock, so the time the callbacks took is not added to the wait
+	CurrentTick = ILibGetUptime();
 	if (LifeTimeMonitor->NextTriggerTick != -1 && *blocktime > (int)(LifeTimeMonitor->NextTriggerTick - CurrentTick))
 	{
-		int delta = (int)(LifeTimeMonitor->NextTriggerTick - CurrentTick);
-		if (delta < 1000) *blocktime = 1000; else *blocktime = delta;
+		long long delta = LifeTimeMonitor->NextTriggerTick - CurrentTick;
+		*blocktime = delta > 0 ? (int)delta : 0;
 	}
 }
 
