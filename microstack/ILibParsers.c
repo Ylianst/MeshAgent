@@ -7847,7 +7847,7 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 			node = ILibLinkedList_Remove(node);
 			continue;
 		}
-		if (Temp->ExpirationTick == 0 || Temp->ExpirationTick < CurrentTick)
+		if (Temp->ExpirationTick == 0 || Temp->ExpirationTick <= CurrentTick)
 		{
 			ILibQueue_EnQueue(EventQueue, Temp);
 			node = ILibLinkedList_Remove(node);
@@ -7878,11 +7878,12 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 	}
 	LifeTimeMonitor->ActiveList = NULL;
 
-	// Compute how much time until next trigger
+	// Compute how much time until next trigger. Reread the clock, so the time the callbacks took is not added to the wait
+	CurrentTick = ILibGetUptime();
 	if (LifeTimeMonitor->NextTriggerTick != -1 && *blocktime > (int)(LifeTimeMonitor->NextTriggerTick - CurrentTick))
 	{
-		int delta = (int)(LifeTimeMonitor->NextTriggerTick - CurrentTick);
-		if (delta < 1000) *blocktime = 1000; else *blocktime = delta;
+		long long delta = LifeTimeMonitor->NextTriggerTick - CurrentTick;
+		*blocktime = delta > 0 ? (int)delta : 0;
 	}
 }
 
@@ -10010,29 +10011,6 @@ long long ILibGetUptime()
 {
 	return(GetTickCount64());
 }
-#elif __APPLE__
-long long ILibGetUptime()
-{
-	int mib[2];
-	size_t size;
-	struct timeval ts;
-	time_t now;
-
-	mib[0] = CTL_KERN;
-	mib[1] = KERN_BOOTTIME;
-	size = sizeof(ts);
-	(void)time(&now);
-	if (sysctl(mib, 2, &ts, &size, NULL, 0) == -1) ILIBCRITICALEXIT(254);
-	return ((long long)(now - ts.tv_sec)) * 1000;
-}
-#elif _MIPS
-long long ILibGetUptime()
-{
-	// On MIPS routers, we just used the current clock. This could messup if the router's clock is changed.
-	time_t t;
-	time(&t);
-	return (t * 1000);
-}
 #elif NACL
 //need to impl
 long long ILibGetUptime()
@@ -10047,9 +10025,13 @@ long long ILibGetUptime()
 long long ILibGetUptime()
 {
 	struct timespec ts; 
-	memset(&ts, 0, sizeof ts);
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return (((long long)ts.tv_sec) * 1000) + ((((long long)ts.tv_nsec) / 1000) % 1000);
+	if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+	{
+		struct timeval tv;
+		gettimeofday(&tv, NULL);
+		return (((long long)tv.tv_sec) * 1000) + (((long long)tv.tv_usec) / 1000);
+	}
+	return (((long long)ts.tv_sec) * 1000) + (((long long)ts.tv_nsec) / 1000000);
 }
 #endif
 
