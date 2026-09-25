@@ -1,0 +1,60 @@
+name: Agent Release
+
+on:
+  push:
+    tags:
+      - '*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a version tag
+        shell: bash
+        run: |
+          [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$ ]] || exit 1
+  linux:
+    needs: validate
+    uses: ./.github/workflows/linux-build.yml
+  windows:
+    needs: validate
+    uses: ./.github/workflows/windows-build.yml
+  macos:
+    needs: validate
+    uses: ./.github/workflows/mac-build.yml
+  freebsd:
+    needs: validate
+    uses: ./.github/workflows/freebsd-build.yml
+  release:
+    needs: [linux, windows, macos, freebsd]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: meshagent-*
+          path: release
+          merge-multiple: true
+      - name: Verify release files and write checksums
+        run: node .github/scripts/agent-release.js manifest "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" release
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          flags=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" release/* --verify-tag --draft --generate-notes --title "$GITHUB_REF_NAME" "${flags[@]}"

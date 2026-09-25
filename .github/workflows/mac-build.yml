@@ -2,7 +2,12 @@ name: macOS Build
 run-name: Build MacOS versions of MeshAgent
 on:
   push:
+    branches: ['**']
   pull_request:
+  workflow_call:
+permissions:
+  contents: read
+
 jobs:
   macos-build-arm64:
     name: macOS arm64 (ARCHID=29)
@@ -15,8 +20,9 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v7.0.1
         with:
+          if-no-files-found: error
           name: meshagent-macos-arm64
-          path: ${{ github.workspace }}/meshagent_*
+          path: ${{ github.workspace }}/meshagent_osx-arm-64
 
   macos-build-x86_64:
     name: macOS x86_64 (ARCHID=16)
@@ -29,5 +35,27 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v7.0.1
         with:
+          if-no-files-found: error
           name: meshagent-macos-x86_64
-          path: ${{ github.workspace }}/meshagent_*
+          path: ${{ github.workspace }}/meshagent_osx-x86-64
+
+  macos-build-universal:
+    name: macOS universal installer
+    needs: [macos-build-arm64, macos-build-x86_64]
+    runs-on: macos-15
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: meshagent-macos-*
+          path: binaries
+          merge-multiple: true
+      - name: Combine architectures
+        run: |
+          lipo -create binaries/meshagent_osx-arm-64 binaries/meshagent_osx-x86-64 -output meshagent_osx-universal-64
+          lipo -verify_arch arm64 x86_64 meshagent_osx-universal-64
+          codesign --force --sign - meshagent_osx-universal-64
+      - uses: actions/upload-artifact@v7
+        with:
+          name: meshagent-macos-universal
+          path: meshagent_osx-universal-64
+          if-no-files-found: error
