@@ -52,7 +52,7 @@ jobs:
       - name: Combine architectures
         run: |
           lipo -create binaries/meshagent_osx-arm-64 binaries/meshagent_osx-x86-64 -output meshagent_osx-universal-64
-          lipo -verify_arch arm64 x86_64 meshagent_osx-universal-64
+          lipo meshagent_osx-universal-64 -verify_arch arm64 x86_64
           codesign --force --sign - meshagent_osx-universal-64
       - uses: actions/upload-artifact@v7
         with:
