@@ -1,0 +1,41 @@
+name: Migrate bundled agents
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Existing binaries to preserve as release assets
+        type: choice
+        options: [legacy, september]
+        default: legacy
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-migration-${{ inputs.profile }}
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Restore and verify original files
+        env:
+          PROFILE: ${{ inputs.profile }}
+        run: node .github/scripts/agent-release.js migrate "$GITHUB_REPOSITORY" "$PROFILE" release
+      - name: Create draft migration release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          tag=$(jq -r '.releases[0].tag' release/agent-release.json)
+          flags=()
+          if [[ "$tag" == testing-* ]]; then flags+=(--prerelease); fi
+          printf '%s\n' 'Preserved binaries from MeshCentral 1.2.6. These files have not been rebuilt. Source paths and checksums are recorded in agent-release.json.' > release-notes.txt
+          gh release create "$tag" release/* --target "$GITHUB_SHA" --draft --latest=false --title "$tag" --notes-file release-notes.txt "${flags[@]}"
