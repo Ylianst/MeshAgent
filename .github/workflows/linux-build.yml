@@ -22,14 +22,22 @@ jobs:
           sudo apt-get install -y linux-libc-dev:i386 libc6-dev-i386 libjpeg62-dev:i386 &&
           sudo apt-get install -y libc6-armel-cross libc6-dev-armel-cross binutils-arm-linux-gnueabi libncurses5-dev gcc-arm-linux-gnueabihf &&
           sudo apt-get install -y libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev
+      # -march=x86-64 in BOOTLIN_CC64 because Bootlin's x86-64 toolchain defaults to -march=corei7
+      # -idirafter for the proper searchpath order
+      - name: Install Bootlin x86 glibc 2.27 toolchains
+        run: |
+          curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/x86-i686/tarballs/x86-i686--glibc--stable-2018.11-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP" &&
+          curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/x86-64-core-i7/tarballs/x86-64-core-i7--glibc--stable-2018.11-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP" &&
+          echo "BOOTLIN_CC32=$RUNNER_TEMP/x86-i686--glibc--stable-2018.11-1/bin/i686-linux-gcc -idirafter /usr/include/i386-linux-gnu -idirafter /usr/include" >> "$GITHUB_ENV" &&
+          echo "BOOTLIN_CC64=$RUNNER_TEMP/x86-64-core-i7--glibc--stable-2018.11-1/bin/x86_64-linux-gcc -march=x86-64 -mtune=generic -idirafter /usr/include/x86_64-linux-gnu -idirafter /usr/include" >> "$GITHUB_ENV"
       - name: Build 32 Bit Linux
-        run: make -j4 linux ARCHID=5 && make clean
+        run: make -j4 linux ARCHID=5 CC="$BOOTLIN_CC32" && make clean
       - name: Build 64 Bit Linux
-        run: make -j4 linux ARCHID=6 && make clean
+        run: make -j4 linux ARCHID=6 CC="$BOOTLIN_CC64" && make clean
       - name: Build 32 Bit NOKVM Linux
-        run: make -j4 linux ARCHID=19 && make clean
+        run: make -j4 linux ARCHID=19 CC="$BOOTLIN_CC32" && make clean
       - name: Build 64 Bit NOKVM Linux
-        run: make -j4 linux ARCHID=20 && make clean
+        run: make -j4 linux ARCHID=20 CC="$BOOTLIN_CC64" && make clean
       - name: Build 64 Bit Alpine Linux
         run: make -j4 linux ARCHID=33 && make clean
       - name: Upload Artifacts
@@ -40,16 +48,21 @@ jobs:
           path: ${{ github.workspace }}/meshagent_*
 
   linux-build-arm:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository code
         uses: actions/checkout@v7.0.0
       - name: Install Packages
         run: |
           sudo apt clean all && sudo apt update &&
-          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev build-essential
+          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev
+      - name: Install Bootlin aarch64 glibc 2.27 toolchain
+        run: |
+          curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--glibc--stable-2018.11-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP" &&
+          echo "$RUNNER_TEMP/aarch64--glibc--stable-2018.11-1/aarch64-buildroot-linux-gnu/bin" >> "$GITHUB_PATH" &&
+          echo "BOOTLIN_CC=$RUNNER_TEMP/aarch64--glibc--stable-2018.11-1/bin/aarch64-linux-gcc -idirafter $GITHUB_WORKSPACE/lib-jpeg-turbo/includes -idirafter /usr/include" >> "$GITHUB_ENV"
       - name: Build ARM64 Linux
-        run: make -j4 linux ARCHID=26 && make clean
+        run: make -j4 linux ARCHID=26 CC="$BOOTLIN_CC" && make clean
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7.0.1
         with:
@@ -59,23 +72,21 @@ jobs:
 
   linux-build-aarch64-glibc:
     name: aarch64 glibc (ARCHID=32, meshagent_aarch64)
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository code
         uses: actions/checkout@v7.0.0
-      # ARCHID=32 is MeshCentral's distributed 64-bit ARM slot (meshagent_aarch64); ARCHID=26
-      # above (meshagent_arm64) is the legacy twin the server marks "replaced by ARCHID 32".
-      # The makefile now gates the Bootlin cross-toolchain behind CROSS=1, so a plain build uses
-      # the container's native gcc and strip (an arm64 container, so the binary is aarch64).
-      # bookworm (glibc 2.36) runs on Pi OS Bookworm and Trixie; Debian 11 bullseye is EOL and 404s.
-      - name: Build aarch64 (ARCHID=32) in an older-glibc container
+      - name: Install Packages
         run: |
-          docker run --rm -v "${{ github.workspace }}":/src -w /src debian:bookworm bash -c '
-            apt-get update &&
-            apt-get install -y git build-essential pkg-config libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev &&
-            git config --global --add safe.directory /src &&
-            make -j4 linux ARCHID=32
-          '
+          sudo apt clean all && sudo apt update &&
+          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev
+      - name: Install Bootlin aarch64 glibc 2.27 toolchain
+        run: |
+          curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--glibc--stable-2018.11-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP" &&
+          echo "$RUNNER_TEMP/aarch64--glibc--stable-2018.11-1/aarch64-buildroot-linux-gnu/bin" >> "$GITHUB_PATH" &&
+          echo "BOOTLIN_CC=$RUNNER_TEMP/aarch64--glibc--stable-2018.11-1/bin/aarch64-linux-gcc -idirafter $GITHUB_WORKSPACE/lib-jpeg-turbo/includes -idirafter /usr/include" >> "$GITHUB_ENV"
+      - name: Build aarch64 (ARCHID=32)
+        run: make -j4 linux ARCHID=32 CC="$BOOTLIN_CC"
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7.0.1
         with:
@@ -83,28 +94,25 @@ jobs:
           name: meshagent-binaries-aarch64
           path: ${{ github.workspace }}/meshagent_aarch64
 
+  # 32-bit Raspberry Pi. Bootlin's armv6-eabihf toolchain defaults to -mcpu=arm1176jzf-s with hard-float VFP,
+  # so this armhf binary runs on every 32-bit Pi, Zero/1 (armv6) through 2/3/4 (armv7).
   linux-build-armhf-glibc:
     name: armhf glibc (ARCHID=25, meshagent_armhf, armv6)
     runs-on: ubuntu-24.04
     steps:
       - name: Check out repository code
         uses: actions/checkout@v7.0.0
-      - name: Enable 32-bit ARM emulation
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm
-      # 32-bit Raspberry Pi (meshagent_armhf). Built armv6 hardfloat in a Raspbian container
-      # under QEMU so the one armhf binary runs on every 32-bit Pi, Zero/1 (armv6) through
-      # 2/3/4 (armv7); a Debian armhf image would be armv7 and skip Pi Zero/1. ARCHID=25
-      # defaults to native gcc when CROSS is unset. bullseye keeps the glibc floor at 2.31.
-      - name: Build armhf (ARCHID=25) in an armv6 container
+      - name: Install Packages
         run: |
-          docker run --rm --platform linux/arm/v6 --entrypoint /bin/bash -v "${{ github.workspace }}":/src -w /src balenalib/rpi-raspbian:bullseye -c '
-            apt-get update &&
-            apt-get install -y git build-essential pkg-config libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev &&
-            git config --global --add safe.directory /src &&
-            make -j4 linux ARCHID=25
-          '
+          sudo apt clean all && sudo apt update &&
+          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev
+      - name: Install Bootlin armv6 hard-float glibc 2.27 toolchain
+        run: |
+          curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/armv6-eabihf/tarballs/armv6-eabihf--glibc--stable-2018.11-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP" &&
+          echo "$RUNNER_TEMP/armv6-eabihf--glibc--stable-2018.11-1/arm-buildroot-linux-gnueabihf/bin" >> "$GITHUB_PATH" &&
+          echo "BOOTLIN_CC=$RUNNER_TEMP/armv6-eabihf--glibc--stable-2018.11-1/bin/arm-linux-gcc -idirafter $GITHUB_WORKSPACE/lib-jpeg-turbo/includes -idirafter /usr/include" >> "$GITHUB_ENV"
+      - name: Build armhf (ARCHID=25)
+        run: make -j4 linux ARCHID=25 CC="$BOOTLIN_CC"
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7.0.1
         with:
