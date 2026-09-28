@@ -24,12 +24,12 @@ jobs:
           sudo apt-get install -y libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev
       # -march=x86-64 in BOOTLIN_CC64 because Bootlin's x86-64 toolchain defaults to -march=corei7
       # -idirafter for the proper searchpath order
-      - name: Install Bootlin x86 glibc 2.27 toolchains
+      - name: Install Bootlin x86 glibc 2.24 toolchains
         run: |
-          curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/x86-i686/tarballs/x86-i686--glibc--stable-2018.11-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP" &&
-          curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/x86-64-core-i7/tarballs/x86-64-core-i7--glibc--stable-2018.11-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP" &&
-          echo "BOOTLIN_CC32=$RUNNER_TEMP/x86-i686--glibc--stable-2018.11-1/bin/i686-linux-gcc -idirafter /usr/include/i386-linux-gnu -idirafter /usr/include" >> "$GITHUB_ENV" &&
-          echo "BOOTLIN_CC64=$RUNNER_TEMP/x86-64-core-i7--glibc--stable-2018.11-1/bin/x86_64-linux-gcc -march=x86-64 -mtune=generic -idirafter /usr/include/x86_64-linux-gnu -idirafter /usr/include" >> "$GITHUB_ENV"
+          curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/x86-i686/tarballs/x86-i686--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP" &&
+          curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/x86-64-core-i7/tarballs/x86-64-core-i7--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP" &&
+          echo "BOOTLIN_CC32=$RUNNER_TEMP/x86-i686--glibc--stable/bin/i686-linux-gcc -idirafter /usr/include/i386-linux-gnu -idirafter /usr/include" >> "$GITHUB_ENV" &&
+          echo "BOOTLIN_CC64=$RUNNER_TEMP/x86-64-core-i7--glibc--stable/bin/x86_64-linux-gcc -march=x86-64 -mtune=generic -idirafter /usr/include/x86_64-linux-gnu -idirafter /usr/include" >> "$GITHUB_ENV"
       - name: Build 32 Bit Linux
         run: make -j4 linux ARCHID=5 CC="$BOOTLIN_CC32" && make clean
       - name: Build 64 Bit Linux
@@ -56,11 +56,11 @@ jobs:
         run: |
           sudo apt clean all && sudo apt update &&
           sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev
-      - name: Install Bootlin aarch64 glibc 2.27 toolchain
+      - name: Install Bootlin aarch64 glibc 2.24 toolchain
         run: |
-          curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--glibc--stable-2018.11-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP" &&
-          echo "$RUNNER_TEMP/aarch64--glibc--stable-2018.11-1/aarch64-buildroot-linux-gnu/bin" >> "$GITHUB_PATH" &&
-          echo "BOOTLIN_CC=$RUNNER_TEMP/aarch64--glibc--stable-2018.11-1/bin/aarch64-linux-gcc -idirafter $GITHUB_WORKSPACE/lib-jpeg-turbo/includes -idirafter /usr/include" >> "$GITHUB_ENV"
+          curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP" &&
+          echo "$RUNNER_TEMP/aarch64--glibc--stable/aarch64-buildroot-linux-gnu/bin" >> "$GITHUB_PATH" &&
+          echo "BOOTLIN_CC=$RUNNER_TEMP/aarch64--glibc--stable/bin/aarch64-linux-gcc -idirafter $GITHUB_WORKSPACE/lib-jpeg-turbo/includes -idirafter /usr/include" >> "$GITHUB_ENV"
       - name: Build ARM64 Linux
         run: make -j4 linux ARCHID=26 CC="$BOOTLIN_CC" && make clean
       - name: Upload Artifacts
@@ -80,11 +80,11 @@ jobs:
         run: |
           sudo apt clean all && sudo apt update &&
           sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev
-      - name: Install Bootlin aarch64 glibc 2.27 toolchain
+      - name: Install Bootlin aarch64 glibc 2.24 toolchain
         run: |
-          curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--glibc--stable-2018.11-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP" &&
-          echo "$RUNNER_TEMP/aarch64--glibc--stable-2018.11-1/aarch64-buildroot-linux-gnu/bin" >> "$GITHUB_PATH" &&
-          echo "BOOTLIN_CC=$RUNNER_TEMP/aarch64--glibc--stable-2018.11-1/bin/aarch64-linux-gcc -idirafter $GITHUB_WORKSPACE/lib-jpeg-turbo/includes -idirafter /usr/include" >> "$GITHUB_ENV"
+          curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP" &&
+          echo "$RUNNER_TEMP/aarch64--glibc--stable/aarch64-buildroot-linux-gnu/bin" >> "$GITHUB_PATH" &&
+          echo "BOOTLIN_CC=$RUNNER_TEMP/aarch64--glibc--stable/bin/aarch64-linux-gcc -idirafter $GITHUB_WORKSPACE/lib-jpeg-turbo/includes -idirafter /usr/include" >> "$GITHUB_ENV"
       - name: Build aarch64 (ARCHID=32)
         run: make -j4 linux ARCHID=32 CC="$BOOTLIN_CC"
       - name: Upload Artifacts
@@ -106,11 +106,11 @@ jobs:
         run: |
           sudo apt clean all && sudo apt update &&
           sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev
-      - name: Install Bootlin armv6 hard-float glibc 2.27 toolchain
+      - name: Install Bootlin armv6 hard-float glibc 2.24 toolchain
         run: |
-          curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/armv6-eabihf/tarballs/armv6-eabihf--glibc--stable-2018.11-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP" &&
-          echo "$RUNNER_TEMP/armv6-eabihf--glibc--stable-2018.11-1/arm-buildroot-linux-gnueabihf/bin" >> "$GITHUB_PATH" &&
-          echo "BOOTLIN_CC=$RUNNER_TEMP/armv6-eabihf--glibc--stable-2018.11-1/bin/arm-linux-gcc -idirafter $GITHUB_WORKSPACE/lib-jpeg-turbo/includes -idirafter /usr/include" >> "$GITHUB_ENV"
+          curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/armv6-eabihf/tarballs/armv6-eabihf--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP" &&
+          echo "$RUNNER_TEMP/armv6-eabihf--glibc--stable/arm-buildroot-linux-gnueabihf/bin" >> "$GITHUB_PATH" &&
+          echo "BOOTLIN_CC=$RUNNER_TEMP/armv6-eabihf--glibc--stable/bin/arm-linux-gcc -idirafter $GITHUB_WORKSPACE/lib-jpeg-turbo/includes -idirafter /usr/include" >> "$GITHUB_ENV"
       - name: Build armhf (ARCHID=25)
         run: make -j4 linux ARCHID=25 CC="$BOOTLIN_CC"
       - name: Upload Artifacts
