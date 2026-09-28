@@ -20,7 +20,6 @@ jobs:
           sudo apt clean all && sudo apt update && 
           sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg62-dev build-essential musl-tools &&
           sudo apt-get install -y linux-libc-dev:i386 libc6-dev-i386 libjpeg62-dev:i386 &&
-          sudo apt-get install -y libc6-armel-cross libc6-dev-armel-cross binutils-arm-linux-gnueabi libncurses5-dev gcc-arm-linux-gnueabihf &&
           sudo apt-get install -y libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev
       # -march=x86-64 in BOOTLIN_CC64 because Bootlin's x86-64 toolchain defaults to -march=corei7
       # -idirafter for the proper searchpath order
@@ -48,6 +47,7 @@ jobs:
           path: ${{ github.workspace }}/meshagent_*
 
   linux-build-arm:
+    name: arm glibc (ARCHID=26, 32 and 25)
     runs-on: ubuntu-24.04
     steps:
       - name: Check out repository code
@@ -56,64 +56,33 @@ jobs:
         run: |
           sudo apt clean all && sudo apt update &&
           sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev
-      - name: Install Bootlin aarch64 glibc 2.24 toolchain
+      - name: Install Bootlin aarch64 and armv6 hard-float glibc 2.24 toolchains
         run: |
           curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP" &&
-          echo "$RUNNER_TEMP/aarch64--glibc--stable/aarch64-buildroot-linux-gnu/bin" >> "$GITHUB_PATH" &&
-          echo "BOOTLIN_CC=$RUNNER_TEMP/aarch64--glibc--stable/bin/aarch64-linux-gcc -idirafter $GITHUB_WORKSPACE/lib-jpeg-turbo/includes -idirafter /usr/include" >> "$GITHUB_ENV"
-      - name: Build ARM64 Linux
-        run: make -j4 linux ARCHID=26 CC="$BOOTLIN_CC" && make clean
-      - name: Upload Artifacts
+          curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/armv6-eabihf/tarballs/armv6-eabihf--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP" &&
+          echo "BOOTLIN_CC_AARCH64=$RUNNER_TEMP/aarch64--glibc--stable/bin/aarch64-linux-gcc -idirafter $GITHUB_WORKSPACE/lib-jpeg-turbo/includes -idirafter /usr/include" >> "$GITHUB_ENV" &&
+          echo "BOOTLIN_CC_ARMV6=$RUNNER_TEMP/armv6-eabihf--glibc--stable/bin/arm-linux-gcc -idirafter $GITHUB_WORKSPACE/lib-jpeg-turbo/includes -idirafter /usr/include" >> "$GITHUB_ENV"
+      - name: Build ARM64 Linux (ARCHID=26)
+        run: PATH="$RUNNER_TEMP/aarch64--glibc--stable/aarch64-buildroot-linux-gnu/bin:$PATH" make -j4 linux ARCHID=26 CC="$BOOTLIN_CC_AARCH64" && make clean
+      - name: Build aarch64 (ARCHID=32)
+        run: PATH="$RUNNER_TEMP/aarch64--glibc--stable/aarch64-buildroot-linux-gnu/bin:$PATH" make -j4 linux ARCHID=32 CC="$BOOTLIN_CC_AARCH64" && make clean
+      # 32-bit Raspberry Pi. Bootlin's armv6-eabihf toolchain defaults to -mcpu=arm1176jzf-s with hard-float VFP,
+      # so this armhf binary runs on every 32-bit Pi, Zero/1 (armv6) through 2/3/4 (armv7).
+      - name: Build armhf (ARCHID=25)
+        run: PATH="$RUNNER_TEMP/armv6-eabihf--glibc--stable/arm-buildroot-linux-gnueabihf/bin:$PATH" make -j4 linux ARCHID=25 CC="$BOOTLIN_CC_ARMV6" && make clean
+      - name: Upload ARM64 Artifacts
         uses: actions/upload-artifact@v7.0.1
         with:
           if-no-files-found: error
           name: meshagent-binaries-arm
-          path: ${{ github.workspace }}/meshagent_*
-
-  linux-build-aarch64-glibc:
-    name: aarch64 glibc (ARCHID=32, meshagent_aarch64)
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Check out repository code
-        uses: actions/checkout@v7.0.0
-      - name: Install Packages
-        run: |
-          sudo apt clean all && sudo apt update &&
-          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev
-      - name: Install Bootlin aarch64 glibc 2.24 toolchain
-        run: |
-          curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP" &&
-          echo "$RUNNER_TEMP/aarch64--glibc--stable/aarch64-buildroot-linux-gnu/bin" >> "$GITHUB_PATH" &&
-          echo "BOOTLIN_CC=$RUNNER_TEMP/aarch64--glibc--stable/bin/aarch64-linux-gcc -idirafter $GITHUB_WORKSPACE/lib-jpeg-turbo/includes -idirafter /usr/include" >> "$GITHUB_ENV"
-      - name: Build aarch64 (ARCHID=32)
-        run: make -j4 linux ARCHID=32 CC="$BOOTLIN_CC"
-      - name: Upload Artifacts
+          path: ${{ github.workspace }}/meshagent_arm64
+      - name: Upload aarch64 Artifacts
         uses: actions/upload-artifact@v7.0.1
         with:
           if-no-files-found: error
           name: meshagent-binaries-aarch64
           path: ${{ github.workspace }}/meshagent_aarch64
-
-  # 32-bit Raspberry Pi. Bootlin's armv6-eabihf toolchain defaults to -mcpu=arm1176jzf-s with hard-float VFP,
-  # so this armhf binary runs on every 32-bit Pi, Zero/1 (armv6) through 2/3/4 (armv7).
-  linux-build-armhf-glibc:
-    name: armhf glibc (ARCHID=25, meshagent_armhf, armv6)
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Check out repository code
-        uses: actions/checkout@v7.0.0
-      - name: Install Packages
-        run: |
-          sudo apt clean all && sudo apt update &&
-          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev
-      - name: Install Bootlin armv6 hard-float glibc 2.24 toolchain
-        run: |
-          curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/armv6-eabihf/tarballs/armv6-eabihf--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP" &&
-          echo "$RUNNER_TEMP/armv6-eabihf--glibc--stable/arm-buildroot-linux-gnueabihf/bin" >> "$GITHUB_PATH" &&
-          echo "BOOTLIN_CC=$RUNNER_TEMP/armv6-eabihf--glibc--stable/bin/arm-linux-gcc -idirafter $GITHUB_WORKSPACE/lib-jpeg-turbo/includes -idirafter /usr/include" >> "$GITHUB_ENV"
-      - name: Build armhf (ARCHID=25)
-        run: make -j4 linux ARCHID=25 CC="$BOOTLIN_CC"
-      - name: Upload Artifacts
+      - name: Upload armhf Artifacts
         uses: actions/upload-artifact@v7.0.1
         with:
           if-no-files-found: error
