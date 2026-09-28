@@ -1,0 +1,54 @@
+name: OpenBSD Build
+run-name: Build OpenBSD versions of MeshAgent
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      openbsd: ${{ steps.chk.outputs.openbsd }}
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7.0.0
+        with:
+          fetch-depth: 0
+      # A pull request compares against its base branch, a push against the commit before it.
+      - id: chk
+        name: Find the builds this change needs
+        run: bash .github/scripts/changed-targets.sh "${{ github.event.pull_request.base.sha || github.event.before }}"
+
+  openbsd-build-x86-64:
+    name: OpenBSD x86_64 (ARCHID=37)
+    needs: changes
+    if: needs.changes.outputs.openbsd == 'true'
+    runs-on: ubuntu-24.04
+    env:
+      OPENBSD_REL: "7.9"
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7.0.0
+      - name: Install clang and lld
+        run: sudo apt-get -qq update && sudo apt-get -qq -y install clang lld
+      # The sysroot is streamed from about 400 MB of OpenBSD sets, so it is cached per release and fetched only once.
+      - name: Restore the OpenBSD sysroot
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/openbsd-sysroot
+          key: openbsd-sysroot-${{ env.OPENBSD_REL }}-${{ hashFiles('.github/scripts/fetch-openbsd-sysroot.sh') }}
+      - name: Fetch the OpenBSD sysroot
+        run: bash .github/scripts/fetch-openbsd-sysroot.sh "$OPENBSD_REL" "$RUNNER_TEMP/openbsd-sysroot"
+      - name: Build meshagent (x86_64)
+        run: |
+          OSSL="$GITHUB_WORKSPACE/openssl/1.1.1w"
+          make -j4 openbsd ARCHID=37 CC="clang -target x86_64-unknown-openbsd$OPENBSD_REL --sysroot=$RUNNER_TEMP/openbsd-sysroot -fuse-ld=lld -Wno-date-time -Wno-unused-command-line-argument -I$OSSL/openbsd-x86_64/include -I$OSSL/include -L$OSSL/openbsd-x86_64/lib"
+      - name: Verify the binary targets OpenBSD
+        run: |
+          file meshagent_openbsd_x86-64
+          file meshagent_openbsd_x86-64 | grep -q OpenBSD
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: meshagent-openbsd-x86_64
+          path: ${{ github.workspace }}/meshagent_openbsd_x86-64
