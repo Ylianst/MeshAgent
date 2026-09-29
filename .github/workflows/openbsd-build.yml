@@ -11,7 +11,7 @@ jobs:
       openbsd: ${{ steps.chk.outputs.openbsd }}
     steps:
       - name: Check out repository code
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
       # A pull request compares against its base branch, a push against the commit before it.
@@ -28,12 +28,12 @@ jobs:
       OPENBSD_REL: "7.9"
     steps:
       - name: Check out repository code
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
       - name: Install clang and lld
         run: sudo apt-get -qq update && sudo apt-get -qq -y install clang lld
       # The sysroot is streamed from about 400 MB of OpenBSD sets, so it is cached per release and fetched only once.
       - name: Restore the OpenBSD sysroot
-        uses: actions/cache@v4
+        uses: actions/cache@v6.1.0
         with:
           path: ${{ runner.temp }}/openbsd-sysroot
           key: openbsd-sysroot-${{ env.OPENBSD_REL }}-${{ hashFiles('.github/scripts/fetch-openbsd-sysroot.sh') }}
