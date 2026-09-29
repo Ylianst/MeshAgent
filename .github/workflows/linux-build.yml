@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Check out repository code
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7
       - name: Install Packages
         run: |
           sudo dpkg --add-architecture i386 &&
@@ -21,12 +21,19 @@ jobs:
           sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg62-dev build-essential musl-tools &&
           sudo apt-get install -y linux-libc-dev:i386 libc6-dev-i386 libjpeg62-dev:i386 &&
           sudo apt-get install -y libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev
+      - name: Restore the Bootlin x86 toolchains
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ runner.temp }}/x86-i686--glibc--stable
+            ${{ runner.temp }}/x86-64-core-i7--glibc--stable
+          key: bootlin-x86-2017.05-toolchains-1-1
       # -march=x86-64 in BOOTLIN_CC64 because Bootlin's x86-64 toolchain defaults to -march=corei7
       # -idirafter for the proper searchpath order
       - name: Install Bootlin x86 glibc 2.24 toolchains
         run: |
-          curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/x86-i686/tarballs/x86-i686--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP" &&
-          curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/x86-64-core-i7/tarballs/x86-64-core-i7--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP" &&
+          { [ -d "$RUNNER_TEMP/x86-i686--glibc--stable" ] || curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/x86-i686/tarballs/x86-i686--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP"; } &&
+          { [ -d "$RUNNER_TEMP/x86-64-core-i7--glibc--stable" ] || curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/x86-64-core-i7/tarballs/x86-64-core-i7--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP"; } &&
           echo "BOOTLIN_CC32=$RUNNER_TEMP/x86-i686--glibc--stable/bin/i686-linux-gcc -idirafter /usr/include/i386-linux-gnu -idirafter /usr/include" >> "$GITHUB_ENV" &&
           echo "BOOTLIN_CC64=$RUNNER_TEMP/x86-64-core-i7--glibc--stable/bin/x86_64-linux-gcc -march=x86-64 -mtune=generic -idirafter /usr/include/x86_64-linux-gnu -idirafter /usr/include" >> "$GITHUB_ENV"
       - name: Build 32 Bit Linux
@@ -40,7 +47,7 @@ jobs:
       - name: Build 64 Bit Alpine Linux
         run: make -j4 linux ARCHID=33 && make clean
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7
         with:
           if-no-files-found: error
           name: meshagent-binaries-x86
@@ -51,15 +58,22 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Check out repository code
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7
       - name: Install Packages
         run: |
           sudo apt clean all && sudo apt update &&
           sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev
+      - name: Restore the Bootlin ARM toolchains
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ runner.temp }}/aarch64--glibc--stable
+            ${{ runner.temp }}/armv6-eabihf--glibc--stable
+          key: bootlin-arm-2017.05-toolchains-1-1
       - name: Install Bootlin aarch64 and armv6 hard-float glibc 2.24 toolchains
         run: |
-          curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP" &&
-          curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/armv6-eabihf/tarballs/armv6-eabihf--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP" &&
+          { [ -d "$RUNNER_TEMP/aarch64--glibc--stable" ] || curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP"; } &&
+          { [ -d "$RUNNER_TEMP/armv6-eabihf--glibc--stable" ] || curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/armv6-eabihf/tarballs/armv6-eabihf--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP"; } &&
           echo "BOOTLIN_CC_AARCH64=$RUNNER_TEMP/aarch64--glibc--stable/bin/aarch64-linux-gcc -idirafter $GITHUB_WORKSPACE/lib-jpeg-turbo/includes -idirafter /usr/include" >> "$GITHUB_ENV" &&
           echo "BOOTLIN_CC_ARMV6=$RUNNER_TEMP/armv6-eabihf--glibc--stable/bin/arm-linux-gcc -idirafter $GITHUB_WORKSPACE/lib-jpeg-turbo/includes -idirafter /usr/include" >> "$GITHUB_ENV"
       - name: Build ARM64 Linux (ARCHID=26)
@@ -71,19 +85,19 @@ jobs:
       - name: Build armhf (ARCHID=25)
         run: PATH="$RUNNER_TEMP/armv6-eabihf--glibc--stable/arm-buildroot-linux-gnueabihf/bin:$PATH" make -j4 linux ARCHID=25 CC="$BOOTLIN_CC_ARMV6" && make clean
       - name: Upload ARM64 Artifacts
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7
         with:
           if-no-files-found: error
           name: meshagent-binaries-arm
           path: ${{ github.workspace }}/meshagent_arm64
       - name: Upload aarch64 Artifacts
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7
         with:
           if-no-files-found: error
           name: meshagent-binaries-aarch64
           path: ${{ github.workspace }}/meshagent_aarch64
       - name: Upload armhf Artifacts
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7
         with:
           if-no-files-found: error
           name: meshagent-binaries-armhf
