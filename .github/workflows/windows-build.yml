@@ -6,6 +6,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   windows-build:
     runs-on: ${{ matrix.platform == 'ARM64' && 'windows-11-arm' || 'windows-2022' }}

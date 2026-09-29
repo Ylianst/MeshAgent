@@ -2,51 +2,55 @@ name: "Code scanning - action"
 
 on:
   push:
+    branches: [master]
   pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.txt'
+      - test/**
+      - webrtc/**
+      - docs/**
   schedule:
-    - cron: '0 1 * * 1'
+    # Off the full hour, because GitHub delays or drops scheduled runs at :00 under load.
+    - cron: '23 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
 
 jobs:
-  CodeQL-Build:
-
-    runs-on: ubuntu-latest
-
+  analyze:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: c-cpp
+            build-mode: manual
+          - language: javascript-typescript
+            build-mode: none
+          - language: actions
+            build-mode: none
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        # We must fetch at least the immediate parents so that if this is
-        # a pull request then we can checkout the head.
-        fetch-depth: 2
-
-    # If this run was triggered by a pull request event, then checkout
-    # the head of the pull request instead of the merge commit.
-    - run: git checkout HEAD^2
-      if: ${{ github.event_name == 'pull_request' }}
-      
-    # Initializes the CodeQL tools for scanning.
-    - name: Initialize CodeQL
-      uses: github/codeql-action/init@v2
-      # Override language selection by uncommenting this and choosing your languages
-      with:
-         languages: javascript, cpp
-
-    # Autobuild attempts to build any compiled languages  (C/C++, C#, or Java).
-    # If this step fails, then you should remove it and run the build manually (see below)
-    #- name: Autobuild
-    #  uses: github/codeql-action/autobuild@v1
-
-    # ℹ️ Command-line programs to run using the OS shell.
-    # 📚 https://git.io/JvXDl
-
-    # ✏️ If the Autobuild fails above, remove it and uncomment the following three lines
-    #    and modify them (or add more) to build your code if your project
-    #    uses a compiled language
-
-    - run: |
-        make linux ARCHID=6 KVM=0
-    #   make bootstrap
-    #   make release
-
-    - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v2
+      - uses: actions/checkout@v7
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          config: |
+            paths-ignore:
+              - test/**
+              - webrtc/**
+            paths:
+              - 'modules/*.js'
+              - .github/workflows
+      - if: matrix.build-mode == 'manual'
+        run: |
+          sudo apt-get -qq update && sudo apt-get -qq -y install libx11-dev libxtst-dev libxext-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev libjpeg62-dev
+          make -j4 linux ARCHID=6
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}

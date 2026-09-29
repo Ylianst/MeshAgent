@@ -3,6 +3,8 @@ run-name: Build MacOS versions of MeshAgent
 on:
   push:
   pull_request:
+permissions:
+  contents: read
 jobs:
   macos-build-arm64:
     name: macOS arm64 (ARCHID=29)

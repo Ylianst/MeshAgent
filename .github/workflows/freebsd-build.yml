@@ -3,6 +3,8 @@ run-name: Build FreeBSD versions of MeshAgent
 on:
   push:
   pull_request:
+permissions:
+  contents: read
 jobs:
   freebsd-build-x86-64:
     name: FreeBSD x86_64 (ARCHID=30)
