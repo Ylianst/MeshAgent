@@ -6265,10 +6265,12 @@ int MeshAgent_System(char *cmd)
 // cheap counter comparison; the sweep only runs while the heap is actually growing.
 extern size_t ILibDuktape_ScriptContainer_TotalAllocations;
 static size_t g_meshCoreGcMark = 0;
+static MeshAgentHostContainer *g_meshCoreGcAgent = NULL;
 #define MESHAGENT_GC_GROWTH_BYTES (1024 * 1024)
+#define MESHAGENT_GC_TIMER_MS 2000
 void MeshAgent_HeapGcTimerSink(void *object)
 {
-	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)object;
+	MeshAgentHostContainer *agent = *((MeshAgentHostContainer**)object);
 	if (agent == NULL || agent->chain == NULL || ILibIsChainBeingDestroyed(agent->chain)) { return; }
 	if (agent->meshCoreCtx != NULL && duk_ctx_is_alive(agent->meshCoreCtx) && !duk_ctx_shutting_down(agent->meshCoreCtx))
 	{
@@ -6290,7 +6292,7 @@ void MeshAgent_HeapGcTimerSink(void *object)
 			g_meshCoreGcMark = total;	// heap shrank (e.g. core restart); re-baseline downward
 		}
 	}
-	ILibLifeTime_AddEx(ILibGetBaseTimer(agent->chain), agent, 2000, MeshAgent_HeapGcTimerSink, NULL);
+	ILibLifeTime_AddEx(ILibGetBaseTimer(agent->chain), &g_meshCoreGcAgent, MESHAGENT_GC_TIMER_MS, MeshAgent_HeapGcTimerSink, NULL);
 }
 
 int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **param)
@@ -6396,7 +6398,8 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 
 	// Keep the script heap bounded against short-lived spawn churn (see MeshAgent_HeapGcTimerSink).
 	g_meshCoreGcMark = 0;
-	ILibLifeTime_AddEx(ILibGetBaseTimer(agentHost->chain), agentHost, 2000, MeshAgent_HeapGcTimerSink, NULL);
+	g_meshCoreGcAgent = agentHost;
+	ILibLifeTime_AddEx(ILibGetBaseTimer(agentHost->chain), &g_meshCoreGcAgent, MESHAGENT_GC_TIMER_MS, MeshAgent_HeapGcTimerSink, NULL);
 
 	// Check to see if we are running as just a JavaScript Engine
 	if (agentHost->meshCoreCtx_embeddedScript != NULL || (paramLen >= 2 && ILibString_EndsWith(param[1], -1, ".js", 3) != 0) || (paramLen >= 2 && ILibString_EndsWith(param[1], -1, ".zip", 4) != 0))
