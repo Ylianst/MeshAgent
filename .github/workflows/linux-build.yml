@@ -16,11 +16,21 @@ jobs:
           sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg62-dev build-essential musl-tools &&
           sudo apt-get install -y linux-libc-dev:i386 libc6-dev-i386 libjpeg62-dev:i386 &&
           sudo apt-get install -y libc6-armel-cross libc6-dev-armel-cross binutils-arm-linux-gnueabi libncurses5-dev gcc-arm-linux-gnueabihf &&
-          sudo apt-get install -y libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev
+          sudo apt-get install -y libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev &&
+          sudo apt-get install -y libpulse-dev
+      # AUDIO=1 enables the Opus/PulseAudio KVM audio path. Only the
+      # KVM-enabled targets get it, and only those with a committed
+      # lib-opus/linux/$(ARCHNAME)/libopus.a: x86 (5), x86-64 (6), arm64 (26).
+      # The NOKVM and Alpine targets below must stay without it.
+      #
+      # CAMERA=1 enables the V4L2 webcam path on the same KVM-enabled targets.
+      # It needs no extra package or library: V4L2 is kernel ioctls via
+      # linux/videodev2.h (from libc6-dev, already present), and the JPEG work
+      # it does uses the libjpeg-turbo the KVM build already links.
       - name: Build 32 Bit Linux
-        run: make -j4 linux ARCHID=5 && make clean
+        run: make -j4 linux ARCHID=5 AUDIO=1 CAMERA=1 && make clean
       - name: Build 64 Bit Linux
-        run: make -j4 linux ARCHID=6 && make clean
+        run: make -j4 linux ARCHID=6 AUDIO=1 CAMERA=1 && make clean
       - name: Build 32 Bit NOKVM Linux
         run: make -j4 linux ARCHID=19 && make clean
       - name: Build 64 Bit NOKVM Linux
@@ -41,9 +51,9 @@ jobs:
       - name: Install Packages
         run: |
           sudo apt clean all && sudo apt update &&
-          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev build-essential
+          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev build-essential libpulse-dev
       - name: Build ARM64 Linux
-        run: make -j4 linux ARCHID=26 && make clean
+        run: make -j4 linux ARCHID=26 AUDIO=1 CAMERA=1 && make clean
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7.0.1
         with:
@@ -61,13 +71,17 @@ jobs:
       # The makefile now gates the Bootlin cross-toolchain behind CROSS=1, so a plain build uses
       # the container's native gcc and strip (an arm64 container, so the binary is aarch64).
       # bookworm (glibc 2.36) runs on Pi OS Bookworm and Trixie; Debian 11 bullseye is EOL and 404s.
+      #
+      # AUDIO=1 CAMERA=1: MeshCentral serves this one file, meshagent_aarch64, to devices reporting ARCHID 26 or 32, so it
+      # is what every ARM64 device downloads, and it must carry the microphone/camera/audio support like the x86 builds do
+      # (lib-opus/linux/aarch64 is committed). libpulse-dev is needed for the PulseAudio headers.
       - name: Build aarch64 (ARCHID=32) in an older-glibc container
         run: |
           docker run --rm -v "${{ github.workspace }}":/src -w /src debian:bookworm bash -c '
             apt-get update &&
-            apt-get install -y git build-essential pkg-config libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev &&
+            apt-get install -y git build-essential pkg-config libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev libpulse-dev &&
             git config --global --add safe.directory /src &&
-            make -j4 linux ARCHID=32
+            make -j4 linux ARCHID=32 AUDIO=1 CAMERA=1
           '
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7.0.1

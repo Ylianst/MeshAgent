@@ -18,6 +18,12 @@ limitations under the License.
 #include "linux_kvm_drm_egl.h"
 #include "linux_kvm.h"
 #include "linux_kvm_rotated.h"
+#include "linux_kvm_pipe.h"
+#if defined(_KVM_AUDIO)
+#include "meshcore/KVM/kvm_audio.h"
+#include "meshcore/KVM/kvm_mic.h"
+#include "meshcore/KVM/kvm_cam.h"
+#endif
 #include "linux_kvm_wayland.h"
 #include "linux_compression.h"
 #include "linux_tile.h"
@@ -307,7 +313,7 @@ static int g_drmInputLen = 0;
 // would drain everything could never arrive: both processes deadlocked until killed. Keeping the
 // input pipe drained while we wait keeps the master's event loop alive, so backpressure stays
 // what it is meant to be - a stall, not a hang.
-static int kvm_drm_write_all(int fd, const char *buffer, size_t len)
+static int kvm_drm_write_all_locked(int fd, const char *buffer, size_t len, int *pipeLocked)
 {
 	size_t offset = 0;
 
@@ -365,6 +371,14 @@ static int kvm_drm_write_all(int fd, const char *buffer, size_t len)
 		if ((pfd[0].revents & (POLLERR | POLLNVAL)) != 0) { return -1; }
 		if ((pfd[0].revents & POLLOUT) != 0)
 		{
+			// One packet at a time on the pipe: the audio, microphone and camera threads write to it as well (see
+			// linux_kvm_pipe.h). If one of them is part way through a packet, wait for it here, rather than blocking on the
+			// lock, so that the viewer input keeps being drained by the next pass of this loop.
+			if (*pipeLocked == 0)
+			{
+				if (pthread_mutex_trylock(kvm_pipe_write_lock()) != 0) { usleep(2000); continue; }
+				*pipeLocked = 1;
+			}
 			ssize_t written = write(fd, buffer + offset, len - offset);
 			if (written < 0)
 			{
@@ -375,6 +389,14 @@ static int kvm_drm_write_all(int fd, const char *buffer, size_t len)
 		}
 	}
 	return 0;
+}
+
+static int kvm_drm_write_all(int fd, const char *buffer, size_t len)
+{
+	int pipeLocked = 0;
+	int result = kvm_drm_write_all_locked(fd, buffer, len, &pipeLocked);
+	if (pipeLocked != 0) { pthread_mutex_unlock(kvm_pipe_write_lock()); }
+	return result;
 }
 
 // Entry point for the shared kvm_send_* helpers in linux_kvm.c: in DRM mode every write to the
@@ -3615,6 +3637,13 @@ void *kvm_server_mainloop_drm(void *parm)
 	}
 	kvm_drm_close_all_devices(devices, deviceCount);
 
+#if defined(_KVM_AUDIO)
+	kvm_audio_cleanup();
+	kvm_mic_cleanup();
+#endif
+#if defined(_KVM_CAMERA)
+	kvm_cam_cleanup();
+#endif
 	close(slave2master[1]);
 	close(master2slave[0]);
 	slave2master[1] = 0;

@@ -17,6 +17,7 @@ limitations under the License.
 #include "linux_kvm.h"
 #include "linux_kvm_wayland.h"
 #include "linux_kvm_drm.h"
+#include "linux_kvm_pipe.h"
 #include "meshcore/meshdefines.h"
 #include "microstack/ILibParsers.h"
 #include "microstack/ILibAsyncSocket.h"
@@ -43,6 +44,13 @@ limitations under the License.
 
 #include "linux_events.h"
 #include "linux_compression.h"
+
+#if defined(_KVM_AUDIO)
+#include "meshcore/KVM/kvm_audio.h"
+#include "meshcore/KVM/kvm_mic.h"
+#include "meshcore/KVM/kvm_cam.h"
+extern int slave2master[2];
+#endif
 
 #define EXIT_SUCCESS 0
 #define EXIT_FAILURE 1
@@ -166,6 +174,34 @@ static void kvm_slave_send(const void *buffer, size_t len)
 		ignore_result(write(slave2master[1], buffer, len));
 	}
 }
+
+// The capture thread: the thread that runs kvm_server_mainloop() and so handles the viewer's input.
+static pthread_t g_kvmCaptureThread;
+static int g_kvmCaptureThreadSet = 0;
+
+// For the audio, microphone and camera threads. They share the pipe with the capture thread's tile stream, which on the
+// DRM backend is non-blocking: see linux_kvm_pipe.h for why a plain write() is not enough there.
+int kvm_slave_write_from_thread(int fd, const char *buffer, size_t len)
+{
+	return kvm_pipe_write_packet(fd, buffer, len, &g_shutdown);
+}
+
+#if defined(_KVM_AUDIO)
+// The write handler the audio, microphone and camera modules are given. It is called on the capture thread by the input
+// handlers (capability replies), and on the modules' own threads. The capture thread must go through the DRM writer on the
+// DRM backend, which keeps draining viewer input while it waits for room; the modules' threads must not, that writer
+// shares state with the capture thread, so they take the packet lock instead.
+static ILibTransport_DoneState kvm_audio_pipe_write(char *buf, int len, void *reserved)
+{
+	(void)reserved;
+	if (slave2master[1] > 0)
+	{
+		if (g_kvmBackendDRM != 0 && g_kvmCaptureThreadSet != 0 && pthread_equal(pthread_self(), g_kvmCaptureThread)) { kvm_slave_send(buf, (size_t)len); }
+		else { (void)kvm_slave_write_from_thread(slave2master[1], buf, (size_t)len); }
+	}
+	return ILibTransport_DoneState_COMPLETE;
+}
+#endif
 
 int remoteMouseX = 0, remoteMouseY = 0;
 
@@ -1007,6 +1043,44 @@ int kvm_server_inputdata(char* block, int blocklen)
 			}
 			break;
 		}
+#if defined(_KVM_AUDIO)
+		case MNG_AUDIO_START: kvm_audio_start(); break;
+		case MNG_AUDIO_STOP:  kvm_audio_stop(); break;
+		case MNG_AUDIO_QUERY: kvm_audio_resend_caps(kvm_audio_pipe_write, NULL); break;
+		/* Microphone playback. MNG_MIC_START only reaches here once the agent's
+		 * JavaScript layer has recorded the local user's consent. */
+		case MNG_MIC_CONSENT:
+			/* The local user accepted. Only the agent's consent flow sends
+			 * this, and it carries no encoder-settings payload of its own --
+			 * continue with whatever is already in effect. */
+			kvm_mic_set_consent(1);
+			kvm_mic_start(NULL, 0);
+			break;
+		case MNG_MIC_START: kvm_mic_start((const unsigned char*)block, size); break;
+		case MNG_MIC_STOP:  kvm_mic_stop(); break;
+		case MNG_MIC_QUERY: kvm_mic_resend_caps(kvm_audio_pipe_write, NULL); break;
+		case MNG_MIC_DATA:  kvm_mic_feed(block, size); break;
+		case MNG_MIC_DEVICE_QUERY: kvm_mic_query_devices(kvm_audio_pipe_write, NULL); break;
+#endif
+#if defined(_KVM_CAMERA)
+		/* Webcam. Mirrors the microphone block above exactly, including the
+		 * rule that MNG_CAM_START only opens the camera once the agent's
+		 * JavaScript layer has recorded the local user's consent. */
+		case MNG_CAM_CONSENT:
+			/* The local user accepted. MNG_CAM_CONSENT itself carries no
+			 * payload saying which request it is answering -- native tracks
+			 * that internally and replays exactly what was actually asked
+			 * for (stream start, snapshot, or both), with its settings. */
+			kvm_cam_set_consent(1);
+			kvm_cam_consent_granted();
+			break;
+		case MNG_CAM_START: kvm_cam_start((const unsigned char*)block, size); break;
+		case MNG_CAM_STOP:  kvm_cam_stop(); break;
+		case MNG_CAM_QUERY: kvm_cam_resend_caps(kvm_audio_pipe_write, NULL); break;
+		case MNG_CAM_DATA:  kvm_cam_feed(block, size); break;
+		case MNG_CAM_DEVICE_QUERY: kvm_cam_query_devices(kvm_audio_pipe_write, NULL); break;
+		case MNG_CAM_SNAPSHOT: kvm_cam_snapshot((const unsigned char*)block, size, kvm_audio_pipe_write, NULL); break;
+#endif
 	}
 	return size;
 }
@@ -1217,7 +1291,10 @@ void* kvm_server_mainloop_x11(void* parm)
 
 	unsigned short currentDisplayId = 0;
 
-	if (sessionUid != 0)
+	// Only a root agent has anything to drop. An agent that runs as an ordinary user (a per-user install, a container)
+	// is already no more privileged than the session it captures, and initgroups() would fail for it with EPERM, which
+	// aborted the capture child and left the remote desktop stuck in setup.
+	if (sessionUid != 0 && geteuid() == 0)
 	{
 		// Full drop, not bare setuid: keeping gid 0 / root's supplementary groups would leave the
 		// X11 slave more privileged than the session user, and continuing as root after a failed
@@ -1339,6 +1416,19 @@ void* kvm_server_mainloop_x11(void* parm)
 			ptr2 = 0;
 			while ((ptr2 = kvm_server_inputdata((char*)pchRequest2 + ptr, cbBytesRead - ptr)) != 0) { ptr += ptr2; }
 			if (ptr == len) { len = 0; ptr = 0; }
+		}
+
+		if (g_remotepause)
+		{
+			// Video suppressed (e.g. an audio/mic-only session): skip the
+			// screen capture/cursor-tracking/tile-send below entirely, but
+			// the input read above still ran, so an unpause can still
+			// arrive. imagedisplay was already opened for this iteration
+			// (above, before the input read); close it now the same way
+			// the end of a normal iteration would, so it is not leaked.
+			if (imagedisplay != NULL) { x11_exports->XCloseDisplay(imagedisplay); imagedisplay = NULL; }
+			usleep((FRAME_RATE_TIMER > 0) ? (FRAME_RATE_TIMER * 1000) : 100000);
+			continue;
 		}
 
 		if (cursordisplay == NULL)
@@ -1594,6 +1684,13 @@ void* kvm_server_mainloop_x11(void* parm)
 	}
 
 	if (desktop != NULL) { free(desktop); desktop = NULL; }
+#if defined(_KVM_AUDIO)
+	kvm_audio_cleanup();
+	kvm_mic_cleanup();
+#endif
+#if defined(_KVM_CAMERA)
+	kvm_cam_cleanup();
+#endif
 	close(slave2master[1]);
 	close(master2slave[0]);
 	slave2master[1] = 0;
@@ -1624,6 +1721,8 @@ void* kvm_server_mainloop_x11(void* parm)
 void* kvm_server_mainloop(void* parm)
 {
 	int sessionUid = (int)(intptr_t)parm;
+	g_kvmCaptureThread = pthread_self();
+	g_kvmCaptureThreadSet = 1;
 	kvm_screenreader_mode_t screenreaderMode = kvm_screenreader_mode_for_uid(sessionUid);
 	if (screenreaderMode == KVM_SCREENREADER_MODE_DRM)
 	{
@@ -1828,6 +1927,20 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 		return NULL;
 	}
 
+#if defined(_KVM_AUDIO)
+	kvm_audio_set_slave_fd(slave2master[1]);
+	kvm_audio_init(kvm_audio_pipe_write, NULL);
+	kvm_mic_set_slave_fd(slave2master[1]);
+	kvm_mic_init(kvm_audio_pipe_write, NULL);
+#endif
+#if defined(_KVM_CAMERA)
+	/* Same pipe and the same "prepare state, advertise capability, open
+	 * nothing" contract the microphone has: no device is touched and no
+	 * consent is granted here. */
+	kvm_cam_set_slave_fd(slave2master[1]);
+	kvm_cam_init(kvm_audio_pipe_write, NULL);
+#endif
+
 	// Two Phase is ok here, because all our fork/vfork calls always happen on the same thread
 	fcntl(slave2master[0], F_SETFD, FD_CLOEXEC);
 	fcntl(slave2master[1], F_SETFD, FD_CLOEXEC);
@@ -1879,6 +1992,14 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 		//fprintf(logFile, "Starting kvm_server_mainloop\n");
 		if (authToken != NULL) { setenv("XAUTHORITY", authToken, 1); }
 		if (dispid != NULL) { setenv("DISPLAY", dispid, 1); }
+
+		/* Deliberately no speculative kvm_mic_start() here. Asking at session
+		 * open prompted the local user about the microphone whenever anyone
+		 * opened a desktop session, including the common case where the
+		 * operator only wants the screen and never touches the microphone.
+		 * The prompt now happens only when the operator actually asks to
+		 * listen (MNG_MIC_START), which is what the local user is being
+		 * asked about. */
 
 		kvm_server_mainloop((void*)(intptr_t)uid);
 		_exit(0);
