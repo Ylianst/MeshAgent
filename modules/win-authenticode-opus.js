@@ -33,6 +33,8 @@ function read(path)
     crypt.CreateMethod('CryptQueryObject');
     crypt.CreateMethod('CryptMsgGetParam');
     crypt.CreateMethod('CryptDecodeObject');
+    crypt.CreateMethod('CertCloseStore');
+    crypt.CreateMethod('CryptMsgClose');
 
     var dwEncoding = GM.CreateVariable(4);
     var dwContentType = GM.CreateVariable(4);
@@ -40,7 +42,7 @@ function read(path)
     var hStore = GM.CreatePointer();
     var hMsg = GM.CreatePointer();
     var dwSignerInfo = GM.CreateVariable(4);
-    var n, result;
+    var n, result = null;
 
     if (crypt.CryptQueryObject(CERT_QUERY_OBJECT_FILE, GM.CreateVariable(path, { wide: true }),
                     CERT_QUERY_CONTENT_FLAG_PKCS7_SIGNED_EMBED,
@@ -87,15 +89,19 @@ function read(path)
                         var opus = GM.CreateVariable(dwData.toBuffer().readUInt32LE());
                         if (crypt.CryptDecodeObject(ENCODING, GM.CreateVariable(SPC_SP_OPUS_INFO_OBJID), pb, cb, 0, opus, dwData).Val != 0)
                         {
-                       
-                            return ({ description: opus.Deref().Val != 0 ? opus.Deref().Wide2UTF8 : null, url: opus.Deref(GM.PointerSize, GM.PointerSize).Deref().Val != 0 ? opus.Deref(GM.PointerSize, GM.PointerSize).Deref().Deref(GM.PointerSize, GM.PointerSize).Deref().Wide2UTF8.trim() : null });
+                            result = { description: opus.Deref().Val != 0 ? opus.Deref().Wide2UTF8 : null, url: opus.Deref(GM.PointerSize, GM.PointerSize).Deref().Val != 0 ? opus.Deref(GM.PointerSize, GM.PointerSize).Deref().Deref(GM.PointerSize, GM.PointerSize).Deref().Wide2UTF8.trim() : null };
                         }
                     }
+                    break;
                 }
             }
         }
     }
-    return (null);
+
+    if (hMsg.Deref().Val != 0) { crypt.CryptMsgClose(hMsg.Deref()); }
+    if (hStore.Deref().Val != 0) { crypt.CertCloseStore(hStore.Deref(), 0); }
+
+    return (result);
 }
 function locked(uri)
 {

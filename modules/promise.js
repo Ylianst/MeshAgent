@@ -199,29 +199,6 @@ function Promise(promiseFunc)
         this.emit.apply(this, args);
         this.emit('settled');
     };
-    this._internal.resolveInspector = function resolveInspector()
-    {
-        var v = this.emit_returnValue('resolved');
-        if(v!=null && v._ObjectID == 'promise')
-        {
-            // then() returned a promise, so we need to resolve/reject it
-            v._internal.once('resolved', this.promise.__childPromise._internal.resolver.bind(this.promise.__childPromise._internal));
-            v._internal.once('rejected', this.promise.__childPromise._internal.rejector.bind(this.promise.__childPromise._internal));
-        }
-        else
-        {
-            if (v != null)
-            {
-                // then() returned a non-promise object, so we need to resolve the promise with it
-                this.promise.__childPromise._res(v);
-            }
-            else
-            {
-                // then() didn't return anything, so we just propagate the values from the underlying promise
-                this.once('resolved', this.promise.__childPromise._internal.resolver.bind(this.promise.__childPromise._internal));
-            }
-        }
-    };
     this.catch = function(func)
     {
         var rt = getRootPromise(this);
@@ -279,7 +256,33 @@ function Promise(promiseFunc)
         }
         else
         {
-            this._internal.once('resolved', this._internal.resolveInspector);
+            // Bind THIS then()'s child with a per-child closure. The old shared resolveInspector
+            // settled only this.promise.__childPromise, which every then() call overwrites, so a
+            // second then() on one pending promise left the first child unsettled and pinned in the
+            // module-global refTable forever (reachable, so GC can never reclaim it). That was the
+            // getclip leak: dispatchRead() coalesces to one pending promise that is then()'d every
+            // second. emit_returnValue('resolved') is correct per child because emit updates it in
+            // listener order and each closure runs immediately after its own handler.
+            this._internal.once('resolved', (function (child)
+            {
+                return (function ()
+                {
+                    var v = this.emit_returnValue('resolved');
+                    if (v != null && v._ObjectID == 'promise')
+                    {
+                        v._internal.once('resolved', child._internal.resolver.bind(child._internal));
+                        v._internal.once('rejected', child._internal.rejector.bind(child._internal));
+                    }
+                    else if (v != null)
+                    {
+                        child._res(v);
+                    }
+                    else
+                    {
+                        this.once('resolved', child._internal.resolver.bind(child._internal));
+                    }
+                });
+            })(retVal));
             this._internal.once('rejected', retVal._internal.rejector.bind(retVal._internal).internal);
         }
 

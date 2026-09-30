@@ -143,23 +143,26 @@ void dump32bit (const XImage * input)
 int util_crc(int x, int y, long long bufferSize, void *desktop, long long desktopsize, int tilewidth, int tileheight)
 {
     int hval = 0;
-    int *bp = NULL;
-    int *be = NULL;
+    char *bp = NULL;
+    char *be = NULL;
     int height = 0;
 
+    // Walked as bytes: the row stride is 3 bytes per pixel, so these 32 bit reads land on
+    // arbitrary addresses and must not be issued through an int* (SIGBUS on MIPS/ARMv5).
     for (height = y; height < y + tileheight; height++) {
-    	bp = (int *)(((char *)desktop) + (3 * ((height * adjust_screen_size(SCREEN_WIDTH)) + x)));
-    	be = (int *)(((char *)desktop) + (3 * ((height * adjust_screen_size(SCREEN_WIDTH)) + x + tilewidth)));
-    	while ((bp + 1) <= be)
+    	bp = ((char *)desktop) + (3 * ((height * adjust_screen_size(SCREEN_WIDTH)) + x));
+    	be = ((char *)desktop) + (3 * ((height * adjust_screen_size(SCREEN_WIDTH)) + x + tilewidth));
+    	while ((bp + 4) <= be)
 		{
 			// hval *= 0x01000193;
 			hval += (hval << 1) + (hval << 4) + (hval << 7) + (hval << 8) + (hval << 24);
-			hval ^= *bp++;
+			hval ^= (int)ILibUnaligned_Read32(bp);
+			bp += 4;
 		}
 
     	if (be - bp >= 0) {
     		hval += (hval << 1) + (hval << 4) + (hval << 7) + (hval << 8) + (hval << 24);
-    		hval ^= (*(int *)(((char *)be) - 3));
+    		hval ^= (int)ILibUnaligned_Read32(be - 3);
     	}
     }
 

@@ -489,10 +489,10 @@ duk_ret_t ILibDuktape_GenericMarshal_Variable_Val_SET(duk_context *ctx)
 		switch (size)
 		{
 		case 2:
-			((unsigned short*)ptr)[0] = (unsigned short)duk_require_int(ctx, 0);
+			ILibUnaligned_Write16(ptr, (unsigned short)duk_require_int(ctx, 0));
 			break;
 		case 4:
-			((unsigned int*)ptr)[0] = (unsigned int)duk_require_int(ctx, 0);
+			ILibUnaligned_Write32(ptr, (unsigned int)duk_require_int(ctx, 0));
 			break;
 		default:
 			return(ILibDuktape_Error(ctx, "Unsupported VAL size, with integral type"));
@@ -568,10 +568,10 @@ duk_ret_t ILibDuktape_GenericMarshal_Variable_GetEx(duk_context *ctx)
 	switch (varSize)
 	{
 	case 2:
-		duk_push_int(ctx, (int)((unsigned short*)ptr)[0]);
+		duk_push_int(ctx, (int)ILibUnaligned_Read16(ptr));
 		break;
 	case 4:
-		duk_push_int(ctx, (int)((unsigned int*)ptr)[0]);
+		duk_push_int(ctx, (int)ILibUnaligned_Read32(ptr));
 		break;
 	default:
 		return(ILibDuktape_Error(ctx, "Invalid Variable"));
@@ -595,10 +595,10 @@ duk_ret_t ILibDuktape_GenericMarshal_Variable_SetEx(duk_context *ctx)
 	switch (varSize)
 	{
 	case 2:
-		((unsigned short*)ptr)[0] = (unsigned short)newVal;
+		ILibUnaligned_Write16(ptr, (unsigned short)newVal);
 		break;
 	case 4:
-		((unsigned int*)ptr)[0] = (unsigned int)newVal;
+		ILibUnaligned_Write32(ptr, (unsigned int)newVal);
 		break;
 	default:
 		return(ILibDuktape_Error(ctx, "Invalid Variable"));

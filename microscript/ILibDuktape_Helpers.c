@@ -345,15 +345,28 @@ char *Duktape_Duplicate_GetStringEx(duk_context *ctx, duk_idx_t i, duk_size_t *l
 }
 int Duktape_GetIntPropertyValue(duk_context *ctx, duk_idx_t i, char* propertyName, int defaultValue)
 {
-	int retVal = defaultValue;
-	if (ctx!=NULL && duk_has_prop_string(ctx, i, propertyName))
+	// Use the int64 function, fixes NaN returning defaultValue instead of 0
+	int64_t v = Duktape_GetInt64PropertyValue(ctx, i, propertyName, defaultValue);
+	return (int)(v > INT_MAX ? INT_MAX : (v < INT_MIN ? INT_MIN : v));
+}
+
+// Duktape_GetIntPropertyValue() restricts to 32 bits, which limits to max 2147483647, while a JS number can be MAX_SAFE_INTEGER=9007199254740991
+// Certain functions (seeking, file position in fs) need larger numbers, so implement the INT64 version for this. Restrict to 64 bits by hand since there is no duk_to_int 64
+int64_t Duktape_GetInt64PropertyValue(duk_context *ctx, duk_idx_t i, char* propertyName, int64_t defaultValue)
+{
+	int64_t retVal = defaultValue;
+	if (ctx != NULL && duk_has_prop_string(ctx, i, propertyName))
 	{
-		duk_get_prop_string(ctx, i, propertyName);
-		if (!duk_is_null_or_undefined(ctx, -1))
+		duk_get_prop_string(ctx, i, propertyName);	// push obj[propertyName] on the stack
+		if (!duk_is_null_or_undefined(ctx, -1))		// -1=stack top
 		{
-			retVal = duk_to_int(ctx, -1);
+			double v = duk_to_number(ctx, -1);		// force string to number
+			if (v != v) { retVal = defaultValue; }	// NaN test, NaN is the only value not equal to itself
+			else if (v >= 9223372036854775808.0) { retVal = INT64_MAX; }	// INT64_MAX+1 as a double to prevent rounding/conversion issues
+			else if (v < INT64_MIN) { retVal = INT64_MIN; }
+			else { retVal = (int64_t)v; }
 		}
-		duk_pop(ctx);
+		duk_pop(ctx);	// remove property from stack
 	}
 	return retVal;
 }
@@ -429,7 +442,7 @@ char* Duktape_GetBuffer(duk_context *ctx, duk_idx_t i, duk_size_t *bufLen)
 	else if (duk_is_buffer(ctx, i))
 	{
 		retVal = (char*)duk_require_buffer(ctx, i, &len);
-		if (ILibMemory_CanaryOK(ILibMemory_FromRaw(retVal)) && ILibMemory_RawSize(ILibMemory_FromRaw(retVal)) == len)
+		if (retVal != NULL && len >= sizeof(ILibMemory_Header) && ILibMemory_CanaryOK(ILibMemory_FromRaw(retVal)) && ILibMemory_RawSize(ILibMemory_FromRaw(retVal)) == len)
 		{
 			retVal = ILibMemory_FromRaw(retVal);
 			if (bufLen != NULL) { *bufLen = ILibMemory_Size(retVal); }
@@ -442,7 +455,7 @@ char* Duktape_GetBuffer(duk_context *ctx, duk_idx_t i, duk_size_t *bufLen)
 	else if(duk_is_buffer_data(ctx, i))
 	{
 		retVal = (char*)duk_require_buffer_data(ctx, i, &len);
-		if (ILibMemory_CanaryOK(ILibMemory_FromRaw(retVal)) && ILibMemory_RawSize(ILibMemory_FromRaw(retVal)) == len)
+		if (retVal != NULL && len >= sizeof(ILibMemory_Header) && ILibMemory_CanaryOK(ILibMemory_FromRaw(retVal)) && ILibMemory_RawSize(ILibMemory_FromRaw(retVal)) == len)
 		{
 			retVal = ILibMemory_FromRaw(retVal);
 			if (bufLen != NULL) { *bufLen = ILibMemory_Size(retVal); }
@@ -761,6 +774,54 @@ void ILibDuktape_Process_UncaughtExceptionEx(duk_context *ctx, char *format, ...
 		duk_pcall_method(emitter->ctx, 2);
 		duk_pop(emitter->ctx);															// ...
 	}
+}
+// Safe wrapper around duk_pcall_method for callbacks that operate on a
+// heap-stashed object (e.g. state->writeStream). Without this guard, when
+// the object has been closed, GC'd, or replaced since the heapptr was
+// captured, duk_get_prop_string(..., "write") returns undefined, the
+// following duk_pcall_method raises "cannot read property 'write' of
+// undefined", and because the call originates from a native callback the
+// error cannot reach a JS try/catch -> Duktape promotes it to a fatal ->
+// the engine calls Engine_fatal and the process exits with code 254.
+//
+// Usage: replace
+//     duk_get_prop_string(ctx, -1, "write");     // [..., this, write]
+//     if (duk_pcall_method(ctx, N) != 0) { ... }
+// with
+//     duk_get_prop_string(ctx, -1, "write");     // [..., this, write]
+//     if (ILibDuktape_SafePcallMethod(ctx, N, "module.fn() ") != 0) { ... }
+//
+// Stack contract:
+//   - On entry: the top of stack holds the last argument pushed, and below
+//     it, in order, the remaining nargs-1 arguments, then `this`, then the
+//     callable (Duktape pcall_method layout).
+//   - On success: the callable, `this`, and all args are popped; the return
+//     value (if any) is on top of the stack.
+//   - On missing/non-function callable: the callable, `this`, and the args
+//     are popped; no return value is left on the stack.
+//   - On pcall error: the error object is on top; we pop it after routing
+//     to Process_UncaughtExceptionEx.
+int ILibDuktape_SafePcallMethod(duk_context *ctx, int nargs, const char *where)
+{
+	if (ctx == NULL || !duk_ctx_is_alive(ctx) || duk_ctx_shutting_down(ctx)) { return(-1); }
+	// In Duktape's pcall_method layout [..., callable, this, arg1, ..., argN],
+	// `callable` is at index -(nargs + 2) and `this` at -(nargs + 1).
+	if (!duk_is_function(ctx, -(nargs + 2)))
+	{
+		// The "callable" is not a function. This is the bug-shape that used
+		// to crash the engine. Pop the (callable, this, arg1..argN) and
+		// surface a soft error via the normal uncaughtException sink.
+		duk_pop_n(ctx, nargs + 2);
+		ILibDuktape_Process_UncaughtExceptionEx(ctx, "SafePcallMethod: target not callable (%s)", where ? where : "?");
+		return(-1);
+	}
+	int rc = duk_pcall_method(ctx, nargs);
+	if (rc != 0)
+	{
+		ILibDuktape_Process_UncaughtExceptionEx(ctx, "%s", where ? where : "SafePcallMethod");
+		duk_pop(ctx);
+	}
+	return(rc);
 }
 // Error MUST be at top of stack when calling this method
 void ILibDuktape_Process_UncaughtException(duk_context *ctx)

@@ -25,7 +25,6 @@ limitations under the License.
 #endif
 
 #include "agentcore.h"
-#include "signcheck.h"
 #include "meshdefines.h"
 #include "meshinfo.h"
 #include "microscript/ILibDuktape_Commit.h"
@@ -47,6 +46,11 @@ limitations under the License.
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <arpa/inet.h>
+#include <unistd.h>
+#endif
+
+#if defined(__linux__) && defined(__GLIBC__)
+#include <malloc.h>		// malloc_trim (glibc only; MUSL/Alpine has no such symbol): return GC-freed pages to the OS (see MeshAgent_HeapGcTimerSink)
 #endif
 
 #ifdef _OPENBSD
@@ -59,17 +63,18 @@ int gRemoteMouseRenderDefault = 0;
 	#ifdef WIN32
 		#include "KVM/Windows/kvm.h"
 	#endif
-	#ifdef _POSIX
-		#ifndef __APPLE__
-			#include "KVM/Linux/linux_kvm.h"
-			#if defined(_KVM_AUDIO)
-				#include "KVM/kvm_audio.h"
-				#include "KVM/kvm_mic.h"
+		#ifdef _POSIX
+			#ifndef __APPLE__
+				#include "KVM/Linux/linux_kvm.h"
+				#include "KVM/Linux/linux_kvm_wayland.h"
+				#if defined(_KVM_AUDIO)
+					#include "KVM/kvm_audio.h"
+					#include "KVM/kvm_mic.h"
+				#endif
+			#else
+				#include "KVM/MacOS/mac_kvm.h"
 			#endif
-		#else
-			#include "KVM/MacOS/mac_kvm.h"
 		#endif
-	#endif
 #endif
 
 #if defined(WIN32) && !defined(_WIN32_WCE) && !defined(_MINCORE)
@@ -376,10 +381,6 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent);
 int agent_VerifyMeshCertificates(MeshAgentHostContainer *agent);
 void MeshServer_SendJSON(MeshAgentHostContainer* agent, ILibWebClient_StateObject WebStateObject, char *JSON, int JSONLength);
 
-#if defined(_LINKVM) && defined(_POSIX) && !defined(__APPLE__)
-extern void ILibProcessPipe_FreePipe(ILibProcessPipe_Pipe pipeObject);
-#endif
-
 void MeshAgent_sendConsoleText(duk_context *ctx, char *format, ...)
 {
 	char dest[4096];
@@ -653,7 +654,7 @@ void UDPSocket_OnData(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer
 		if (agentHost->controlChannelDebug != 0)
 		{
 			printf("Received encrypted discovery response...\n");
-			ILIBLOGMESSAGEX("Received encrypted discovery response...\n");
+			ILIBLOGMESSAGEX("Received encrypted discovery response...");
 		}
 	}
 	else
@@ -666,7 +667,7 @@ void UDPSocket_OnData(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer
 		if (agentHost->controlChannelDebug != 0)
 		{
 			printf("Received unencrypted discovery response...\n");
-			ILIBLOGMESSAGEX("Received unencrypted discovery response...\n");
+			ILIBLOGMESSAGEX("Received unencrypted discovery response...");
 		}
 	}
 
@@ -683,7 +684,7 @@ void UDPSocket_OnData(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer
 		if (agentHost->controlChannelDebug != 0)
 		{
 			printf("FoundServer: %s\n", agentHost->multicastServerUrl);
-			ILIBLOGMESSAGEX("FoundServer: %s\n", agentHost->multicastServerUrl);
+			ILIBLOGMESSAGEX("FoundServer: %s", agentHost->multicastServerUrl);
 		}
 
 		if (agentHost->serverConnectionState == 0) { MeshServer_ConnectEx(agentHost); }
@@ -693,7 +694,7 @@ void UDPSocket_OnData(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer
 		if (agentHost->controlChannelDebug != 0)
 		{
 			printf("Failed to parse response...\n");
-			ILIBLOGMESSAGEX("Failed to parse response...\n");
+			ILIBLOGMESSAGEX("Failed to parse response...");
 		}
 	}
 }
@@ -847,13 +848,21 @@ void ILibDuktape_MeshAgent_Ready(ILibDuktape_EventEmitter *sender, char *eventNa
 }
 #ifdef _LINKVM
 #ifdef WIN32
+typedef struct RemoteDesktop_KVM_WriteState
+{
+	RemoteDesktop_Ptrs *ptrs;
+	size_t bufferLen;
+} RemoteDesktop_KVM_WriteState;
+
 void ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink_Chain(void *chain, void *user)
 {
 	if (user == NULL) { return; }
 
-	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)((void**)ILibMemory_Extra(user))[0];
+	RemoteDesktop_KVM_WriteState *state = (RemoteDesktop_KVM_WriteState*)ILibMemory_Extra(user);
+
+	RemoteDesktop_Ptrs *ptrs = state->ptrs;
 	char *buffer = (char*)user;
-	size_t bufferLen = ILibMemory_Size(user);
+	size_t bufferLen = state->bufferLen;	// The KVM packet length: ILibMemory_Size(user) would include alignment padding
 
 #if defined(_KVM_AUDIO)
 	/* Native asked for a consent prompt (see kvm_mic_start()). This is an
@@ -960,16 +969,19 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(char *
 	{
 		if (!ILibIsRunningOnChainThread(duk_ctx_chain(ptrs->ctx)))
 		{
-			char *bstate = ILibMemory_SmartAllocateEx(bufferLen, sizeof(void*));
+			char *bstate = ILibMemory_SmartAllocateEx(bufferLen, sizeof(RemoteDesktop_KVM_WriteState));
+			RemoteDesktop_KVM_WriteState *state = (RemoteDesktop_KVM_WriteState*)ILibMemory_Extra(bstate);
 			memcpy_s(bstate, (size_t)bufferLen, buffer, (size_t)bufferLen);
-			((void**)ILibMemory_Extra(bstate))[0] = ptrs;
+			state->ptrs = ptrs;
+			// Allocation sizes include alignment padding, which is not part of the KVM packet.
+			state->bufferLen = (size_t)bufferLen;
 			ILibChain_RunOnMicrostackThreadEx3(duk_ctx_chain(ptrs->ctx), ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink_Chain, NULL, bstate);
 			return ILibTransport_DoneState_COMPLETE;		// Always returning complete, because we'll let the stream object handle flow control
 		}
 	}
 #endif
 
-	if ((buffer != NULL) && (bufferLen > 4) && (ntohs(((unsigned short*)buffer)[0]) == MNG_DEBUG))
+	if ((buffer != NULL) && (bufferLen > 4) && (ntohs(ILibUnaligned_Read16(buffer)) == MNG_DEBUG))
 	{
 		Duktape_Console_LogEx(ptrs->ctx, ILibDuktape_LogType_Info1, "%s", buffer + 4);
 	}
@@ -1058,16 +1070,24 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_WriteSink(ILibDuktap
 	if (((RemoteDesktop_Ptrs*)user)->kvmPipe == NULL)
 	{
 		// Write to AF_UNIX Domain Socket
-		duk_push_external_buffer(stream->writableStream->ctx);														// [ext]
-		duk_config_buffer(stream->writableStream->ctx, -1, buffer, (duk_size_t)bufferLen);
-		duk_push_heapptr(stream->writableStream->ctx, stream->writableStream->obj);									// [ext][rd]
-		duk_get_prop_string(stream->writableStream->ctx, -1, KVM_IPC_SOCKET);										// [ext][rd][IPC]
-		duk_get_prop_string(stream->writableStream->ctx, -1, "write");												// [ext][rd][IPC][write]
-		duk_swap_top(stream->writableStream->ctx, -2);																// [ext][rd][write][this]
-		duk_push_buffer_object(stream->writableStream->ctx, -4, 0, (duk_size_t)bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);// [ext][rd][write][this][buffer]
-		if (duk_pcall_method(stream->writableStream->ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(stream->writableStream->ctx, "Error Writing Data"); }
-																													// [ext][rd][ret]
-		duk_pop_n(stream->writableStream->ctx, 3);																	// ...
+		duk_context *kctx = stream->writableStream->ctx;
+		duk_push_heapptr(kctx, stream->writableStream->obj);															// [rd]
+		duk_get_prop_string(kctx, -1, KVM_IPC_SOCKET);																// [rd][IPC]
+		if (!duk_is_object(kctx, -1))
+		{
+			// Return an error instead of exit if KVM_IPC_SOCKET is also not set. kvm_relay_setup() returns NULL when it cannot reach the user LaunchAgent, so kvmPipe is NULL too, and KVM_IPC_SOCKET is only set for the LoginWindow case.
+			// Prevents reading "write" from an undefined, which stopped the agent with: uncaught: 'cannot read property write of undefined'.
+			duk_pop_2(kctx);																						// ...
+			return ILibTransport_DoneState_ERROR;
+		}
+		duk_push_external_buffer(kctx);																				// [rd][IPC][ext]
+		duk_config_buffer(kctx, -1, buffer, (duk_size_t)bufferLen);
+		duk_get_prop_string(kctx, -2, "write");																		// [rd][IPC][ext][write]
+		duk_dup(kctx, -3);																							// [rd][IPC][ext][write][this]
+		duk_push_buffer_object(kctx, -3, 0, (duk_size_t)bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);						// [rd][IPC][ext][write][this][buffer]
+		if (duk_pcall_method(kctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(kctx, "Error Writing Data"); }
+																													// [rd][IPC][ext][ret]
+		duk_pop_n(kctx, 4);																							// ...
 	}
 	else
 #endif
@@ -1128,7 +1148,13 @@ void ILibDuktape_MeshAgent_RemoteDesktop_EndSink(ILibDuktape_DuplexStream *strea
 		duk_del_prop_string(ptrs->ctx, -1, REMOTE_DESKTOP_STREAM);
 		duk_pop(ptrs->ctx);											// ...
 #if defined(_LINKVM) && defined(_POSIX) && !defined(__APPLE__)
-		if (ptrs->kvmPipe != NULL) { ILibProcessPipe_FreePipe(ptrs->kvmPipe); }
+		if (ptrs->kvmPipe != NULL)
+		{
+			// Cancel the pending broken-pipe timer before freeing, else it fires ~4s later on freed memory.
+			ILibLifeTime_Remove(ILibGetBaseTimer(duk_ctx_chain(ptrs->ctx)), ptrs->kvmPipe);
+			ILibProcessPipe_Pipe_SetBrokenPipeHandler(ptrs->kvmPipe, NULL);
+			ILibProcessPipe_FreePipe(ptrs->kvmPipe);
+		}
 #endif
 		memset(ptrs, 0, sizeof(RemoteDesktop_Ptrs));
 	}
@@ -1145,9 +1171,13 @@ void ILibDuktape_MeshAgent_RemoteDesktop_PauseSink(ILibDuktape_DuplexStream *sen
 	{
 		duk_push_heapptr(sender->writableStream->ctx, sender->writableStream->obj);									// [rd]
 		duk_get_prop_string(sender->writableStream->ctx, -1, KVM_IPC_SOCKET);										// [rd][IPC]
-		duk_get_prop_string(sender->writableStream->ctx, -1, "pause");												// [rd][IPC][pause]
-		duk_swap_top(sender->writableStream->ctx, -2);																// [rd][pause][this]
-		duk_pcall_method(sender->writableStream->ctx, 0);															// [rd][ret]
+		// Skip if KVM_IPC_SOCKET is also not set, because reading "pause" from an undefined stops the agent the same way as in the write sink.
+		if (duk_is_object(sender->writableStream->ctx, -1))
+		{
+			duk_get_prop_string(sender->writableStream->ctx, -1, "pause");											// [rd][IPC][pause]
+			duk_swap_top(sender->writableStream->ctx, -2);															// [rd][pause][this]
+			duk_pcall_method(sender->writableStream->ctx, 0);														// [rd][ret]
+		}
 		duk_pop_2(sender->writableStream->ctx);																		// ...
 	}
 #endif
@@ -1166,9 +1196,13 @@ void ILibDuktape_MeshAgent_RemoteDesktop_ResumeSink(ILibDuktape_DuplexStream *se
 	{
 		duk_push_heapptr(sender->writableStream->ctx, sender->writableStream->obj);									// [rd]
 		duk_get_prop_string(sender->writableStream->ctx, -1, KVM_IPC_SOCKET);										// [rd][IPC]
-		duk_get_prop_string(sender->writableStream->ctx, -1, "resume");												// [rd][IPC][resume]
-		duk_swap_top(sender->writableStream->ctx, -2);																// [rd][resume][this]
-		duk_pcall_method(sender->writableStream->ctx, 0);															// [rd][ret]
+		// Skip if KVM_IPC_SOCKET is also not set, because reading "resume" from an undefined stops the agent the same way as in the write sink.
+		if (duk_is_object(sender->writableStream->ctx, -1))
+		{
+			duk_get_prop_string(sender->writableStream->ctx, -1, "resume");											// [rd][IPC][resume]
+			duk_swap_top(sender->writableStream->ctx, -2);															// [rd][resume][this]
+			duk_pcall_method(sender->writableStream->ctx, 0);														// [rd][ret]
+		}
 		duk_pop_2(sender->writableStream->ctx);																		// ...
 	}
 #endif
@@ -1190,7 +1224,13 @@ duk_ret_t ILibDuktape_MeshAgent_RemoteDesktop_Finalizer(duk_context *ctx)
 		duk_pop(ptrs->ctx);											// ...
 #ifdef _LINKVM
 #if defined(_POSIX) && !defined(__APPLE__)
-		if (ptrs->kvmPipe != NULL) { ILibProcessPipe_FreePipe(ptrs->kvmPipe); }
+		if (ptrs->kvmPipe != NULL)
+		{
+			// Cancel the pending broken-pipe timer before freeing, else it fires ~4s later on freed memory.
+			ILibLifeTime_Remove(ILibGetBaseTimer(duk_ctx_chain(ptrs->ctx)), ptrs->kvmPipe);
+			ILibProcessPipe_Pipe_SetBrokenPipeHandler(ptrs->kvmPipe, NULL);
+			ILibProcessPipe_FreePipe(ptrs->kvmPipe);
+		}
 #endif
 		kvm_cleanup();
 #endif
@@ -1267,7 +1307,7 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop_DomainIPC_DataSink(duk_context 
 	// We need to properly frame the data before we propagate it up
 	if (bufferLen > 4)
 	{
-		size = ntohs(((unsigned short*)(buffer))[1]);
+		size = ntohs(ILibUnaligned_Read16(buffer + 2));
 		if (size <= bufferLen)
 		{
 			// We have all the data, to be able to frame it
@@ -1346,17 +1386,50 @@ duk_ret_t ILibDuktape_MeshAgent_userChanged(duk_context *ctx)
 	{
 		ILibLifeTime_Remove(ILibGetBaseTimer(duk_ctx_chain(ctx)), ptrs->kvmPipe);
 		ILibProcessPipe_Pipe_SetBrokenPipeHandler(ptrs->kvmPipe, NULL);
+		// Free the old pipe object like the EndSink teardown does; the restart below allocates a
+		// new one, and auto-recovery made this path fire on every child crash/logout, so the leak
+		// was no longer a rare manual-restart cost.
+		ILibProcessPipe_FreePipe(ptrs->kvmPipe);
+		ptrs->kvmPipe = NULL;
 		kvm_cleanup();
 
 		duk_peval_string(ctx, "require('user-sessions').consoleUid()");
 		int id = duk_to_int(ctx, -1);
+
+		// Same greeter case as getRemoteDesktop, on the logout/user-switch re-fork: the login screen's
+		// X server and cookie are root-owned, so capture as root rather than the DM's own uid.
+		if (id != 0)
+		{
+			int gdmuid = -1;
+			if (duk_peval_string(ctx, "require('user-sessions').gdmUid") == 0 && duk_is_number(ctx, -1)) { gdmuid = duk_get_int(ctx, -1); }
+			duk_pop(ctx);
+			if (gdmuid == id)
+			{
+				id = 0;
+				// getXInfo() below reads its uid arg off the stack top, so swap consoleUid()'s result for id
+				duk_pop(ctx);
+				duk_push_int(ctx, id);
+			}
+		}
+
 		duk_eval_string(ctx, "require('monitor-info')");				//[uid][monitor-info]
 		duk_get_prop_string(ctx, -1, "getXInfo");						//[uid][monitor-info][getXInfo]
 		duk_swap_top(ctx, -2);											//[uid][getXInfo][this]
 		duk_dup(ctx, -3);												//[uid][getXInfo][this][uid]
-		if (duk_pcall_method(ctx, 1) != 0) { duk_eval_string(ctx, "console.log('error');"); return(0); }								//[uid][xinfo]
-		x = Duktape_GetStringPropertyValue(ctx, -1, "xauthority", NULL);
-		d = Duktape_GetStringPropertyValue(ctx, -1, "display", NULL);
+		if (duk_pcall_method(ctx, 1) != 0)															//[uid][xinfo|error]
+		{
+			// getXInfo() has no X server to query on a Wayland/greeter session and throws. The DRM
+			// backend does not need XAUTHORITY/DISPLAY, so don't abort the restart (that is what left
+			// the session dead until a manual restart).
+			Duktape_Console_LogEx(ctx, ILibDuktape_LogType_Info1, "userChanged: getXInfo failed (%s); restarting without X env", duk_safe_to_string(ctx, -1));
+			x = NULL;
+			d = NULL;
+		}
+		else
+		{
+			x = Duktape_GetStringPropertyValue(ctx, -1, "xauthority", NULL);
+			d = Duktape_GetStringPropertyValue(ctx, -1, "display", NULL);
+		}
 
 
 		duk_push_heapptr(ctx, s);							// [stream]
@@ -1367,6 +1440,18 @@ duk_ret_t ILibDuktape_MeshAgent_userChanged(duk_context *ctx)
 		ptrs->kvmPipe = kvm_relay_restart(0, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, id, x, d);
 	}
 	return(0);
+}
+
+// Called (deferred, on the microstack thread) by the KVM parent in linux_kvm.c when a capture child
+// exits unexpectedly (logout / user-switch / crash). Re-derives the current console session and
+// re-forks the capture child by reusing the exact same recovery as a live user-sessions 'changed'
+// event, so the DRM/Wayland and X11 backends share one restart path.
+void ILibDuktape_MeshAgent_RemoteDesktop_KvmAutoRecover(void *reservedPtrs)
+{
+	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)reservedPtrs;
+	if (ptrs == NULL || !ILibMemory_CanaryOK(ptrs) || ptrs->ctx == NULL) { return; }		// stream torn down
+	if (!duk_ctx_is_alive(ptrs->ctx)) { return; }
+	duk_peval_string_noresult(ptrs->ctx, "try { require('user-sessions').emit('changed'); } catch (e) {}");
 }
 #endif
 
@@ -1459,6 +1544,12 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		else
 		{
 			ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+			if (ptrs->kvmPipe == NULL)
+			{
+				// Only report the failure here. kvm_relay_setup() returns NULL when /tmp/meshagent-kvm-<uid>.sock is still on disk but the user LaunchAgent is stopped, so nothing accepts on it.
+				// The session object stays cached on purpose. The end sink already deletes REMOTE_DESKTOP_STREAM when the tunnel closes, and deleting it here makes that same end sink read a property off undefined and kill the agent the same way.
+				MeshAgent_sendConsoleText(ctx, "KVM: no connection to the user agent for uid %d, is the user service running?", console_uid);
+			}
 		}
 	#else
 		if (TSID != -1) 
@@ -1481,6 +1572,24 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 				}
 			}
 		}
+
+		// At a DM greeter the X server and its Xauthority are root-owned (e.g. LightDM's
+		// /var/run/lightdm/root/:0, mode 0600). consoleUid() returns the DM's own service uid here, so
+		// the capture child setuid()s to it and can no longer read that cookie: XOpenDisplay fails and
+		// the child exits. Capture as root instead; getXInfo(0) already resolves the root server's
+		// cookie. gdmUid==console_uid only holds at the greeter (a real login is uid>=1000).
+		if (TSID == -1 && console_uid != 0)
+		{
+			int gdmuid = -1;
+			if (duk_peval_string(ctx, "require('user-sessions').gdmUid") == 0 && duk_is_number(ctx, -1)) { gdmuid = duk_get_int(ctx, -1); }
+			duk_pop(ctx);
+			if (gdmuid == console_uid)
+			{
+				Duktape_Console_LogEx(ctx, ILibDuktape_LogType_Info1, "No user logged in; capturing display-manager greeter as root (was uid %d)", console_uid);
+				console_uid = 0;
+			}
+		}
+
 		duk_push_int(ctx, console_uid); duk_put_prop_string(ctx, -2, REMOTE_DESKTOP_UID);
 		duk_push_this(ctx);																// [MeshAgent]
 		if (!duk_has_prop_string(ctx, -1, MESH_USER_CHANGED_CB))
@@ -1502,12 +1611,12 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		// For Linux, we need to determine where the XAUTHORITY is:
 		char *updateXAuth = NULL;
 		char *updateDisplay = NULL;
-		char *xdm = NULL;
+		int waylandSession = kvm_is_wayland_session_for_uid(console_uid);
 		int needPop = 0;
 		duk_eval_string(ctx, "require('user-sessions').Self()");
 		int self = duk_get_int(ctx, -1); duk_pop(ctx);
 
-		if (self==0 || getenv("XAUTHORITY") == NULL || getenv("DISPLAY") == NULL)
+		if (!waylandSession && (self == 0 || getenv("XAUTHORITY") == NULL || getenv("DISPLAY") == NULL))
 		{
 			if (duk_peval_string(ctx, "require('monitor-info').getXInfo") == 0)
 			{
@@ -1518,15 +1627,6 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 					{
 						updateXAuth = Duktape_GetStringPropertyValue(ctx, -1, "xauthority", NULL);
 						updateDisplay = Duktape_GetStringPropertyValue(ctx, -1, "display", NULL);
-						xdm = Duktape_GetStringPropertyValue(ctx, -1, "xdm", "");
-
-						if (strcmp(xdm, "xwayland") == 0)
-						{
-							ILibDuktape_MeshAgent_RemoteDesktop_SendError(ptrs, "This platform is configured to use Xwayland");
-							ILibDuktape_MeshAgent_RemoteDesktop_SendError(ptrs, "please modify config to use Xorg");
-							duk_pop(ctx);
-							return(1);
-						}
 
 						if (console_uid != 0 && updateXAuth == NULL)
 						{
@@ -2579,6 +2679,39 @@ int agent_VerifyMeshCertificates(MeshAgentHostContainer *agent)
 	if (i != 1) { return 1; } // Bad certificates
 	return 0;
 }
+
+// Load the optional mTLS client certificate. This is only used for the outgoing connection to
+// the server, it does not replace the agent certificate and has no effect on the NodeID.
+// The PEM file has to hold the private key first, followed by the certificate.
+void agent_LoadClientCertificate(MeshAgentHostContainer *agent)
+{
+	char certfile[1024];
+	int len;
+
+	agent->clientcert.flags = 0;
+	agent->clientcert.x509 = NULL;
+	agent->clientcert.pkey = NULL;
+
+	if (agent->masterDb == NULL) { return; }
+	len = ILibSimpleDataStore_Get(agent->masterDb, "ClientCertPem", NULL, 0);
+	if (len <= 0 || len >= (int)sizeof(certfile)) { return; }
+
+	ILibSimpleDataStore_Get(agent->masterDb, "ClientCertPem", certfile, (int)sizeof(certfile));
+	certfile[sizeof(certfile) - 1] = 0;
+
+	if (util_from_pem(certfile, &(agent->clientcert)) == -1)
+	{
+		// util_from_pem does not clean up after itself, so the key may be set even on failure
+		if (agent->clientcert.pkey != NULL) { EVP_PKEY_free(agent->clientcert.pkey); agent->clientcert.pkey = NULL; }
+		agent->clientcert.x509 = NULL;
+		ILIBLOGMESSAGEX("Unable to load mTLS client certificate: %s", certfile);
+		return;
+	}
+
+	// Also hand it to the script engine, the relay tunnels are opened from there
+	ILibDuktape_ClientCert = &(agent->clientcert);
+	ILIBLOGMESSAGEX("Loaded mTLS client certificate: %s", certfile);
+}
 #endif
 
 
@@ -2739,13 +2872,13 @@ int GenerateSHA384FileHash(char *filePath, char *fileHash)
 	if (checkSumIndex != 0)
 	{
 		bytesRead = fread(ILibScratchPad, 1, checkSumIndex + 4, tmpFile);
-		((unsigned int*)(ILibScratchPad + checkSumIndex))[0] = 0;
+		ILibUnaligned_Write32(ILibScratchPad + checkSumIndex, 0);
 		SHA384_Update(&ctx, ILibScratchPad, bytesRead);
 		if (endIndex > 0) { bytesLeft -= (unsigned int)bytesRead; }
 
 		bytesRead = fread(ILibScratchPad, 1, tableIndex + 8 - (checkSumIndex + 4), tmpFile);
-		((unsigned int*)(ILibScratchPad + bytesRead - 8))[0] = 0;
-		((unsigned int*)(ILibScratchPad + bytesRead - 8))[1] = 0;
+		ILibUnaligned_Write32(ILibScratchPad + bytesRead - 8, 0);
+		ILibUnaligned_Write32(ILibScratchPad + bytesRead - 4, 0);
 		SHA384_Update(&ctx, ILibScratchPad, bytesRead);
 		if (endIndex > 0) { bytesLeft -= (unsigned int)bytesRead; }
 	}
@@ -2911,7 +3044,7 @@ void MeshServer_selfupdate_continue(MeshAgentHostContainer *agent)
 		// Windows Console Mode updater
 		if (duk_peval_string(agent->meshCoreCtx, "require('agent-installer').consoleUpdate();") != 0)
 		{
-			printf("%s", duk_safe_to_string(agent->meshCoreCtx, -1));
+			printf("%s\n", duk_safe_to_string(agent->meshCoreCtx, -1));
 		}
 	}
 	else
@@ -3009,16 +3142,28 @@ duk_ret_t MeshServer_selfupdate_unzip_error(duk_context *ctx)
 	return(0);
 }
 
-// Process MeshCentral server commands. 
+// The MeshCommands_Binary identifier for a control channel command number, minus its MeshCommand_ prefix, generated from the MESH_COMMANDS list in agentcore.h
+static const char* MeshCommand_Name(unsigned short command)
+{
+	switch (command)
+	{
+#define MESH_COMMAND_NAME(id, value) case id: return(&#id[sizeof("MeshCommand_") - 1]);
+		MESH_COMMANDS(MESH_COMMAND_NAME)
+#undef MESH_COMMAND_NAME
+		default: return((command & 0xFF00) == 0x7B00 ? "JSON" : "unknown");
+	}
+}
+
+// Process MeshCentral server commands.
 void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAgentHostContainer *agent, char *cmd, int cmdLen)
 {
-	unsigned short command = ntohs(((unsigned short*)cmd)[0]);
+	unsigned short command = ntohs(ILibUnaligned_Read16(cmd));
 	unsigned short requestid;
 
 	if (agent->controlChannelDebug != 0)
 	{
-		printf("ProcessCommand(%u)...\n", command);
-		ILIBLOGMESSAGEX("ProcessCommand(%u)...", command);
+		printf("ProcessCommand (%u) %s\n", command, MeshCommand_Name(command));
+		ILIBLOGMESSAGEX("ProcessCommand (%u) %s", command, MeshCommand_Name(command));
 	}
 
 #ifndef MICROSTACK_NOTLS
@@ -3032,7 +3177,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 		case MeshCommand_AuthRequest: // This is basic authentication information from the server, we need to sign this and return the signature.
 			if (cmdLen == sizeof(MeshCommand_BinaryPacket_AuthRequest))
 			{
-				if (agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Processing Authentication Request..."); }
+				if (agent->controlChannelDebug != 0) { printf("Processing Authentication Request...\n"); ILIBLOGMESSAGEX("Processing Authentication Request..."); }
 				MeshCommand_BinaryPacket_AuthRequest *AuthRequest = (MeshCommand_BinaryPacket_AuthRequest*)cmd;
 				int signLen;
 				SHA512_CTX c;
@@ -3107,7 +3252,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 		case MeshCommand_AuthVerify: // This is the signature from the server. We need to check everything is ok.
 			if (cmdLen > 8)
 			{
-				if (agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Processing Authentication Verification..."); }
+				if (agent->controlChannelDebug != 0) { printf("Processing Authentication Verification...\n"); ILIBLOGMESSAGEX("Processing Authentication Verification..."); }
 
 				MeshCommand_BinaryPacket_AuthVerify_Header *avh = (MeshCommand_BinaryPacket_AuthVerify_Header*)cmd;
 #ifdef WIN32
@@ -3137,8 +3282,9 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 						X509_pubkey_digest(serverCert, EVP_sha256(), (unsigned char*)ILibScratchPad, (unsigned int*)&hashlen); // OpenSSL 1.1, SHA256 (For older .mshx policy file)
 						if (memcmp(ILibScratchPad, agent->serverHash, UTIL_SHA256_HASHSIZE) != 0) 
 						{
-							printf("Server certificate mismatch\r\n"); break; // TODO: Disconnect
+							printf("Server certificate mismatch\r\n");	// TODO: Disconnect
 							if (agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Server certificate mismatch"); }
+							break;
 						}
 					}
 
@@ -3275,12 +3421,12 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 
 	// All these commands must have both a commandid and a requestid
 	if (cmdLen < 4) return;
-	requestid = ntohs(((unsigned short*)cmd)[1]);
+	requestid = ntohs(ILibUnaligned_Read16(cmd + 2));
 
 	if (agent->controlChannelDebug != 0) 
 	{
-		printf("BinaryCommand(%u, %u)...\n", command, requestid);
-		ILIBLOGMESSAGEX("BinaryCommand(%u, %u)...", command, requestid); 
+		printf("BinaryCommand (%u) %s, request %u\n", command, MeshCommand_Name(command), requestid);
+		ILIBLOGMESSAGEX("BinaryCommand (%u) %s, request %u", command, MeshCommand_Name(command), requestid);
 	}
 
 
@@ -3415,8 +3561,8 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 		}
 		case MeshCommand_CoreOk: // Message from the server indicating our meshcore is ok. No update needed.
 		{
-			printf("Server verified meshcore...");
-			
+			printf("Server verified meshcore...\n");
+			if (agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Server verified meshcore..."); }
 			duk_eval_string(agent->meshCoreCtx, "_MSH().setuid;");
 			if (duk_is_null_or_undefined(agent->meshCoreCtx, -1) == 0)
 			{
@@ -3656,7 +3802,7 @@ void MeshServer_ControlChannel_IdleTimeout_PongTimeout(void *object)
 	if (agent->controlChannelDebug != 0)
 	{
 		printf("AgentCore/MeshServer_ControlChannel_IdleTimeout(): PONG TIMEOUT\n");
-		ILIBLOGMESSAGEX("AgentCore/MeshServer_ControlChannel_IdleTimeout(): PONG TIMEOUT\n");
+		ILIBLOGMESSAGEX("AgentCore/MeshServer_ControlChannel_IdleTimeout(): PONG TIMEOUT");
 	}
 	ILibWebClient_Disconnect(agent->controlChannel);
 	agent->controlChannel = NULL;
@@ -3668,7 +3814,7 @@ void MeshServer_ControlChannel_IdleTimeout(ILibWebClient_StateObject WebStateObj
 	if (agent->controlChannelDebug != 0)
 	{
 		printf("AgentCore/MeshServer_ControlChannel_IdleTimeout(): Sending Ping\n");
-		ILIBLOGMESSAGEX("AgentCore/MeshServer_ControlChannel_IdleTimeout(): Sending Ping\n");
+		ILIBLOGMESSAGEX("AgentCore/MeshServer_ControlChannel_IdleTimeout(): Sending Ping");
 	}
 
 	ILibLifeTime_Add(ILibGetBaseTimer(agent->chain), Agent2PingData(agent), 5, MeshServer_ControlChannel_IdleTimeout_PongTimeout, NULL);
@@ -3687,7 +3833,7 @@ void MeshServer_ControlChannel_PongSink(ILibWebClient_StateObject WebStateObject
 	if (agent->controlChannelDebug != 0)
 	{
 		printf("AgentCore/MeshServer_ControlChannel_IdleTimeout(): Pong Received\n");
-		ILIBLOGMESSAGEX("AgentCore/MeshServer_ControlChannel_IdleTimeout(): Pong Received\n");
+		ILIBLOGMESSAGEX("AgentCore/MeshServer_ControlChannel_IdleTimeout(): Pong Received");
 	}
 
 #ifdef _REMOTELOGGING
@@ -3702,7 +3848,6 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 	if (agent->controlChannelRequest != NULL)
 	{
 		ILibLifeTime_Remove(ILibGetBaseTimer(agent->chain), agent->controlChannelRequest);
-		ILibMemory_Free(agent->controlChannelRequest);
 		agent->controlChannelRequest = NULL;
 	}
 
@@ -3939,8 +4084,8 @@ void MeshServer_ConnectEx_NetworkError(void *j)
 
 	printf("Network Timeout occurred...\n");
 
+	// OnResponse schedules the retry; a second attempt can reenter proxy discovery.
 	ILibWebClient_CancelRequest(request);
-	MeshServer_ConnectEx(agent);
 }
 void MeshServer_ConnectEx_NetworkError_Cleanup(void *j)
 {
@@ -4163,6 +4308,10 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 			useproxy = len;
 		}
 	}
+	else
+	{
+		agent->triedNoProxy_Index = agent->serverIndex;
+	}
 #ifndef MICROSTACK_NOTLS
 	ILibParseUriResult result = ILibParseUri(serverUrl, &host, &port, &path, useproxy ? NULL : &meshServer);
 #else
@@ -4176,6 +4325,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		{
 			printf("agentcore: DNS Lock[%s]: Unauthorized to connect to: %s\n", agent->DNS_LOCK, host);
 			free(host); free(path);
+			ILibDestructParserResults(rs);
 			ILibLifeTime_Add(ILibGetBaseTimer(agent->chain), agent, 5, MeshServer_ConnectEx_Lockout_Retry, NULL);
 			return;
 		}
@@ -4253,6 +4403,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		{
 			printf("agentcore: ServerID Lock: ServerID MISMATCH for: %s\n", host);
 			free(host); free(path);
+			ILibDestructParserResults(rs);
 			ILibLifeTime_Add(ILibGetBaseTimer(agent->chain), agent, 5, MeshServer_ConnectEx_Lockout_Retry, NULL);
 			return;
 		}
@@ -4296,8 +4447,10 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	if (useproxy != 0 || meshServer.sin6_family != AF_UNSPEC)
 	{
 		if (useproxy == 0) { strcpy_s(agent->serverip, sizeof(agent->serverip), ILibRemoteLogging_ConvertAddress((struct sockaddr*)&meshServer)); }
-		printf("Connecting %sto: %s\n", useproxy!=0?"(via proxy) ":"", agent->serveruri);
-		if (agent->logUpdate != 0 || agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Connecting %sto: %s", useproxy != 0 ? "(via proxy) " : "", agent->serveruri); }
+		printf("Connecting %sto: %s\n", useproxy != 0 ? "(via proxy) " : "", agent->serveruri);
+		if (agent->logUpdate != 0 || agent->controlChannelDebug != 0) {
+			ILIBLOGMESSAGEX("Connecting %sto: %s", useproxy != 0 ? "(via proxy) " : "", agent->serveruri);
+		}
 
 		ILibWebClient_AddWebSocketRequestHeaders(req, 65535, MeshServer_OnSendOK);
 
@@ -4409,26 +4562,17 @@ void MeshServer_Agent_SelfTest(MeshAgentHostContainer *agent)
 
 	if (duk_peval_string(agent->meshCoreCtx, "require('agent-selftest')();") != 0)
 	{
-		printf("   -> Loading Test Script.................[FAILED] %s", duk_safe_to_string(agent->meshCoreCtx, -1));
+		printf("   -> Loading Test Script.................[FAILED] %s\n", duk_safe_to_string(agent->meshCoreCtx, -1));
 		exit(1);
 	}
 	duk_pop(agent->meshCoreCtx);
 }
 
-void MeshServer_Connect(MeshAgentHostContainer *agent)
-{
-	unsigned int timeout;
-
-	// If this is called while we are in any connection state, just leave now.
-	if (agent->serverConnectionState != 0) return;
-
-	if (ILibSimpleDataStore_Get(agent->masterDb, "selfTest", NULL, 0) != 0)
-	{
-		MeshServer_Agent_SelfTest(agent);
-		return;
-	}
-
 #ifdef WIN32
+static void MeshServer_CheckAuthenticode(MeshAgentHostContainer *agent)
+{
+	if (agent->authenticodeChecked != 0) return;
+
 	duk_idx_t top = duk_get_top(agent->meshCoreCtx);
 	if (duk_peval_string(agent->meshCoreCtx, "require('win-authenticode-opus')(process.execPath);") == 0)							// [obj]
 	{
@@ -4452,6 +4596,26 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 		}
 	}
 	duk_set_top(agent->meshCoreCtx, top);																							// ...
+	duk_gc(agent->meshCoreCtx, 0);
+	agent->authenticodeChecked = 1;
+}
+#endif
+
+void MeshServer_Connect(MeshAgentHostContainer *agent)
+{
+	unsigned int timeout;
+
+	// If this is called while we are in any connection state, just leave now.
+	if (agent->serverConnectionState != 0) return;
+
+	if (ILibSimpleDataStore_Get(agent->masterDb, "selfTest", NULL, 0) != 0)
+	{
+		MeshServer_Agent_SelfTest(agent);
+		return;
+	}
+
+#ifdef WIN32
+	MeshServer_CheckAuthenticode(agent);
 #endif
 
 	util_random(sizeof(int), (char*)&timeout);
@@ -4471,16 +4635,17 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 	SLAVELOG = ILibSimpleDataStore_Get(agent->masterDb, "slaveKvmLog", NULL, 0);
 #endif
 
-	if (agent->logUpdate != 0) { ILIBLOGMESSAGEX("PLATFORM_TYPE: %d", agent->platformType); }
-	if (agent->logUpdate != 0) { ILIBLOGMESSAGEX("Running as Service: %d", agent->JSRunningAsService); }
-
-	if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("Attempting to connect to Server..."); }
-	if (agent->controlChannelDebug != 0)
+	if (agent->logUpdate != 0)
 	{
-		ILIBLOGMESSSAGE("Attempting to connect to Server...");
-		printf("Attempting to connect to Server...\n");
+		ILIBLOGMESSAGEX("PLATFORM_TYPE: %d", agent->platformType);
+		ILIBLOGMESSAGEX("Running as Service: %d", agent->JSRunningAsService);
 	}
-	else if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("Attempting to connect to Server..."); }
+
+	if (agent->logUpdate != 0 || agent->controlChannelDebug != 0)
+	{
+		printf("Attempting to connect to Server...\n");
+		ILIBLOGMESSSAGE("Attempting to connect to Server...");
+	}
 
 	if (agent->retryTime == 0)
 	{
@@ -4622,7 +4787,7 @@ int importSettings(MeshAgentHostContainer *agent, char* fileName)
 					}
 					else
 					{
-						if (valLen > 2 && ntohs(((unsigned short*)val)[0]) == HEX_IDENTIFIER)
+						if (valLen > 2 && ntohs(ILibUnaligned_Read16(val)) == HEX_IDENTIFIER)
 						{
 							// HEX value
 							ILibSimpleDataStore_PutEx(agent->masterDb, key, keyLen, ILibScratchPad2, util_hexToBuf(val + 2, valLen - 2, ILibScratchPad2));
@@ -4678,6 +4843,7 @@ MeshAgentHostContainer* MeshAgent_Create(MeshCommand_AuthInfo_CapabilitiesMask c
 			retVal->shCore = NULL;
 		}
 	}
+	retVal->authenticodeChecked = 0;
 #endif
 
 	retVal->agentID = (AgentIdentifiers)MESH_AGENTID;
@@ -4784,7 +4950,7 @@ void MeshAgent_AgentMode_IPAddressChanged_Handler(ILibIPAddressMonitor sender, v
 	if (agentHost->controlChannelDebug != 0)
 	{
 		printf("MeshAgent_AgentMode_IPAddressChanged_Handler(%d)\n", agentHost->serverConnectionState);
-		ILIBLOGMESSAGEX("MeshAgent_AgentMode_IPAddressChanged_Handler(%d)\n", agentHost->serverConnectionState);
+		ILIBLOGMESSAGEX("MeshAgent_AgentMode_IPAddressChanged_Handler(%d)", agentHost->serverConnectionState);
 	}
 
 	if (agentHost->multicastDiscovery != NULL)
@@ -4792,7 +4958,7 @@ void MeshAgent_AgentMode_IPAddressChanged_Handler(ILibIPAddressMonitor sender, v
 		if (agentHost->controlChannelDebug != 0)
 		{
 			printf("Resetting MulticastSocketv4\n");
-			ILIBLOGMESSAGEX("Resetting MulticastSocketv4\n");
+			ILIBLOGMESSAGEX("Resetting MulticastSocketv4");
 		}
 		ILibMulticastSocket_ResetMulticast(agentHost->multicastDiscovery, 0);
 	}
@@ -4801,7 +4967,7 @@ void MeshAgent_AgentMode_IPAddressChanged_Handler(ILibIPAddressMonitor sender, v
 		if (agentHost->controlChannelDebug != 0)
 		{
 			printf("Resetting MulticastSocketv6\n");
-			ILIBLOGMESSAGEX("Resetting MulticastSocketv6\n");
+			ILIBLOGMESSAGEX("Resetting MulticastSocketv6");
 		}
 		ILibMulticastSocket_ResetMulticast(agentHost->multicastDiscovery2, 0);
 	}
@@ -5059,6 +5225,24 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			uint64_t val = 0;
 			if (ILib_atoi_uint64(&val, ILibScratchPad, len) == 0) { ILibCriticalLog_MaxSize = val; }
 		}
+	}
+
+	if (ILibSimpleDataStore_Get(agentHost->masterDb, "logRotate", NULL, 0) != 0)
+	{
+		int len = ILibSimpleDataStore_Get(agentHost->masterDb, "logRotate", ILibScratchPad, sizeof(ILibScratchPad));
+		if (len < sizeof(ILibScratchPad))
+		{
+			uint64_t val = 0;
+			if (ILib_atoi_uint64(&val, ILibScratchPad, len) == 0 && val > 0)
+			{
+				ILibCriticalLog_CapMode = ILibAppendStringToDisk_Cap_Rotate;
+				ILibCriticalLog_RotateCount = (int)val; // value doubles as how many rotated logs to keep
+			}
+		}
+	}
+	if (ILibCriticalLog_CapMode == ILibAppendStringToDisk_Cap_Stop && ILibSimpleDataStore_Get(agentHost->masterDb, "logTruncate", NULL, 0) != 0)
+	{
+		ILibCriticalLog_CapMode = ILibAppendStringToDisk_Cap_Truncate;
 	}
 
 #ifdef WIN32
@@ -5491,7 +5675,11 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 #endif
 
 #ifndef MICROSTACK_NOTLS
-	if (agentHost->selftlscert.x509 == NULL) {
+	agent_LoadClientCertificate(agentHost);
+	if (agentHost->clientcert.x509 != NULL) {
+		// An mTLS client certificate was configured, use that one instead.
+		ILibWebClient_EnableHTTPS(agentHost->httpClientManager, &(agentHost->clientcert), NULL, ValidateMeshServer, agentHost);
+	} else if (agentHost->selftlscert.x509 == NULL) {
 		// We don't have a TLS certificate, so setup the client without one.
 		ILibWebClient_EnableHTTPS(agentHost->httpClientManager, NULL, NULL, ValidateMeshServer, agentHost);
 	} else {
@@ -6017,7 +6205,7 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 			else if (strncmp(argv[i], "--script-flags", 14) == 0 && ((i + 1) < argc))
 			{
 				// JS Permissions (see .h for values)
-				if (ntohs(((unsigned short*)argv[i + 1])[0]) == HEX_IDENTIFIER)
+				if (ntohs(ILibUnaligned_Read16(argv[i + 1])) == HEX_IDENTIFIER)
 				{
 					int xlen = (int)strnlen_s(argv[i + 1], 32);
 					if (xlen <= 10)
@@ -6220,10 +6408,51 @@ int MeshAgent_System(char *cmd)
 
 #endif
 
+// Duktape's voluntary GC trigger scales with heap size, so a steady stream of short-lived
+// EventEmitter/child_process/ScriptContainer graphs climbs to ever higher plateaus before a
+// sweep runs. The worst offender is MeshCentral's once-a-second getclip clipboard poll during
+// a Desktop session: each poll spawns session-lookup children plus a clipboard read container,
+// all finalizable (so refcounting cannot reclaim them), and that churn outpaces voluntary GC,
+// growing the main agent RSS without bound. Force a mark-and-sweep once
+// the script heap grows past a fixed delta since the last one, so the churn is reclaimed
+// promptly and RSS stays bounded regardless of which object types are involved. The check is a
+// cheap counter comparison; the sweep only runs while the heap is actually growing.
+extern size_t ILibDuktape_ScriptContainer_TotalAllocations;
+static size_t g_meshCoreGcMark = 0;
+#define MESHAGENT_GC_GROWTH_BYTES (1024 * 1024)
+void MeshAgent_HeapGcTimerSink(void *object)
+{
+	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)object;
+	if (agent == NULL || agent->chain == NULL || ILibIsChainBeingDestroyed(agent->chain)) { return; }
+	if (agent->meshCoreCtx != NULL && duk_ctx_is_alive(agent->meshCoreCtx) && !duk_ctx_shutting_down(agent->meshCoreCtx))
+	{
+		size_t total = ILibDuktape_ScriptContainer_TotalAllocations;
+		if (total > g_meshCoreGcMark + MESHAGENT_GC_GROWTH_BYTES)
+		{
+			duk_gc(agent->meshCoreCtx, 0);
+			g_meshCoreGcMark = ILibDuktape_ScriptContainer_TotalAllocations;	// post-sweep baseline
+#if defined(__linux__) && defined(__GLIBC__)
+			// The finalizers duk_gc just ran free large native buffers (child pipe buffers,
+			// readable paused_data). glibc keeps those pages, so return them to the OS or RSS
+			// stays at the high-water mark and still looks like a leak. glibc only: MUSL (Alpine)
+			// has no malloc_trim and hands freed pages back on its own, so it just skips this.
+			malloc_trim(0);
+#endif
+		}
+		else if (total < g_meshCoreGcMark)
+		{
+			g_meshCoreGcMark = total;	// heap shrank (e.g. core restart); re-baseline downward
+		}
+	}
+	ILibLifeTime_AddEx(ILibGetBaseTimer(agent->chain), agent, 2000, MeshAgent_HeapGcTimerSink, NULL);
+}
+
 int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **param)
 {
 	char *startParms = NULL;
-	char _exedata[ILibMemory_Init_Size(1024, sizeof(void*))];
+	// void* element type guarantees the pointer alignment ILibMemory blocks require (a plain
+	// char array only guarantees alignment 1, and ILibMemory_CanaryOK rejects misaligned blocks)
+	void *_exedata[(ILibMemory_Init_Size(1024, sizeof(void*)) + sizeof(void*) - 1) / sizeof(void*)];
 	char *exePath = ILibMemory_Init(_exedata, 1024, sizeof(void*), ILibMemory_Types_STACK);
 	((void**)ILibMemory_Extra(exePath))[0] = agentHost;
 
@@ -6318,6 +6547,10 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 #endif
 
 	void *reserved[] = { agentHost, &paramLen, param };
+
+	// Keep the script heap bounded against short-lived spawn churn (see MeshAgent_HeapGcTimerSink).
+	g_meshCoreGcMark = 0;
+	ILibLifeTime_AddEx(ILibGetBaseTimer(agentHost->chain), agentHost, 2000, MeshAgent_HeapGcTimerSink, NULL);
 
 	// Check to see if we are running as just a JavaScript Engine
 	if (agentHost->meshCoreCtx_embeddedScript != NULL || (paramLen >= 2 && ILibString_EndsWith(param[1], -1, ".js", 3) != 0) || (paramLen >= 2 && ILibString_EndsWith(param[1], -1, ".zip", 4) != 0))
@@ -6478,6 +6711,8 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 void MeshAgent_Destroy(MeshAgentHostContainer* agent)
 {
 #ifndef MICROSTACK_NOTLS
+	ILibDuktape_ClientCert = NULL;
+	util_freecert(&agent->clientcert);
 	util_freecert(&agent->selftlscert);
 	util_freecert(&agent->selfcert);
 #endif

@@ -7,12 +7,12 @@
 # Then do "make -j8" and get the resulting file /.libs/libturbojpeg.a
 #
 #
-# To build MeshAgent2 on Linux you first got to download the dev libraries to compile the agent, we need x11, txt, ext and jpeg. To install, do this:
+# To build MeshAgent2 on Linux you first got to download the dev libraries to compile the agent, we need x11, xtst, ext, xrandr, egl, glesv2, drm, wayland-client and jpeg. To install, do this:
 #	Using APT:
-#		sudo apt-get install libx11-dev libxtst-dev libxext-dev libjpeg62-dev libxrandr-dev
+#		sudo apt-get install libx11-dev libxtst-dev libxext-dev libjpeg62-dev libxrandr-dev libegl1-mesa-dev libgles2-mesa-dev libdrm-dev libwayland-dev pkg-config
 #
 #	Using YUM:
-#		sudo yum install libX11-devel libXtst-devel libXext-devel libjpeg-devel libXrandr-devel
+#		sudo yum install libX11-devel libXtst-devel libXext-devel libjpeg-devel libXrandr-devel mesa-libEGL-devel mesa-libGLES-devel libdrm-devel wayland-devel pkgconf
 #
 #	NOTE: If you install headers for jpeg8, you need to put the compiled .a in the v80 folder, and specify JPEGVER=v80 when building MeshAgent
 #		eg: make linux ARCHID=6 JPEGVER=v80
@@ -29,7 +29,7 @@
 #   make macos ARCHID=16   																		# macOS x86 64 bit
 #   make macos ARCHID=29																		# macOS ARM 64 bit
 #   lipo -create -output meshagent_osx-universal-64 meshagent_osx-x86-64 meshagent_osx-arm-64	# Combine the two binaries into a universal binary
-# 
+#
 # Special builds:
 #
 #   make linux ARCHID=6 WEBLOG=1 KVM=0      # Linux x86 64 bit, with Web Logging, and KVM disabled
@@ -161,6 +161,7 @@
 #	IFADDR_DISABLE							1 = Don't use ifaddrs.h				=> Default is use IFADDR
 #	KVM										1 = KVM Enabled, 0 = KVM Disabled   => Default depends on ARCHID
 #	KVM_ALL_TILES							0 = Normal, 1 = All Tiles			=> Default is Normal Tiling Algorithm
+#	KVMDEBUG								1 = KVM helper trace log			=> Default is disabled (Windows and macOS KVM only)
 #	LEGACY_LD								0 = Standard, 1 = Legacy			=> Default is Standard (CentOS 5.11 requires Legacy)
 #	NET_SEND_FORCE_FRAGMENT					1 = net.send() fragments sends		=> Default is normal send operation
 #	NOTLS									1 = TLS Support Compiled Out		=> Default is TLS Support Compiled In
@@ -192,7 +193,7 @@ SOURCES += $(ADDITIONALSOURCES)
 SOURCES += meshcore/agentcore.c meshconsole/main.c meshcore/meshinfo.c
 
 # Mesh Agent settings
-MESH_VER = 194
+MESH_VER = 195
 EXENAME = meshagent
 
 # Cross-compiler paths
@@ -218,11 +219,25 @@ OBJECTS = $(patsubst %.c,%.o, $(SOURCES))
 CC = gcc
 STRIP = strip
 
+# Compiler for the Alpine / musl x86-64 target (ARCHID 33)
+# Building natively on Alpine it resolves to the host gcc, which is already musl.
+# For cross-compile: apt install musl-tools.
+# musl-gcc drives the host gcc with -nostdinc and musl's own include path, so
+# the kernel headers are not on it and <linux/limits.h> cannot be found.
+# -idirafter appends the system directories AFTER musl's, so musl still wins
+# for everything it provides and only linux/* and asm/* come from the host.
+# Do not use -I here - that would shadow musl's headers with glibc's.
+# On Alpine none of that applies: musl-gcc does not exist there and
+# /usr/include/x86_64-linux-gnu is a Debian path, so detect a musl host
+# compiler and use it as-is. Override with "make MUSL_CC=..." for any other
+# musl toolchain.
+MUSL_CC ?= $(shell gcc -dumpmachine 2>/dev/null | grep -q musl && echo gcc || echo musl-gcc -idirafter /usr/include/x86_64-linux-gnu -idirafter /usr/include)
+
 # Need to be separate for dependency generation	
 INCDIRS = -I. -Iopenssl/include -Imicrostack -Imicroscript -Imeshcore -Imeshconsole
 
 # Compiler and linker flags
-CFLAGS ?= -std=gnu99 -g -Wall -D_POSIX -DMICROSTACK_PROXY $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DDUK_USE_DEBUGGER_SUPPORT -DDUK_USE_INTERRUPT_COUNTER -DDUK_USE_DEBUGGER_INSPECT -DDUK_USE_DEBUGGER_PAUSE_UNCAUGHT
+CFLAGS ?= -std=gnu99 -g -Wall -D_POSIX -D_FILE_OFFSET_BITS=64 -DMICROSTACK_PROXY $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DDUK_USE_DEBUGGER_SUPPORT -DDUK_USE_INTERRUPT_COUNTER -DDUK_USE_DEBUGGER_INSPECT -DDUK_USE_DEBUGGER_PAUSE_UNCAUGHT
 LDFLAGS ?= -L. -lpthread -lutil -lm
 CEXTRA = -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -fstack-protector -fno-strict-aliasing
 LDEXTRA = 
@@ -253,18 +268,23 @@ endif
 
 ifeq ($(ARCHID),33)
 ARCHNAME = alpine-x86-64
+CC = $(MUSL_CC)
 KVM=0
 CRASH_HANDLER=0
 endif
 
 ifeq ($(ARCHID),32)
 ARCHNAME = aarch64
+# CROSS=1 uses the pinned Bootlin toolchain; unset builds with native gcc/strip (the aarch64
+# CI job runs in an arm64 container), so the default strip runs instead of being skipped.
+ifeq ($(CROSS),1)
 export PATH := $(PATH_AARCH64)bin:$(PATH_AARCH64)libexec/gcc/aarch64-buildroot-linux-gnu/5.4.0:$(PATH_AARCH64)aarch64-buildroot-linux-gnu/bin:$(PATH)
 export STAGING_DIR := $(PATH_AARCH64)
-CC = $(PATH_AARCH64)bin/aarch64-linux-gcc 
+CC = $(PATH_AARCH64)bin/aarch64-linux-gcc
 STRIP = $(PATH_AARCH64)bin/aarch64-linux-strip
-CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
 INCDIRS += -I$(PATH_AARCH64)include
+endif
+CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
 KVM = 1
 LMS = 0
 endif
@@ -316,7 +336,7 @@ ifeq ($(ARCHID),16)
 ARCHNAME = osx-x86-64
 KVM = 1
 LMS = 0
-MACOSARCH = -mmacosx-version-min=10.5
+MACOSARCH = -mmacosx-version-min=10.12
 CC = gcc -arch x86_64
 endif
 
@@ -498,7 +518,9 @@ ifeq ($(CROSS),1)
 endif
 KVM = 1
 LMS = 0
-CEXTRA = -fno-strict-aliasing 
+CEXTRA = -fno-strict-aliasing
+# Bind the pre-2.29 libm symbols so a bullseye-built binary still loads on Buster (glibc 2.28).
+CFLAGS += -include microstack/glibc_compat.h
 endif
 
 # Official Linux ARM 64bit
@@ -547,47 +569,78 @@ endif
 
 ifeq ($(KVM),1)
 # Mesh Agent KVM, this is only included in builds that have KVM support
-LINUXKVMSOURCES = meshcore/KVM/Linux/linux_kvm.c meshcore/KVM/Linux/linux_events.c meshcore/KVM/Linux/linux_tile.c meshcore/KVM/Linux/linux_compression.c
+LINUXKVMSOURCES = meshcore/KVM/Linux/linux_kvm.c meshcore/KVM/Linux/linux_kvm_wayland.c meshcore/KVM/Linux/linux_kvm_drm.c meshcore/KVM/Linux/linux_kvm_drm_egl.c meshcore/KVM/Linux/linux_kvm_rotated.c meshcore/KVM/Linux/linux_kvm_xkb.c meshcore/KVM/Linux/linux_events.c meshcore/KVM/Linux/linux_events_evdev.c meshcore/KVM/Linux/linux_tile.c meshcore/KVM/Linux/linux_compression.c
 MACOSKVMSOURCES = meshcore/KVM/MacOS/mac_kvm.c meshcore/KVM/MacOS/mac_events.c meshcore/KVM/MacOS/mac_tile.c meshcore/KVM/Linux/linux_compression.c
 CFLAGS += -D_LINKVM
-	ifneq ($(JPEGVER),)
-		ifeq ($(LEGACY_LD),1)
-			LINUXFLAGS = lib-jpeg-turbo/linux/$(ARCHNAME)/$(JPEGVER)/libturbojpeg.a
-		else
-			LINUXFLAGS = -l:lib-jpeg-turbo/linux/$(ARCHNAME)/$(JPEGVER)/libturbojpeg.a
-		endif
-		MACOSFLAGS = ./lib-jpeg-turbo/macos/$(ARCHNAME)/$(JPEGVER)/libturbojpeg.a
-	else
-		ifeq ($(NOTURBOJPEG),1)
-			LINUXFLAGS = -ljpeg
-		else
-			ifeq ($(LEGACY_LD),1)
-				LINUXFLAGS = lib-jpeg-turbo/linux/$(ARCHNAME)/libturbojpeg.a
-			else
-				LINUXFLAGS = -l:lib-jpeg-turbo/linux/$(ARCHNAME)/libturbojpeg.a
-			endif
-			MACOSFLAGS = ./lib-jpeg-turbo/macos/$(ARCHNAME)/libturbojpeg.a
-		endif
-	endif
-	BSDFLAGS = /usr/local/lib/libjpeg.a
-	# Mesh Agent KVM Audio: Opus capture/encode for Linux (PulseAudio via dlopen) + macOS
-	ifeq ($(AUDIO),1)
-		LINUXKVMSOURCES += meshcore/KVM/Linux/linux_audio.c meshcore/KVM/Linux/linux_mic.c
-		CFLAGS += -D_KVM_AUDIO
-		LINUXFLAGS += lib-opus/linux/$(ARCHNAME)/libopus.a
-		MACOSFLAGS += ./lib-opus/macos/$(ARCHNAME)/libopus.a
-		INCDIRS += -Ilib-opus/includes
-	endif
-	# Mesh Agent KVM Camera: V4L2 webcam capture for Linux. Adds no third-party
-	# library of its own: V4L2 is kernel ioctls (so there is nothing to dlopen
-	# and nothing that can be missing at runtime), and the JPEG work it does --
-	# encoding the fallback for cameras that cannot produce MJPEG themselves,
-	# and the cheap scaled decode behind static-scene suppression -- uses the
-	# libjpeg-turbo already linked just above for desktop tiles.
-	ifeq ($(CAMERA),1)
-		LINUXKVMSOURCES += meshcore/KVM/Linux/linux_cam.c
-		CFLAGS += -D_KVM_CAMERA
-	endif
+DRMLIBS =
+# The DRM/Wayland header probes only make sense on Linux goals; macOS/BSD also set KVM=1 but a
+# parse-time $(error) here would kill e.g. 'make macos' on hosts without wayland-client.
+ifneq (,$(filter linux pi,$(MAKECMDGOALS)))
+    DRMCFLAGS = $(shell pkg-config --cflags libdrm egl glesv2 2>/dev/null)
+    # libdrm/libEGL/libGLESv2 are dlopen'd at runtime (linux_kvm_drm*.c), not linked, so they stay
+    # out of NEEDED and the agent runs without a DRM/GL stack. Headers still needed (DRMCFLAGS).
+    WAYLANDCLIENT = $(shell pkg-config --exists wayland-client 2>/dev/null && echo 1)
+    ifneq ($(strip $(DRMCFLAGS)),)
+        CFLAGS += $(DRMCFLAGS)
+    else
+        $(error Linux KVM builds require the libdrm, EGL and GLES development packages (pkg-config libdrm egl glesv2))
+    endif
+    ifneq ($(WAYLANDCLIENT),1)
+        $(error Linux KVM builds require the wayland-client development package)
+    endif
+    CFLAGS += $(shell pkg-config --cflags wayland-client)
+    # libwayland-client is dlopen'd at runtime (linux_kvm_drm.c), not linked — headers only.
+    # If the system headers are jpeg8 (JPEG_LIB_VERSION >= 80) and a v80 lib exists, default to it
+    # so the linked lib matches the headers, else libjpeg aborts at runtime ("Wrong JPEG library
+    # version"). Skipped when JPEGVER is set explicitly or NOTURBOJPEG=1.
+    ifeq ($(JPEGVER),)
+        ifneq ($(NOTURBOJPEG),1)
+            JPEG_HDR_VERSION := $(shell $(CC) -include jpeglib.h -E -dM -xc - </dev/null 2>/dev/null | sed -n 's/.*JPEG_LIB_VERSION \([0-9][0-9]*\).*/\1/p' | head -n1)
+            ifeq ($(shell test "$(JPEG_HDR_VERSION)" -ge 80 2>/dev/null && test -f lib-jpeg-turbo/linux/$(ARCHNAME)/v80/libturbojpeg.a && echo yes),yes)
+                JPEGVER = v80
+$(info MeshAgent: system libjpeg is v$(JPEG_HDR_VERSION) (jpeg8); auto-selecting JPEGVER=v80)
+            endif
+        endif
+    endif
+endif
+    ifneq ($(JPEGVER),)
+        ifeq ($(LEGACY_LD),1)
+            LINUXFLAGS = lib-jpeg-turbo/linux/$(ARCHNAME)/$(JPEGVER)/libturbojpeg.a
+        else
+            LINUXFLAGS = -l:lib-jpeg-turbo/linux/$(ARCHNAME)/$(JPEGVER)/libturbojpeg.a
+        endif
+        MACOSFLAGS = ./lib-jpeg-turbo/macos/$(ARCHNAME)/$(JPEGVER)/libturbojpeg.a
+    else
+        ifeq ($(NOTURBOJPEG),1)
+            LINUXFLAGS = -ljpeg
+        else
+            ifeq ($(LEGACY_LD),1)
+                LINUXFLAGS = lib-jpeg-turbo/linux/$(ARCHNAME)/libturbojpeg.a
+            else
+                LINUXFLAGS = -l:lib-jpeg-turbo/linux/$(ARCHNAME)/libturbojpeg.a
+            endif
+            MACOSFLAGS = ./lib-jpeg-turbo/macos/$(ARCHNAME)/libturbojpeg.a
+        endif
+    endif
+    BSDFLAGS = /usr/local/lib/libjpeg.a
+    # Mesh Agent KVM Audio: Opus capture/encode for Linux (PulseAudio via dlopen) + macOS
+    ifeq ($(AUDIO),1)
+        LINUXKVMSOURCES += meshcore/KVM/Linux/linux_audio.c meshcore/KVM/Linux/linux_mic.c
+        CFLAGS += -D_KVM_AUDIO
+        LINUXFLAGS += lib-opus/linux/$(ARCHNAME)/libopus.a
+        MACOSFLAGS += ./lib-opus/macos/$(ARCHNAME)/libopus.a
+        INCDIRS += -Ilib-opus/includes
+    endif
+    # Mesh Agent KVM Camera: V4L2 webcam capture for Linux. Adds no third-party
+    # library of its own: V4L2 is kernel ioctls (so there is nothing to dlopen
+    # and nothing that can be missing at runtime), and the JPEG work it does --
+    # encoding the fallback for cameras that cannot produce MJPEG themselves,
+    # and the cheap scaled decode behind static-scene suppression -- uses the
+    # libjpeg-turbo already linked just above for desktop tiles.
+    ifeq ($(CAMERA),1)
+        LINUXKVMSOURCES += meshcore/KVM/Linux/linux_cam.c
+        CFLAGS += -D_KVM_CAMERA
+    endif
 endif
 
 ifeq ($(LMS),0)
@@ -669,6 +722,9 @@ endif
 
 ifeq ($(KVM_ALL_TILES),1)
 CFLAGS += -DKVM_ALL_TILES
+endif
+ifeq ($(KVMDEBUG),1)
+CFLAGS += -DKVMDEBUGENABLED
 endif
 
 ifeq ($(BIGCHAINLOCK),1)
@@ -809,26 +865,25 @@ $(LIBNAME): $(OBJECTS) $(SOURCES)
 
 # Compile on Raspberry Pi 2/3 with KVM
 pi:
-	$(MAKE) EXENAME="meshagent_pi" CFLAGS="-std=gnu99 -g -Wall -D_POSIX -DMICROSTACK_PROXY -DMICROSTACK_TLS_DETECT -D_LINKVM $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DMESH_AGENTID=25 -D_NOFSWATCHER -D_NOHECI" ADDITIONALSOURCES="$(LINUXKVMSOURCES)" LDFLAGS="-Lopenssl/libstatic/linux/pi -lrt $(LINUXSSL) $(LINUXFLAGS) $(LDFLAGS) $(LDEXTRA) -ldl"
+	$(MAKE) EXENAME="meshagent_pi" CFLAGS="-std=gnu99 -g -Wall -D_POSIX -D_FILE_OFFSET_BITS=64 -DMICROSTACK_PROXY -DMICROSTACK_TLS_DETECT -D_LINKVM $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DMESH_AGENTID=25 -D_NOFSWATCHER -D_NOHECI" ADDITIONALSOURCES="$(LINUXKVMSOURCES)" LDFLAGS="-Lopenssl/libstatic/linux/pi -lrt $(LINUXSSL) $(LINUXFLAGS) $(LDFLAGS) $(LDEXTRA) $(DRMLIBS) -ldl"
 	strip meshagent_pi
 
 linux:
-	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" AID="$(ARCHID)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)" ADDITIONALFLAGS="-lrt -z noexecstack -z relro -z now" CFLAGS="-DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(LINUXSSL) $(LINUXFLAGS) $(LDFLAGS) $(LDEXTRA) -ldl"
+	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" AID="$(ARCHID)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)" ADDITIONALFLAGS="-lrt -z noexecstack -z relro -z now $(DRMLIBS)" CFLAGS="-DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(LINUXSSL) $(LINUXFLAGS) $(LDFLAGS) $(LDEXTRA) -ldl"
 	$(SYMBOLCP)
 	$(STRIP)
 
 macos:
-	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES)" CFLAGS="$(MACOSARCH) -std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACSSL) $(MACOSFLAGS) -L. -lpthread -ldl -lz -lutil -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreServices -framework CoreGraphics -framework CoreFoundation -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"
+	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES)" CFLAGS="$(MACOSARCH) -std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACSSL) $(MACOSFLAGS) -L. -lpthread -ldl -lz -lutil -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreServices -framework CoreGraphics -framework CoreFoundation -framework Security -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"
 	$(SYMBOLCP)
 	$(STRIP)
 
 freebsd:
-	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)"  AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_NOHECI -D_NOILIBSTACKDEBUG -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) $(BSDFLAGS) -L. -lpthread -ldl -lz -lutil $(LDFLAGS) $(LDEXTRA)"
+	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)"  AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_NOHECI -D_NOILIBSTACKDEBUG -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) $(BSDFLAGS) -L. -lpthread -ldl -lz $(filter-out -lutil,$(LDFLAGS)) $(LDEXTRA)"
 	$(SYMBOLCP)
 	$(STRIP)
 
 openbsd:
-	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)"  AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_OPENBSD -D_NOHECI -D_NOILIBSTACKDEBUG -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) $(BSDFLAGS) -L. -lpthread -lz -lutil $(LDFLAGS) $(LDEXTRA)"
+	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)"  AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_OPENBSD -D_NOHECI -D_NOILIBSTACKDEBUG -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) $(BSDFLAGS) -L. -lpthread -lz $(filter-out -lutil,$(LDFLAGS)) $(LDEXTRA)"
 	$(SYMBOLCP)
 	$(STRIP)
-

@@ -330,6 +330,9 @@ ASALocalRun/
 # Klocwork
 .klocwork/
 
+# Generated module export workspace
+modules_expanded/
+
 *.o
 ToolChains/
 .DS_Store

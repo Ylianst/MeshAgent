@@ -1,0 +1,33 @@
+name: macOS Build
+run-name: Build MacOS versions of MeshAgent
+on:
+  push:
+  pull_request:
+jobs:
+  macos-build-arm64:
+    name: macOS arm64 (ARCHID=29)
+    runs-on: macos-15
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7.0.0
+      - name: Build meshagent (arm64, KVM enabled)
+        run: make -j4 macos ARCHID=29
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: meshagent-macos-arm64
+          path: ${{ github.workspace }}/meshagent_*
+
+  macos-build-x86_64:
+    name: macOS x86_64 (ARCHID=16)
+    runs-on: macos-15-intel
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7.0.0
+      - name: Build meshagent (x86_64, KVM enabled)
+        run: make -j4 macos ARCHID=16
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: meshagent-macos-x86_64
+          path: ${{ github.workspace }}/meshagent_*

@@ -34,6 +34,22 @@ limitations under the License.
 
 #include <string.h>
 #include <pwd.h>
+#include <unistd.h>
+#include <errno.h>
+
+// Some macOS SDKs (notably older Xcode / SDK 10.x) did not export
+// LOCAL_PEERPID in <sys/un.h> even though the kernel supports it.
+// Define it here as a fallback so we can always query the connected
+// peer's pid via getsockopt(). This is the macOS-specific way to
+// validate that the daemon's IPC peer really is the user-LaunchAgent
+// meshagent process (and not, e.g., a stale socket file from a
+// crashed helper that was re-bound by an unrelated process). See
+// issue #359: stale /tmp/meshagent-kvm-<uid>.sock files used to
+// cause the daemon to wrap a phantom socket in ILibProcessPipe_Pipe
+// and then crash on the first .write() with "of undefined".
+#ifndef LOCAL_PEERPID
+#define LOCAL_PEERPID 0x102
+#endif
 
 int KVM_Listener_FD = -1;
 // Socket path used when kvm_server_mainloop runs in socket-listener
@@ -60,6 +76,7 @@ void kvm_set_listener_path(const char *path)
 
 
 int KVM_AGENT_FD = -1;
+int KVM_STDOUT_IS_LOG = 0;
 int KVM_SEND(char *buffer, int bufferLen)
 {
 	int retVal = -1;
@@ -108,17 +125,26 @@ pthread_t kvmthread = (pthread_t)NULL;
 ILibProcessPipe_Process gChildProcess;
 ILibQueue g_messageQ;
 
-//int logenabled = 1;
-//FILE *logfile = NULL;
-//#define MASTERLOGFILE "/dev/null"
-//#define SLAVELOGFILE "/dev/null"
-//#define LOGFILE "/dev/null"
+// #define KVMDEBUGENABLED 1
+#ifdef KVMDEBUGENABLED
+static void KvmDebugLog(const char *format, ...)
+{
+	char tmp[255];
+	int len;
+	va_list args;
 
-
+	if (KVM_STDOUT_IS_LOG == 0) { return; }
+	va_start(args, format);
+	len = vsnprintf(tmp, sizeof(tmp), format, args);
+	va_end(args);
+	if (len <= 0) { return; }
+	if (len > (int)sizeof(tmp) - 1) { len = (int)sizeof(tmp) - 1; }
+	write(STDOUT_FILENO, tmp, len);
+	fsync(STDOUT_FILENO);
+}
+#else
 #define KvmDebugLog(...)
-//#define KvmDebugLog(...) printf(__VA_ARGS__); if (logfile != NULL) fprintf(logfile, __VA_ARGS__);
-//#define KvmDebugLog(x) if (logenabled) printf(x);
-//#define KvmDebugLog(x) if (logenabled) fprintf(logfile, "Writing from slave in kvm_send_resolution\n");
+#endif
 
 void senddebug(int val)
 {
@@ -432,11 +458,6 @@ static int                   g_kvmSocketFD   = -1;
 static ILibKVM_WriteHandler  g_kvmSocketWriteHandler = NULL;
 static void                 *g_kvmSocketReserved     = NULL;
 
-// Not currently exported in ILibProcessPipe.h, but available from
-// ILibProcessPipe.c. We use it here so socket-mode sessions are fully
-// detached from the manager on KVM disconnect.
-extern void ILibProcessPipe_FreePipe(void *pipeObject);
-
 static void kvm_relay_socket_ResetState(int closePipe)
 {
 	if (closePipe != 0 && g_kvmSocketPipe != NULL)
@@ -487,9 +508,6 @@ void* kvm_mainloopinput(void* param)
 	char* pchRequest2[30000];
 	int cbBytesRead = 0;
 
-	char tmp[255];
-	int tmpLen;
-
 	if (KVM_AGENT_FD == -1)
 	{
 		int flags;
@@ -499,23 +517,9 @@ void* kvm_mainloopinput(void* param)
 
 	while (!g_shutdown)
 	{
-		if (KVM_AGENT_FD != -1)
-		{
-			tmpLen = sprintf_s(tmp, sizeof(tmp), "About to read from IPC Socket\n");
-			write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
-		}
-
-		KvmDebugLog("Reading from master in kvm_mainloopinput\n");
+		KvmDebugLog("About to read from IPC Socket\n");
 		cbBytesRead = read(KVM_AGENT_FD == -1 ? STDIN_FILENO: KVM_AGENT_FD, pchRequest2 + len, 30000 - len);
-		KvmDebugLog("Read %d bytes from master in kvm_mainloopinput\n", cbBytesRead);
-
-		if (KVM_AGENT_FD != -1)
-		{
-			tmpLen = sprintf_s(tmp, sizeof(tmp), "Read %d bytes from IPC-xx-Socket\n", cbBytesRead);
-			write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
-		}
+		KvmDebugLog("Read %d bytes from IPC Socket\n", cbBytesRead);
 
 		if (cbBytesRead == -1 || cbBytesRead == 0) 
 		{ 
@@ -533,20 +537,9 @@ void* kvm_mainloopinput(void* param)
 		len += cbBytesRead;
 		ptr2 = 0;
 		
-		if (KVM_AGENT_FD != -1)
-		{
-			tmpLen = sprintf_s(tmp, sizeof(tmp), "enter while\n");
-			write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
-		}
+		KvmDebugLog("enter while\n");
 		while ((ptr2 = kvm_server_inputdata((char*)pchRequest2 + ptr, cbBytesRead - ptr)) != 0) { ptr += ptr2; }
-
-		if (KVM_AGENT_FD != -1)
-		{
-			tmpLen = sprintf_s(tmp, sizeof(tmp), "exited while\n");
-			write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
-		}
+		KvmDebugLog("exited while\n");
 
 		if (ptr == len) { len = 0; ptr = 0; }
 		// TODO: else move the reminder.
@@ -590,6 +583,7 @@ void* kvm_server_mainloop(void* param)
 	else
 	{
 		// this is doing I/O via a Unix Domain Socket
+		KVM_STDOUT_IS_LOG = 1;
 		if ((KVM_Listener_FD = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
 		{
 			char tmp[255];
@@ -604,8 +598,7 @@ void* kvm_server_mainloop(void* param)
 		flags = fcntl(KVM_Listener_FD, F_GETFL, 0);
 		if (fcntl(KVM_Listener_FD, F_SETFL, (O_NONBLOCK | flags) ^ O_NONBLOCK) == -1) { }
 
-		written = write(STDOUT_FILENO, "Set FCNTL2\n", 11);
-		fsync(STDOUT_FILENO);
+		KvmDebugLog("Set FCNTL2\n");
 
 		memset(&serveraddr, 0, sizeof(serveraddr));
 		serveraddr.sun_family = AF_UNIX;
@@ -657,16 +650,7 @@ void* kvm_server_mainloop(void* param)
 	pthread_create(&kvmthread, NULL, kvm_mainloopinput, param);
 
 
-	if (KVM_AGENT_FD != -1)
-	{
-		written = write(STDOUT_FILENO, "Starting Loop []\n", 14);
-		fsync(STDOUT_FILENO);
-
-		char stmp[255];
-		int stmpLen = sprintf_s(stmp, sizeof(stmp), "TILE_HEIGHT_COUNT=%d, TILE_WIDTH_COUNT=%d\n", TILE_HEIGHT_COUNT, TILE_WIDTH_COUNT);
-		written = write(STDOUT_FILENO, stmp, stmpLen);
-		fsync(STDOUT_FILENO);
-	}
+	KvmDebugLog("Starting Loop [] TILE_HEIGHT_COUNT=%d, TILE_WIDTH_COUNT=%d\n", TILE_HEIGHT_COUNT, TILE_WIDTH_COUNT);
 
 	while (!g_shutdown) 
 	{
@@ -759,13 +743,7 @@ void* kvm_server_mainloop(void* param)
 			//senddebug(100);
 			getScreenBuffer((unsigned char **)&desktop, &desktopsize, image);
 
-			if (KVM_AGENT_FD != -1)
-			{
-				char tmp[255];
-				int tmpLen = sprintf_s(tmp, sizeof(tmp), "...Enter for loop\n");
-				written = write(STDOUT_FILENO, tmp, tmpLen);
-				fsync(STDOUT_FILENO);
-			}
+			KvmDebugLog("...Enter for loop\n");
 
 			for (y = 0; y < TILE_HEIGHT_COUNT; y++) 
 			{
@@ -812,13 +790,7 @@ void* kvm_server_mainloop(void* param)
 				}
 			}
 
-			if (KVM_AGENT_FD != -1)
-			{
-				char tmp[255];
-				int tmpLen = sprintf_s(tmp, sizeof(tmp), "...exit for loop\n");
-				written = write(STDOUT_FILENO, tmp, tmpLen);
-				fsync(STDOUT_FILENO);
-			}
+			KvmDebugLog("...exit for loop\n");
 
 		}
 		CGImageRelease(image);
@@ -834,11 +806,7 @@ void* kvm_server_mainloop(void* param)
 		tilebuffer = NULL;
 	}
 
-	if (KVM_AGENT_FD != -1)
-	{
-		written = write(STDOUT_FILENO, "Exiting...\n", 11);
-		fsync(STDOUT_FILENO);
-	}
+	KvmDebugLog("Exiting...\n");
 	ILibQueue_Destroy(g_messageQ);
 	return (void*)0;
 }
@@ -956,6 +924,56 @@ static void kvm_relay_socket_BrokenHandler(ILibProcessPipe_Pipe sender)
 	kvm_relay_socket_ResetState(0);
 }
 
+// Validate that the connected peer of an AF_UNIX socket really is the
+// meshagent LaunchAgent we expect (i.e. an agent running as the same
+// uid we were asked to connect to, and owned by the current user, not
+// a stale socket file from a crashed helper or a symlink to something
+// else).
+//
+// Returns 1 if the peer credentials look right, 0 otherwise. On
+// platforms / builds that lack getpeereid() (extremely rare on
+// macOS — it's been there since 10.4) we conservatively return 1
+// rather than blocking the socket path. The crash-class of #359
+// happens AFTER a connect() that returns 0, so the validation only
+// fires for sockets that would otherwise be accepted; we are not
+// adding a new failure mode.
+static int kvm_relay_socket_validate_peer(int fd, int expectedUid, const char *socketPath)
+{
+#if defined(__APPLE__)
+	uid_t peerUid = (uid_t)-1;
+	gid_t peerGid = (gid_t)-1;
+	if (getpeereid(fd, &peerUid, &peerGid) != 0)
+	{
+		fprintf(stderr, "meshagent: kvm-relay: getpeereid() failed on %s: %s (errno=%d) — treating as untrusted peer\n",
+			socketPath, strerror(errno), errno);
+		return(0);
+	}
+	if ((int)peerUid != expectedUid)
+	{
+		fprintf(stderr, "meshagent: kvm-relay: peer uid=%d on %s does not match expected uid=%d — refusing to attach\n",
+			(int)peerUid, socketPath, expectedUid);
+		return(0);
+	}
+	// Also ask the kernel for the peer's pid (Apple-specific
+	// LOCAL_PEERPID option). If the peer exists but reports an
+	// unplausible pid (0, -1) we treat that as a hint the peer
+	// is a phantom and bail out.
+	pid_t peerPid = -1;
+	socklen_t plen = sizeof(peerPid);
+	if (getsockopt(fd, 0, LOCAL_PEERPID, &peerPid, &plen) == 0 && peerPid <= 0)
+	{
+		fprintf(stderr, "meshagent: kvm-relay: peer pid=%d on %s is unplausible — refusing to attach\n",
+			(int)peerPid, socketPath);
+		return(0);
+	}
+	return(1);
+#else
+	UNREFERENCED_PARAMETER(fd);
+	UNREFERENCED_PARAMETER(expectedUid);
+	UNREFERENCED_PARAMETER(socketPath);
+	return(1);
+#endif
+}
 // Setup the KVM session. Return 1 if ok, 0 if it could not be setup.
 void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid)
 {
@@ -994,23 +1012,75 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 		{
 			int fd = -1;
 			int attempt;
-			for (attempt = 0; attempt < 5; attempt++)
+			const int maxRetries = 8;
+			// Per-attempt backoff in microseconds. Capped at 800ms so
+			// that even at the high end we stay well under one second
+			// per attempt; the previous `50000 << attempt` would have
+			// shifted into the millions on a 32-bit int and silently
+			// wrapped to a very small sleep once attempt >= 4.
+			static const int backoffUs[8] = {
+				50000, 100000, 200000, 400000, 800000, 800000, 800000, 800000
+			};
+			int lastConnectErrno = 0;
+			for (attempt = 0; attempt < maxRetries; attempt++)
 			{
 				fd = socket(AF_UNIX, SOCK_STREAM, 0);
-				if (fd < 0) break;
+				if (fd < 0)
+				{
+					lastConnectErrno = errno;
+					fprintf(stderr, "meshagent: kvm-relay: socket() failed on attempt %d: %s (errno=%d)\n",
+						attempt, strerror(errno), errno);
+					break;
+				}
 				struct sockaddr_un addr;
 				memset(&addr, 0, sizeof(addr));
 				addr.sun_family = AF_UNIX;
 				strncpy(addr.sun_path, socketPath, sizeof(addr.sun_path) - 1);
 				if (connect(fd, (struct sockaddr*)&addr, SUN_LEN(&addr)) == 0)
 				{
-					// Agent is up. Wrap the connected socket in a Pipe so
-					// the daemon's existing Pipe_Write / read-handler paths
-					// work without changes elsewhere in the codebase.
+					// Connected. Before wrapping the fd in a Pipe, confirm
+					// the peer is actually the user-LaunchAgent we expect.
+					// This blocks a whole class of crashes where a stale
+					// /tmp/meshagent-kvm-<uid>.sock (left behind by a
+					// crashed helper) gets re-bound by an unrelated
+					// process, the daemon connects, and the very first
+					// .write() through ILibProcessPipe_Pipe becomes a
+					// "cannot read property 'write' of undefined" that
+					// promotes to ILIBCRITICALEXITMSG(254). See #359.
+					if (!kvm_relay_socket_validate_peer(fd, uid, socketPath))
+					{
+						fprintf(stderr, "meshagent: kvm-relay: peer validation failed on %s (attempt %d) — closing and retrying\n",
+							socketPath, attempt);
+						close(fd);
+						fd = -1;
+						// Treat the bad peer as transient; the agent
+						// may rebind the socket correctly on the next
+						// pass. We still want to fall back to fork-exec
+						// if it never recovers.
+						lastConnectErrno = ECONNREFUSED;
+						usleep((useconds_t)backoffUs[attempt]);
+						continue;
+					}
 					g_kvmSocketFD            = fd;
 					g_kvmSocketWriteHandler  = writeHandler;
 					g_kvmSocketReserved      = reserved;
 					g_kvmSocketPipe          = ILibProcessPipe_Pipe_CreateFromExisting((ILibProcessPipe_Manager)processPipeMgr, fd);
+					if (g_kvmSocketPipe == NULL)
+					{
+						// CreateFromExisting can fail if the fd is in a
+						// weird state, the manager is full, or memory is
+						// exhausted. Don't leak the fd or return a half-
+						// initialized pipe — close it and retry, just
+						// like a transient connect() failure.
+						fprintf(stderr, "meshagent: kvm-relay: Pipe_CreateFromExisting returned NULL on %s (attempt %d) — closing and retrying\n",
+							socketPath, attempt);
+						close(fd);
+						g_kvmSocketFD = -1;
+						fd = -1;
+						lastConnectErrno = ECONNREFUSED;
+						usleep((useconds_t)backoffUs[attempt]);
+						continue;
+					}
 					ILibProcessPipe_Pipe_AddPipeReadHandler(g_kvmSocketPipe, 65535, &kvm_relay_socket_ReadHandler);
 					ILibProcessPipe_Pipe_SetBrokenPipeHandler(g_kvmSocketPipe, &kvm_relay_socket_BrokenHandler);
 					ILibProcessPipe_Pipe_ResetMetadata(g_kvmSocketPipe, "KVM user-LaunchAgent socket");
@@ -1018,17 +1088,20 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 					ILibMemory_Free(user); // not used in socket mode
 					return(g_kvmSocketPipe);
 				}
+				lastConnectErrno = errno;
 				close(fd);
 				fd = -1;
 				// Transient failure (ECONNREFUSED on agent re-accept,
-				// or similar). Back off briefly: 50ms, 100ms, 200ms,
-				// 400ms, 800ms — total ~1.55s before giving up.
-				usleep(50000 << attempt);
+				// or similar). Back off briefly. Capped table above;
+				// total budget across 8 attempts is ~3.65s.
+				usleep((useconds_t)backoffUs[attempt]);
 			}
 			// Socket exists but unreachable after retries. Don't fall
 			// back to fork-exec — that path is broken on Tahoe and
 			// would produce black-screen / dead-input. Return NULL
 			// to let the caller surface the error to MeshCentral.
+			fprintf(stderr, "meshagent: kvm-relay: giving up on %s after %d attempts (last errno=%d: %s)\n",
+				socketPath, maxRetries, lastConnectErrno, strerror(lastConnectErrno));
 			ILibMemory_Free(user);
 			return(NULL);
 		}

@@ -2248,7 +2248,7 @@ void ILibDuktape_HttpStream_ServerResponse_WriteImplicitHeaders(void *chain, voi
 			// We can just directly write the data
 			duk_config_buffer(state->ctx, -3, state->buffer, state->bufferLen);
 			duk_push_buffer_object(state->ctx, -3, 0, state->bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);	// [ext][write][this][buffer]
-			retVal = duk_pcall_method(state->ctx, 1);
+			retVal = ILibDuktape_SafePcallMethod(state->ctx, 1, "http.serverResponse.writeImplicitHeaders(): stream.write() ");
 			duk_pop_2(state->ctx);																	// ...
 		}
 		else
@@ -2306,14 +2306,14 @@ void ILibDuktape_HttpStream_ServerResponse_WriteSink_Chain(void *chain, void *us
 		int tmpLen = sprintf_s(tmp, sizeof(tmp), "%X\r\n", (int)state->bufferLen);
 		duk_config_buffer(state->ctx, -4, tmp, tmpLen);
 		duk_push_buffer_object(state->ctx, -4, 0, tmpLen, DUK_BUFOBJ_NODEJS_BUFFER);	// [ext][stream][write][this][buffer]
-		if (duk_pcall_method(state->ctx, 1) != 0) { duk_pop_2(state->ctx); return; }
+		if (ILibDuktape_SafePcallMethod(state->ctx, 1, "http.serverResponse.WriteSink_Chain: stream.write(chunkHeader) ") != 0) { duk_pop_2(state->ctx); return; }
 		duk_pop(state->ctx);															// [ext][stream]
 		duk_get_prop_string(state->ctx, -1, "write");									// [ext][stream][write]
 		duk_dup(state->ctx, -2);														// [ext][stream][write][this]
 	}
 	duk_config_buffer(state->ctx, -4, state->buffer, state->bufferLen);
 	duk_push_buffer_object(state->ctx, -4, 0, state->bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);	// [ext][stream][write][this][buffer]
-	if (duk_pcall_method(state->ctx, 1) != 0) { duk_pop_2(state->ctx); return; }
+	if (ILibDuktape_SafePcallMethod(state->ctx, 1, "http.serverResponse.WriteSink_Chain: stream.write(body) ") != 0) { duk_pop_2(state->ctx); return; }
 	noDrain = duk_get_int(state->ctx, -1);
 	duk_pop(state->ctx);																// [ext][stream]
 	if (state->chunk)
@@ -2324,7 +2324,7 @@ void ILibDuktape_HttpStream_ServerResponse_WriteSink_Chain(void *chain, void *us
 
 		duk_config_buffer(state->ctx, -4, tmp, 2);
 		duk_push_buffer_object(state->ctx, -4, 0, state->bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);// [ext][stream][write][this][buffer]
-		if (duk_pcall_method(state->ctx, 1) != 0) { duk_pop_2(state->ctx); return; }
+		if (ILibDuktape_SafePcallMethod(state->ctx, 1, "http.serverResponse.WriteSink_Chain: stream.write(chunkTrailer) ") != 0) { duk_pop_2(state->ctx); return; }
 		noDrain = duk_get_int(state->ctx, -1);
 		duk_pop(state->ctx);															// [ext][stream]
 	}
@@ -3246,8 +3246,7 @@ duk_ret_t ILibDuktape_HttpStream_md5(duk_context *ctx)
 	ILibDuktape_readableStream *rs = (ILibDuktape_readableStream*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_readableStream_RSPTRS);
 	ILibDuktape_HttpStream_Data *data = (ILibDuktape_HttpStream_Data*)rs->user;
 
-	duk_push_external_buffer(ctx);											// [buffer]
-	duk_config_buffer(ctx, -1, data->entityHash, sizeof(data->entityHash));
+	memcpy_s(duk_push_fixed_buffer(ctx, sizeof(data->entityHash)), sizeof(data->entityHash), data->entityHash, sizeof(data->entityHash));	// [buffer]
 	duk_push_buffer_object(ctx, -1, 0, sizeof(data->entityHash), DUK_BUFOBJ_NODEJS_BUFFER);
 	return(1);
 }
@@ -4099,7 +4098,7 @@ duk_ret_t ILibDuktape_httpStream_parseUri(duk_context *ctx)
 ILibTransport_DoneState ILibDuktape_httpStream_webSocket_WriteWebSocketPacket(ILibDuktape_WebSocket_State *state, int opcode, char *_buffer, int _bufferLen, ILibWebClient_WebSocket_FragmentFlags _bufferFragment)
 {
 	char header[10];
-	int maskKeyInt;
+	uint32_t maskKeyInt;
 	int headerLen = 0;
 	unsigned short flags = state->noMasking == 0 ? WEBSOCKET_MASK : 0;
 
@@ -4198,13 +4197,13 @@ ILibTransport_DoneState ILibDuktape_httpStream_webSocket_WriteWebSocketPacket(IL
 
 		// Mask the payload
 		util_random(4, maskKey);
-		maskKeyInt = ((int*)(maskKey))[0];
-		if (bufferLen > 0) 
+		maskKeyInt = ILibUnaligned_Read32(maskKey);
+		if (bufferLen > 0)
 		{
 			int x;
-			// Note that the line below will cause a SegFault on Linux when compiled with GCC -O3, the fault happens at the XOR (^) operation.
-			// Compiling with -O2 works also, doing the masking operating byte-by-byte also works with -O3.
-			for (x = 0; x < (bufferLen >> 2); ++x) { ((int*)(dataFrame+headerLen+4))[x] = ((int*)buffer)[x] ^ (int)maskKeyInt; } // Mask 4 bytes at a time (SegFaults with -O3).
+			// maskKey/dataFrame/buffer all sit at runtime offsets, so the 4-byte-at-a-time masking below
+			// must not be done through pointer casts (it faulted with GCC -O3, and traps on MIPS/ARMv5).
+			for (x = 0; x < (bufferLen >> 2); ++x) { ILibUnaligned_Write32(dataFrame + headerLen + 4 + (x << 2), ILibUnaligned_Read32(buffer + (x << 2)) ^ maskKeyInt); } // Mask 4 bytes at a time
 			for (x = (x << 2); x < bufferLen; ++x) { dataFrame[x + headerLen + 4] = buffer[x] ^ maskKey[x % 4]; } // Mask the reminder
 		}
 		retVal = ILibDuktape_DuplexStream_WriteData(state->encodedStream, dataFrame, headerLen + 4 + bufferLen) == 0 ? ILibTransport_DoneState_COMPLETE : ILibTransport_DoneState_INCOMPLETE;
@@ -4342,7 +4341,7 @@ ILibTransport_DoneState ILibDuktape_httpStream_webSocket_EncodedWriteSink(ILibDu
 		return(ILibDuktape_httpStream_webSocket_EncodedWriteSink_DispatchUnshift(stream, buffer, bufferLen));
 	} 
 
-	hdr = ntohs(((unsigned short*)(buffer))[0]);
+	hdr = ntohs(ILibUnaligned_Read16(buffer));
 	FIN = (hdr & WEBSOCKET_FIN) != 0;
 	OPCODE = (hdr & WEBSOCKET_OPCODE) >> 8;
 	RSV = (hdr & WEBSOCKET_RSV) >> 8;
@@ -4359,7 +4358,7 @@ ILibTransport_DoneState ILibDuktape_httpStream_webSocket_EncodedWriteSink(ILibDu
 	if (plen == 126)
 	{
 		if (bufferLen < 4) { return(ILibDuktape_httpStream_webSocket_EncodedWriteSink_DispatchUnshift(stream, buffer, bufferLen)); } // We need at least 4 bytes to read enough of the headers
-		plen = (unsigned short)ntohs(((unsigned short*)(buffer))[1]);
+		plen = (unsigned short)ntohs(ILibUnaligned_Read16(buffer + 2));
 		i += 2;
 	}
 	else if (plen == 127)
@@ -4370,7 +4369,7 @@ ILibTransport_DoneState ILibDuktape_httpStream_webSocket_EncodedWriteSink(ILibDu
 		}
 		else
 		{
-			unsigned long long v = ILibNTOHLL(((unsigned long long*)(buffer + 2))[0]);
+			unsigned long long v = ILibNTOHLL(ILibUnaligned_Read64(buffer + 2));
 			if (v > 0x7FFFFFFFUL)
 			{
 				// this value is too big to store in a 32 bit signed variable, so disconnect the websocket.
@@ -4396,10 +4395,10 @@ ILibTransport_DoneState ILibDuktape_httpStream_webSocket_EncodedWriteSink(ILibDu
 		// Unmask the data
 		i += 4;	// Move ptr to start of data
 
-		int maskKeyInt = ((int*)(maskingKey))[0];
+		uint32_t maskKeyInt = ILibUnaligned_Read32(maskingKey);
 		if (plen > 0)
 		{
-			for (x = 0; x < (plen >> 2); ++x) { ((int*)(buffer+i))[x] = ((int*)(buffer+i))[x] ^ (int)maskKeyInt; } // Mask 4 bytes at a time
+			for (x = 0; x < (plen >> 2); ++x) { ILibUnaligned_Write32(buffer + i + (x << 2), ILibUnaligned_Read32(buffer + i + (x << 2)) ^ maskKeyInt); } // Mask 4 bytes at a time
 			for (x = (x << 2); x < plen; ++x) { buffer[x + i] = buffer[x + i] ^ maskingKey[x % 4]; } // Mask the reminder
 		}
 	}
@@ -4976,9 +4975,9 @@ duk_ret_t ILibDuktape_WebSocket_bytesSent_ratio(duk_context *ctx)
 	duk_get_prop_string(ctx, -1, ILibDuktape_WSDEC2WS);						// [WebSocket_Decoded][WebSocket]
 	ws = (ILibDuktape_WebSocket_State*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_WebSocket_StatePtr);
 
-	long double ratio = (long double)ws->actualSent / (long double)ws->uncompressedSent;
+	double ratio = (double)ws->actualSent / (double)ws->uncompressedSent;
 	ratio = (1 - ratio) * 100;
-	duk_push_number(ctx, floor((double)ratio));
+	duk_push_number(ctx, floor(ratio));
 	
 	return(1);
 }
@@ -4989,9 +4988,9 @@ duk_ret_t ILibDuktape_WebSocket_bytesReceived_ratio(duk_context *ctx)
 	duk_get_prop_string(ctx, -1, ILibDuktape_WSDEC2WS);						// [WebSocket_Decoded][WebSocket]
 	ws = (ILibDuktape_WebSocket_State*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_WebSocket_StatePtr);
 
-	long double ratio = (long double)ws->actualReceived / (long double)ws->uncompressedReceived;
+	double ratio = (double)ws->actualReceived / (double)ws->uncompressedReceived;
 	ratio = (1 - ratio) * 100;
-	duk_push_number(ctx, floor((double)ratio));
+	duk_push_number(ctx, floor(ratio));
 
 	return(1);
 }

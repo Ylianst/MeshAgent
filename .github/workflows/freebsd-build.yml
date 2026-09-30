@@ -1,0 +1,33 @@
+name: FreeBSD Build
+run-name: Build FreeBSD versions of MeshAgent
+on:
+  push:
+  pull_request:
+jobs:
+  freebsd-build-x86-64:
+    name: FreeBSD x86_64 (ARCHID=30)
+    # GitHub has no FreeBSD runners, so the build runs inside a FreeBSD VM on a Linux runner.
+    # Binaries built on an older FreeBSD release run on all newer ones, but not vice versa,
+    # so build on the oldest release CI can still support: 13.5 covers 13.x (TrueNAS CORE,
+    # older OPNsense/pfSense) through 15.x. FreeBSD 13 is EOL — if its pkg repo or VM image
+    # disappears and the "prepare" step starts failing, bump the release to 14.4.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7.0.0
+      - name: Build meshagent (x86_64) in FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "13.5"
+          # The makefile generates ILibDuktape_Commit.h only when git works — without git the
+          # build fails on a missing header. safe.directory is needed because the rsynced
+          # repo is owned by the runner uid, not the VM user, so git refuses it otherwise.
+          prepare: |
+            pkg install -y gmake git
+            git config --global --add safe.directory '*'
+          run: gmake -j4 freebsd ARCHID=30
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: meshagent-freebsd-x86_64
+          path: ${{ github.workspace }}/meshagent_*

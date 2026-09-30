@@ -1,0 +1,24 @@
+#prevent lf/crlf hassles
+* text=auto eol=lf
+
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# Visual Studio rewrites these as CRLF on save regardless of platform
+*.sln       text eol=crlf
+*.vcxproj   text eol=crlf
+*.props     text eol=crlf
+*.filters   text eol=crlf
+
+# Prebuilt archives and images
+*.a     binary
+*.lib   binary
+*.png   binary
+*.ico   binary
+*.bmp   binary
+*.dll   binary
+*.exe   binary
+*.zip   binary
+
+# other
+*.md    text diff=markdown

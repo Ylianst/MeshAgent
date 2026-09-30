@@ -1510,7 +1510,7 @@ int ILibStun_WebRTC_UpdateOfferResponse(struct ILibStun_IceState *iceState, char
 
 	if ((*answer = (char*)malloc(rlen + turnRecordSize)) == NULL) ILIBCRITICALEXIT(254);
 	((unsigned short*)(*answer))[0] = 1; // Block version number
-	((unsigned int*)(*answer + 2))[0] = htonl(BlockFlags); // Block flags
+	ILibUnaligned_Write32(*answer + 2, htonl(BlockFlags)); // Block flags
 	memcpy_s(*answer + 6, rlen + turnRecordSize - 6, iceState->userAndKey, 42);
 
 	(*answer)[48] = (char)(iceState->parentStunModule->CertThumbprintLength);
@@ -1518,8 +1518,8 @@ int ILibStun_WebRTC_UpdateOfferResponse(struct ILibStun_IceState *iceState, char
 	(*answer)[49 + 32] = (char)LocalInterfaceListV4Len;
 	for (i = 0; i < LocalInterfaceListV4Len; i++)
 	{
-		((int*)(*answer + 49 + 33 + (i * 6)))[0] = LocalInterfaceListV4[i].sin_addr.s_addr;
-		((short*)(*answer + 49 + 33 + (i * 6) + 4))[0] = ((struct sockaddr_in*)(&(iceState->parentStunModule->LocalIf)))->sin_port;
+		ILibUnaligned_Write32(*answer + 49 + 33 + (i * 6), (uint32_t)LocalInterfaceListV4[i].sin_addr.s_addr);
+		ILibUnaligned_Write16(*answer + 49 + 33 + (i * 6) + 4, (uint16_t)((struct sockaddr_in*)(&(iceState->parentStunModule->LocalIf)))->sin_port);
 	}
 	if (LocalInterfaceListV4 != NULL) free(LocalInterfaceListV4);
 	if (turnRecordSize > 0)
@@ -2868,7 +2868,7 @@ int ILibStun_SetIceOffer2(void *StunModule, char* iceOffer, int iceOfferLen, cha
 	memcpy_s(state->offerblock, iceOfferLen + candidateCount + 1, iceOffer, iceOfferLen);
 	memset(state->offerblock + iceOfferLen, 0, candidateCount + 1);
 	state->blockversion = ntohs(((unsigned short*)(state->offerblock))[0]);
-	state->blockflags = ntohl(((unsigned int*)(state->offerblock + 2))[0]);
+	state->blockflags = ntohl(ILibUnaligned_Read32(state->offerblock + 2));
 	state->rusernamelen = state->offerblock[6];
 	state->rusername = state->offerblock + 7;
 	state->rkeylen = state->offerblock[7 + state->rusernamelen];
@@ -3136,14 +3136,15 @@ ILibTransport_DoneState ILibStun_SendSctpPacket(struct ILibStun_Module *obj, int
 {
 	if (bufferLength < 12) return ILibTransport_DoneState_ERROR;
 
-	// Setup the header
-	((unsigned short*)buffer)[0] = htons(obj->dTlsSessions[session]->inport);		// Source port
-	((unsigned short*)buffer)[1] = htons(obj->dTlsSessions[session]->outport);		// Destination port
-	((unsigned int*)buffer)[1] = obj->dTlsSessions[session]->tag;					// Tag
+	// Setup the header. Callers pass rpacket->Data - 12, which is 2 mod 4 (packed struct), so
+	// the 32 bit header fields must not be stored through pointer casts.
+	ILibUnaligned_Write16(buffer, htons(obj->dTlsSessions[session]->inport));		// Source port
+	ILibUnaligned_Write16(buffer + 2, htons(obj->dTlsSessions[session]->outport));	// Destination port
+	ILibUnaligned_Write32(buffer + 4, obj->dTlsSessions[session]->tag);				// Tag
 
 	// Compute and put the CRC at the right place
-	((unsigned int*)buffer)[2] = 0;
-	((unsigned int*)buffer)[2] = crc32c(0, (unsigned char*)buffer, (uint32_t)bufferLength);
+	ILibUnaligned_Write32(buffer + 8, 0);
+	ILibUnaligned_Write32(buffer + 8, crc32c(0, (unsigned char*)buffer, (uint32_t)bufferLength));
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_4, "SCTP[%d] (%d): Send", session, bufferLength);
 	
@@ -3164,9 +3165,9 @@ ILibTransport_DoneState ILibStun_SendSctpPacket(struct ILibStun_Module *obj, int
 		}
 		if ((buffer + i)[0] == 0)
 		{
-			ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_4, "... TSN: %u", ntohl(((ILibSCTP_DataPayload*)(buffer + i))->TSN));
+			ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_4, "... TSN: %u", ntohl(ILibUnaligned_Read32(buffer + i + 4)));
 		}
-		utmp = ntohs(((uint16_t*)(buffer + i))[1]);
+		utmp = ntohs(ILibUnaligned_Read16(buffer + i + 2));
 		i += utmp;
 
 		if (utmp == 0) 
@@ -3178,7 +3179,7 @@ ILibTransport_DoneState ILibStun_SendSctpPacket(struct ILibStun_Module *obj, int
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_5, "... Source: %u , Destination: %u", obj->dTlsSessions[session]->inport, obj->dTlsSessions[session]->outport);
 	ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_5, "... TAG: %u", obj->dTlsSessions[session]->tag);
-	ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_5, "... Checksum: %u", ((unsigned int*)buffer)[2]);
+	ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_5, "... Checksum: %u", ILibUnaligned_Read32(buffer + 8));
 
 #ifdef _REMOTELOGGING
 	ILibSctp_DebugSctpPacket(ILibChainGetLogger(obj->ChainLink.ParentChain), buffer, bufferLength, "ILibStun_SendSctpPacket");
@@ -3666,7 +3667,7 @@ void ILibStun_SctpProcessStreamData(struct ILibStun_Module *obj, int session, un
 		unsigned short offset = ((ILibSCTP_PendingTSN_Data*)((char*)&o->pendingReconfigPacket))->Data.StreamIdOffset;
 		int streamIdCount = (offset / 2) - 2;
 
-		if(((unsigned int*)(o->rpacket + o->rpacketsize - offset))[0] <= o->userTSN)
+		if(ILibUnaligned_Read32(o->rpacket + o->rpacketsize - offset) <= o->userTSN)
 		{
 			// The LastTSN specified by the peer has passed, so we can continue with the ChannelClose operation
 			// Let's locally initiate a ChannelClose... We'll propagate the close in the response handler
@@ -4014,7 +4015,7 @@ void ILibStun_SctpResent(struct ILibStun_dTlsSession *obj)
 					ILibStun_SendSctpPacket(obj->parent, obj->sessionId, rpacket->Data - 12, rpacket->PacketSize);
 #ifdef _WEBRTCDEBUG
 					//if (obj->onSendRetry != NULL) { obj->onSendRetry(obj, "OnSendRetry", ((unsigned short*)(rpacket->Data + sizeof(char*)))[0]); }
-					if (obj->onSendRetry != NULL) { obj->onSendRetry(obj, "OnSendRetry", ntohl(((unsigned int*)rpacket->Data)[1])); }
+					if (obj->onSendRetry != NULL) { obj->onSendRetry(obj, "OnSendRetry", ntohl(ILibUnaligned_Read32(rpacket->Data + 4))); }
 					if (obj->onRetryPacket != NULL)
 					{
 						char *tmp = ILibMemory_AllocateA(rpacket->PacketSize + 14);
@@ -4532,7 +4533,7 @@ void ILibStun_ProcessSctpPacket(struct ILibStun_Module *obj, int session, char* 
 											pending.Data.StreamIdOffset = (4 + (2*streamCount));
 
 											// We are going to store the TSN followed by the StreamIds 
-											((int*)(o->rpacket + o->rpacketsize - pending.Data.StreamIdOffset))[0] = lastTSN;
+											ILibUnaligned_Write32(o->rpacket + o->rpacketsize - pending.Data.StreamIdOffset, (uint32_t)lastTSN);
 											for(i = 0; i < streamCount; ++i)
 											{
 												((unsigned short*)(o->rpacket + o->rpacketsize - pending.Data.StreamIdOffset))[i+2] = ntohs(req->Streams[i]);
@@ -5205,7 +5206,7 @@ void ILibStun_ProcessSctpPacket(struct ILibStun_Module *obj, int session, char* 
 			ILibStun_SctpDisconnect(obj, session);
 			return;
 		case RCTP_CHUNK_TYPE_COOKIEECHO:
-			o->SRTT = (int)(ILibGetUptime() - *((long long*)(buffer + ptr + 4)));
+			o->SRTT = (int)(ILibGetUptime() - (long long)ILibUnaligned_Read64(buffer + ptr + 4));
 			o->RTTVAR = o->SRTT / 2;
 			o->RTO = o->SRTT + 4 * o->RTTVAR;
 			o->SSTHRESH = 4 * ILibRUDP_StartMTU;
@@ -6689,7 +6690,7 @@ void ILibTURN_ProcessChannelData(struct ILibTURN_TurnClientObject *turn, unsigne
 STUN_TYPE ILibTURN_GetMethodType(char* buffer, int offset, int length)
 {
 	UNREFERENCED_PARAMETER(length);
-	return ((STUN_TYPE)ntohs(((unsigned short*)(buffer + offset))[0]));
+	return ((STUN_TYPE)ntohs(ILibUnaligned_Read16(buffer + offset)));
 }
 
 char* ILibTURN_GetTransactionID(char* buffer, int offset, int length)
@@ -6717,7 +6718,7 @@ char* ILibTURN_GetErrorReason(char* buffer, int length)
 
 int ILibTURN_GetAttributeValue(char* buffer, int offset, int length, STUN_ATTRIBUTES attribute, int index, char** value)
 {
-	unsigned short messageLength = 20 + ntohs(((unsigned short*)(buffer + offset))[1]);
+	unsigned short messageLength = 20 + ntohs(ILibUnaligned_Read16(buffer + offset + 2));
 	int i = 0;
 
 	UNREFERENCED_PARAMETER(length);
@@ -6725,8 +6726,8 @@ int ILibTURN_GetAttributeValue(char* buffer, int offset, int length, STUN_ATTRIB
 	offset += 20;
 	while (offset + 4 <= messageLength)												// Decode each attribute one at a time
 	{
-		STUN_ATTRIBUTES current = (STUN_ATTRIBUTES)ntohs(((unsigned short*)(buffer + offset))[0]);
-		int attrLength = ntohs(((unsigned short*)(buffer + offset))[1]);
+		STUN_ATTRIBUTES current = (STUN_ATTRIBUTES)ntohs(ILibUnaligned_Read16(buffer + offset));
+		int attrLength = ntohs(ILibUnaligned_Read16(buffer + offset + 2));
 		if (offset + 4 + attrLength > messageLength) return 0;
 
 		if (attribute == current)
@@ -6752,7 +6753,7 @@ int ILibTURN_GetAttributeStartLocation(char *buffer, int offset, int length, STU
 
 int ILibTURN_GetAttributeCount(char* buffer, int offset, int length, STUN_ATTRIBUTES attribute)
 {
-	unsigned short messageLength = 20 + ntohs(((unsigned short*)(buffer + offset))[1]);
+	unsigned short messageLength = 20 + ntohs(ILibUnaligned_Read16(buffer + offset + 2));
 	int retVal = 0;
 
 	UNREFERENCED_PARAMETER(length);
@@ -6760,8 +6761,8 @@ int ILibTURN_GetAttributeCount(char* buffer, int offset, int length, STUN_ATTRIB
 	offset += 20;
 	while (offset + 4 <= messageLength)												// Decode each attribute one at a time
 	{
-		STUN_ATTRIBUTES current = (STUN_ATTRIBUTES)ntohs(((unsigned short*)(buffer + offset))[0]);
-		int attrLength = ntohs(((unsigned short*)(buffer + offset))[1]);
+		STUN_ATTRIBUTES current = (STUN_ATTRIBUTES)ntohs(ILibUnaligned_Read16(buffer + offset));
+		int attrLength = ntohs(ILibUnaligned_Read16(buffer + offset + 2));
 		if (offset + 4 + attrLength > messageLength) return 0;
 
 		if (attribute == current) { ++retVal; }
@@ -6816,7 +6817,7 @@ int ILibTURN_IsPacketAuthenticated(struct ILibTURN_TurnClientObject *turn, char*
 	if (fingerprintLen > 0)
 	{
 		fingerprintIndex = ILibTURN_GetAttributeValue(buffer, offset, length, STUN_ATTRIB_FINGERPRINT, 0, NULL);
-		actual = 0x5354554e ^ ntohl(((unsigned int*)fingerprint)[0]);
+		actual = 0x5354554e ^ ntohl(ILibUnaligned_Read32(fingerprint));
 		calculated = ILibStun_CRC32(buffer + offset, fingerprintIndex);
 		if (calculated != actual) { return 0; }
 	}
@@ -6824,15 +6825,15 @@ int ILibTURN_IsPacketAuthenticated(struct ILibTURN_TurnClientObject *turn, char*
 	// Fix Length if there is a fingerprint
 	if (fingerprintLen > 0)
 	{
-		tempVal = ntohs(((unsigned short*)(buffer + offset))[1]);
-		((unsigned short*)(buffer + offset))[1] = htons(tempVal - 8);
+		tempVal = ntohs(ILibUnaligned_Read16(buffer + offset + 2));
+		ILibUnaligned_Write16(buffer + offset + 2, htons(tempVal - 8));
 	}
 
 	ILibTURN_GenerateIntegrityKey(turn->username, turn->currentRealm, turn->password, integrityKey);
 	ILibTURN_CalculateMessageIntegrity(buffer, offset, MessageIntegrityPtr, integrityKey, 16, integrity);
 
 	// Put Length Back if we had to adjust the value due to fingerprint
-	if (fingerprintLen > 0) { ((unsigned short*)(buffer + offset))[1] = htons(tempVal); }
+	if (fingerprintLen > 0) { ILibUnaligned_Write16(buffer + offset + 2, htons(tempVal)); }
 
 	if (MessageIntegrityValueLen == 20 && memcmp(MessageIntegrityValue, integrity, 20) == 0) { return 1; }
 
@@ -7098,8 +7099,8 @@ void ILibTURN_ProcessStunFormattedPacket(struct ILibTURN_TurnClientObject *turn,
 
 int ILibTURN_GetStunPacketLength(char* buffer, int offset, int length)
 {
-	unsigned short messageLength = 20 + ntohs(((unsigned short*)(buffer + offset))[1]);
-	int magic = ntohl(((unsigned int*)(buffer + offset))[1]);
+	unsigned short messageLength = 20 + ntohs(ILibUnaligned_Read16(buffer + offset + 2));
+	int magic = ntohl(ILibUnaligned_Read32(buffer + offset + 4));
 	if (messageLength > length || magic != 0x2112A442) // Check the length and magic string
 	{
 		return 0;
@@ -7117,11 +7118,11 @@ void ILibTURN_TCP_OnData(ILibAsyncSocket_SocketModule socketModule, char* buffer
 
 	if (endPointer >= 4)
 	{
-		if (ntohs(((unsigned short*)(buffer + *p_beginPointer))[0]) >> 14 == 1)
+		if (ntohs(ILibUnaligned_Read16(buffer + *p_beginPointer)) >> 14 == 1)
 		{
 			// This is Channel Data
-			unsigned short ChannelNumber = (unsigned short)((int)ntohs(((unsigned short*)(buffer + *p_beginPointer))[0]) ^ (int)0x4000);
-			unsigned short ChannelDataLength = ntohs(((unsigned short*)(buffer + *p_beginPointer))[1]);
+			unsigned short ChannelNumber = (unsigned short)((int)ntohs(ILibUnaligned_Read16(buffer + *p_beginPointer)) ^ (int)0x4000);
+			unsigned short ChannelDataLength = ntohs(ILibUnaligned_Read16(buffer + *p_beginPointer + 2));
 			if (endPointer >= (4 + FOURBYTEBOUNDARY(ChannelDataLength)))
 			{
 				ILibTURN_ProcessChannelData(turn, ChannelNumber, buffer, *p_beginPointer + 4, ChannelDataLength);

@@ -173,6 +173,16 @@ void ILibDispatchSemaphore_post(sem_t* s);
 #include<stdint.h>
 static inline void ignore_result(uintptr_t result) { (void)result; }
 
+// Alignment-safe scalar access. Strict-alignment CPUs (MIPS, ARMv5/v6, RISC-V, SPARC) raise
+// SIGBUS when a 16/32/64 bit load or store is issued against an unaligned address, so any wide
+// access into a byte buffer at a runtime offset must go through these instead of a pointer cast.
+static inline uint16_t ILibUnaligned_Read16(const void *src) { uint16_t v; memcpy(&v, src, sizeof(v)); return(v); }
+static inline uint32_t ILibUnaligned_Read32(const void *src) { uint32_t v; memcpy(&v, src, sizeof(v)); return(v); }
+static inline uint64_t ILibUnaligned_Read64(const void *src) { uint64_t v; memcpy(&v, src, sizeof(v)); return(v); }
+static inline void ILibUnaligned_Write16(void *dst, uint16_t v) { memcpy(dst, &v, sizeof(v)); }
+static inline void ILibUnaligned_Write32(void *dst, uint32_t v) { memcpy(dst, &v, sizeof(v)); }
+static inline void ILibUnaligned_Write64(void *dst, uint64_t v) { memcpy(dst, &v, sizeof(v)); }
+
 #if defined(_DEBUG)
 #define PRINTERROR() printf("ERROR in %s, line %d\r\n", __FILE__, __LINE__);
 #else
@@ -463,13 +473,16 @@ int ILibIsRunningOnChainThread(void* chain);
 
 	#define ILibChain_Link_SetMetadata(chainLink, value) if((chainLink)!=NULL) { ILibMemory_Free(((ILibChain_Link*)chainLink)->MetaData); ((ILibChain_Link*)chainLink)->MetaData = value; }
 	#define ILibChain_Link_GetMetadata(chainLink) ((chainLink)==NULL?"":(((ILibChain_Link*)chainLink)->MetaData))
-	#define ILibMemory_Canary (((int*)((char*)(const char*)"broe"))[0])
+	#define ILibMemory_Canary ((int)ILibUnaligned_Read32("broe"))
 	#define ILibMemory_RawPtr(ptr) ((char*)(ptr) - sizeof(ILibMemory_Header))
 	#define ILibMemory_RawSize(ptr) (ILibMemory_Size((ptr)) + ILibMemory_ExtraSize((ptr)) + sizeof(ILibMemory_Header))
 	#define ILibMemory_MemType(ptr) (((ILibMemory_Header*)ILibMemory_RawPtr((ptr)))->memoryType)
 	#define ILibMemory_Size(ptr) (((ILibMemory_Header*)ILibMemory_RawPtr((ptr)))->size)
 	#define ILibMemory_ExtraSize(ptr) (((ILibMemory_Header*)ILibMemory_RawPtr((ptr)))->extraSize)
-	#define ILibMemory_Ex_CanaryOK(ptr) ((ptr)==NULL?0:((((ILibMemory_Header*)ILibMemory_RawPtr((ptr)))->CANARY) == ILibMemory_Canary))
+	// The canary is probed against pointers that may not be ILibMemory blocks at all (duktape
+	// buffers, list nodes). Every real one is malloc/alloca + sizeof(ILibMemory_Header), so a
+	// misaligned candidate can be rejected outright rather than faulted on (SIGBUS on MIPS).
+	#define ILibMemory_Ex_CanaryOK(ptr) (((ptr)==NULL || ((((uintptr_t)(ptr)) & (sizeof(void*) - 1)) != 0))?0:((((ILibMemory_Header*)ILibMemory_RawPtr((ptr)))->CANARY) == ILibMemory_Canary))
 #ifdef WIN32
 	int ILibMemory_CanaryOK(void *ptr);
 #else
@@ -479,11 +492,30 @@ int ILibIsRunningOnChainThread(void* chain);
 	#define ILibMemory_Extra(ptr) (ILibMemory_ExtraSize(ptr)>0?((char*)(ptr) + ILibMemory_Size((ptr)) + sizeof(ILibMemory_Header)):NULL)
 	#define ILibMemory_FromRaw(ptr) ((char*)(ptr) + sizeof(ILibMemory_Header))
 
-	#define ILibMemory_Size_Validate(primaryLen, extraLen) (((size_t)(primaryLen)<(UINT32_MAX - (size_t)(extraLen)))&&((size_t)(extraLen)<(UINT32_MAX-(size_t)(primaryLen)))&&((size_t)((primaryLen) + (extraLen))<(UINT32_MAX - sizeof(ILibMemory_Header)))&&((extraLen)==0 || ((size_t)((primaryLen)+(extraLen)+sizeof(ILibMemory_Header))<(UINT32_MAX-sizeof(ILibMemory_Header)))))
+	// Un-macro'd for the same reason as ILibMemory_Init_SizeEx below: MSVC x86 LTCG miscompiles a conditional built from runtime-sized values when it determines a malloc size.
+	// An oversized length would reach malloc uncaught.
+	static inline int ILibMemory_Size_ValidateEx(size_t primaryLen, size_t extraLen)
+	{
+		if (primaryLen >= (UINT32_MAX - extraLen)) { return(0); }
+		if (extraLen >= (UINT32_MAX - primaryLen)) { return(0); }
+		if ((primaryLen + extraLen) >= (UINT32_MAX - sizeof(ILibMemory_Header))) { return(0); }
+		if (extraLen > 0 && ((primaryLen + extraLen + sizeof(ILibMemory_Header)) >= (UINT32_MAX - sizeof(ILibMemory_Header)))) { return(0); }
+		return(1);
+	}
+	// The macro form stays under this name so code outside this tree that still calls it keeps working.
+	#define ILibMemory_Size_Validate(primaryLen, extraLen) ILibMemory_Size_ValidateEx((size_t)(primaryLen), (size_t)(extraLen))
 	#define ILibMemory_Init_Size(primaryLen, extraLen) (primaryLen + extraLen + sizeof(ILibMemory_Header) + (extraLen>0?sizeof(ILibMemory_Header) + (((primaryLen + sizeof(ILibMemory_Header)) + sizeof(void *) - 1) & ~(sizeof(void *) - 1)):0))
+	// Un-macro'd because with non-constant sizes, MSVC x86 LTCG (v143 and v145, v142 verified unaffected) drops the macro's conditional part (extraLen > 0 ? header + roundup : 0).
+	// So the first block with a non-zero extraLen got 44 bytes instead of 88. This gave a 0xC0000374 (STATUS_HEAP_CORRUPTION) error at startup.
+	static inline size_t ILibMemory_Init_SizeEx(size_t primaryLen, size_t extraLen)
+	{
+		size_t total = primaryLen + extraLen + sizeof(ILibMemory_Header);
+		if (extraLen > 0) { total += sizeof(ILibMemory_Header) + (((primaryLen + sizeof(ILibMemory_Header)) + sizeof(void *) - 1) & ~(sizeof(void *) - 1)); }
+		return(total);
+	}
 	void* ILibMemory_Init(void *ptr, size_t primarySize, size_t extraSize, ILibMemory_Types memType);
-	#define ILibMemory_SmartAllocate(len) ILibMemory_InitEx(ILibMemory_Size_Validate(len,0)?malloc(ILibMemory_Init_Size(len, 0)):NULL, (int)len, 0, ILibMemory_Types_HEAP)
-	#define ILibMemory_SmartAllocateEx(primaryLen, extraLen) ILibMemory_InitEx(ILibMemory_Size_Validate(primaryLen,extraLen)?malloc(ILibMemory_Init_Size(primaryLen, extraLen)):NULL, (int)primaryLen, (int)extraLen, ILibMemory_Types_HEAP)
+	#define ILibMemory_SmartAllocate(len) ILibMemory_InitEx(ILibMemory_Size_ValidateEx((size_t)(len),0)?malloc(ILibMemory_Init_Size(len, 0)):NULL, (int)len, 0, ILibMemory_Types_HEAP)
+	#define ILibMemory_SmartAllocateEx(primaryLen, extraLen) ILibMemory_InitEx(ILibMemory_Size_ValidateEx((size_t)(primaryLen),(size_t)(extraLen))?malloc(ILibMemory_Init_SizeEx((size_t)(primaryLen), (size_t)(extraLen))):NULL, (int)primaryLen, (int)extraLen, ILibMemory_Types_HEAP)
 	#define ILibMemory_SmartAllocate_FromString(str) ILibMemory_SmartAllocate_FromStringEx(str, 0)
 	char* ILibMemory_SmartAllocate_FromStringEx(char *str, size_t strLen);
 	void* ILibMemory_SmartReAllocate(void *ptr, size_t len);
@@ -497,11 +529,13 @@ int ILibIsRunningOnChainThread(void* chain);
 	void ILibMemory_Free(void *ptr);
 	void* ILibMemory_AllocateTemp(void* chain, size_t sz);
 
-	#define ILibMemory_AllocateA_ValidateSize(bufferLen) (bufferLen<(UINT32_MAX-(sizeof(void*) + (2*sizeof(ILibMemory_Header)))))
+	#define ILibMemory_AllocateA_ValidateSize(bufferLen) ((size_t)(bufferLen)<(UINT32_MAX-(2*sizeof(void*) - 1 + (2*sizeof(ILibMemory_Header)))))
+	// ILibMemory_Init rounds the primary size before placing the extra header.
+	#define ILibMemory_AllocateA_AllocationSize(bufferLen) ((((size_t)(bufferLen) + sizeof(void*) - 1) & ~(sizeof(void*) - 1)) + sizeof(void*) + (2*sizeof(ILibMemory_Header)))
 #ifdef WIN32
-	#define ILibMemory_AllocateA(bufferLen) ILibMemory_AllocateA_Init(ILibMemory_Init(ILibMemory_AllocateA_ValidateSize(bufferLen)?_alloca(bufferLen + sizeof(void*) + (2*sizeof(ILibMemory_Header))):NULL, bufferLen, sizeof(void*), ILibMemory_Types_STACK))
+	#define ILibMemory_AllocateA(bufferLen) ILibMemory_AllocateA_Init(ILibMemory_Init(ILibMemory_AllocateA_ValidateSize(bufferLen)?_alloca(ILibMemory_AllocateA_AllocationSize(bufferLen)):NULL, bufferLen, sizeof(void*), ILibMemory_Types_STACK))
 #else
-	#define ILibMemory_AllocateA(bufferLen) ILibMemory_AllocateA_Init(ILibMemory_Init(ILibMemory_AllocateA_ValidateSize(bufferLen)?alloca(bufferLen + sizeof(void*) + (2*sizeof(ILibMemory_Header))):NULL, bufferLen, sizeof(void*), ILibMemory_Types_STACK))
+	#define ILibMemory_AllocateA(bufferLen) ILibMemory_AllocateA_Init(ILibMemory_Init(ILibMemory_AllocateA_ValidateSize(bufferLen)?alloca(ILibMemory_AllocateA_AllocationSize(bufferLen)):NULL, bufferLen, sizeof(void*), ILibMemory_Types_STACK))
 #endif
 	#define ILibMemory_AllocateA_Size(buffer)		ILibMemory_Size(buffer)
 	#define ILibMemory_AllocateA_Next(buffer)		(((void**)buffer)[0])
@@ -936,6 +970,10 @@ int ILibIsRunningOnChainThread(void* chain);
 	void ILibWriteStringToDisk(char *FileName, char *data);
 	void ILibAppendStringToDiskEx2(char *FileName, char *data, int dataLen, uint64_t maxSize);
 	void ILibWriteStringToDiskEx(char *FileName, char *data, int dataLen);
+	#define ILibAppendStringToDisk_Cap_Stop		0
+	#define ILibAppendStringToDisk_Cap_Truncate	1
+	#define ILibAppendStringToDisk_Cap_Rotate	2
+	void ILibAppendStringToDiskEx3(char *FileName, char *data, int dataLen, uint64_t maxSize, int capMode, int maxCount);
 	void ILibDeleteFileFromDisk(char *FileName);
 	void ILibGetDiskFreeSpace(void *i64FreeBytesToCaller, void *i64TotalBytes);
 	int ILibFile_CopyTo(char *source, char *destination);
@@ -1603,6 +1641,8 @@ int ILibIsRunningOnChainThread(void* chain);
 
 #define ILIBCRITICALLOG_DEFAULT_MAXSIZE 524288
 	extern uint64_t ILibCriticalLog_MaxSize;
+	extern int ILibCriticalLog_CapMode;
+	extern int ILibCriticalLog_RotateCount;
 #define ILIBCRITICALEXITMSG(code, msg) {printf("%s", ILibCriticalLog(msg, __FILE__, __LINE__, 0, 0)); exit(code);}
 #define ILIBLOGMESSSAGE(msg) ILibCriticalLog(msg, __FILE__, __LINE__, 0, 0)
 	void ILIBLOGMESSAGEX(char *format, ...);

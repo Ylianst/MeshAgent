@@ -247,7 +247,7 @@ int ILibDuktape_readableStream_WriteDataEx_Chain_Dispatch(ILibDuktape_readableSt
 	duk_push_c_function(stream->ctx, ILibDuktape_readableStream_WriteDataEx_Flush, DUK_VARARGS);// [ext][write][this][buffer][flush]
 	duk_push_pointer(stream->ctx, stream);														// [ext][write][this][buffer][flush][ptr]
 	duk_put_prop_string(stream->ctx, -2, "\xFF_STREAM");										// [ext][write][this][buffer][flush]
-	if (duk_pcall_method(stream->ctx, 2) != 0)													// [ext][...]
+	if (ILibDuktape_SafePcallMethod(stream->ctx, 2, "readableStream.WriteDataEx_Chain: ws.write(buffer, flush) ") != 0)	// [ext][...]
 	{
 		ILibDuktape_Process_UncaughtExceptionEx(stream->ctx, "readable.write(): Error Piping ");
 		if (ILibDuktape_readableStream_WriteData_Flush(NULL, stream)) { retVal = 2; }

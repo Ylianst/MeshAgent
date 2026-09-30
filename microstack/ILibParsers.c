@@ -1041,11 +1041,11 @@ void* ILibMemory_SmartReAllocate(void *ptr, size_t len)
 {
 	if (ILibMemory_CanaryOK(ptr))
 	{
-		size_t originalRawSize = ILibMemory_Init_Size(ILibMemory_Size(ptr), ILibMemory_ExtraSize(ptr));
+		size_t originalRawSize = ILibMemory_Init_SizeEx(ILibMemory_Size(ptr), ILibMemory_ExtraSize(ptr));
 		size_t originalSize = ILibMemory_Size(ptr);
 		size_t originalExtraSize = ILibMemory_ExtraSize(ptr);
 		if (originalExtraSize) { len = (len + sizeof(void *) - 1) & ~(sizeof(void *) - 1); }
-		size_t newRawSize = ILibMemory_Init_Size(len, originalExtraSize);
+		size_t newRawSize = ILibMemory_Init_SizeEx(len, originalExtraSize);
 
 		if (newRawSize < originalRawSize && originalExtraSize > 0)
 		{
@@ -7154,7 +7154,7 @@ void ILibSetVersion(struct packetheader *packet, char* Version, size_t VersionLe
 */
 void ILibSetStatusCode(struct packetheader *packet, int StatusCode, char *StatusData, size_t StatusDataLength)
 {
-	if (StatusDataLength < 0) { StatusDataLength = (int)strnlen_s(StatusData, 255); }
+	if (StatusDataLength == (size_t)(-1)) { StatusDataLength = strnlen_s(StatusData, 255); }
 	packet->StatusCode = StatusCode;
 	if (packet->StatusData != NULL) { free(packet->StatusData); }
 	if ((packet->StatusData = (char*)malloc(StatusDataLength+1)) == NULL) ILIBCRITICALEXIT(254);
@@ -7173,12 +7173,12 @@ void ILibSetStatusCode(struct packetheader *packet, int StatusCode, char *Status
 */
 void ILibSetDirective(struct packetheader *packet, char* Directive, size_t DirectiveLength, char* DirectiveObj, size_t DirectiveObjLength)
 {
-	if (DirectiveLength < 0)DirectiveLength = (int)strnlen_s(Directive, 255);
-	if (DirectiveObjLength < 0)DirectiveObjLength = (int)strnlen_s(DirectiveObj, 255);
+	if (DirectiveLength == (size_t)(-1)) { DirectiveLength = strnlen_s(Directive, 255); }
+	if (DirectiveObjLength == (size_t)(-1)) { DirectiveObjLength = strnlen_s(DirectiveObj, 255); }
 
 	if (packet->ReservedMemory != NULL)
 	{
-		if (ILibMemory_AllocateA_Size(packet->ReservedMemory) > (unsigned int)(DirectiveLength + DirectiveObjLength + 2))
+		if (ILibMemory_AllocateA_Size(packet->ReservedMemory) > DirectiveLength + DirectiveObjLength + 2)
 		{
 			packet->Directive = (char*)ILibMemory_AllocateA_Get(packet->ReservedMemory, (size_t)DirectiveLength + 1);
 			packet->DirectiveObj = (char*)ILibMemory_AllocateA_Get(packet->ReservedMemory, (size_t)DirectiveObjLength + 1);
@@ -7373,7 +7373,8 @@ static const char cd64[]="|$$$}rstuvwxyz{$$$$$$$>?@ABCDEFGHIJKLMNOPQRSTUVW$$$$$$
 void ILibencodeblock( unsigned char in[3], unsigned char out[4], int len )
 {
 	out[0] = cb64[ in[0] >> 2 ];
-	out[1] = cb64[ ((in[0] & 0x03) << 4) | ((in[1] & 0xf0) >> 4) ];
+	/* RFC 4648 section 3.5 requires unused pad bits to be zero. */
+	out[1] = cb64[ ((in[0] & 0x03) << 4) | (len > 1 ? ((in[1] & 0xf0) >> 4) : 0) ];
 	out[2] = (unsigned char) (len > 1 ? cb64[ ((in[1] & 0x0f) << 2) | (len>2?((in[2] & 0xc0) >> 6):0) ] : '=');
 	out[3] = (unsigned char) (len > 2 ? cb64[ in[2] & 0x3f ] : '=');
 }
@@ -8597,7 +8598,7 @@ int ILibHashtable_DefaultBucketizer(int value)
 	unsigned char tmp[4];
 	int retVal = 0;
 
-	((unsigned int*)tmp)[0] = value;
+	ILibUnaligned_Write32(tmp, (uint32_t)value);
 	retVal = (int)(tmp[0] ^ tmp[1] ^ tmp[2] ^ tmp[3]); //Klocwork is being retarded, and doesn't realize an unsigned int is 4 bytes
 
 	return retVal;
@@ -8615,32 +8616,32 @@ int ILibHashtable_DefaultHashFunc(void* Key1, char* Key2, int Key2Len)
 	{
 		if (Key2Len < 5)
 		{
-			((int*)tmp)[0] = 0;
+			ILibUnaligned_Write32(tmp, 0);
 			for (i = 0; i < Key2Len; ++i)
 			{
 				tmp[i] = Key2[i];
 			}
-			retVal ^= ((int*)tmp)[0];
+			retVal ^= (int)ILibUnaligned_Read32(tmp);
 		}
-		
+
 		if (Key2Len > 4)
 		{
-			((int*)tmp)[0] = 0;
+			ILibUnaligned_Write32(tmp, 0);
 			for (i = 0; i < 4; ++i)
 			{
 				tmp[i] = Key2[Key2Len - 1 - i];
 			}
-			retVal ^= ((int*)tmp)[0];
-			
+			retVal ^= (int)ILibUnaligned_Read32(tmp);
+
 			if (Key2Len > 12)
 			{
 				int x = Key2Len / 2;
-				((int*)tmp)[0] = 0;
+				ILibUnaligned_Write32(tmp, 0);
 				for (i = 0; i < 4; ++i)
 				{
 					tmp[i] = Key2[i + x];
 				}
-				retVal ^= ((int*)tmp)[0];
+				retVal ^= (int)ILibUnaligned_Read32(tmp);
 			}
 		}
 	}
@@ -9293,24 +9294,20 @@ int ILibString_StartsWith(const char *inString, size_t inStringLength, const cha
 */
 int ILibString_IndexOfEx(const char *inString, size_t inStringLength, const char *indexOf, size_t indexOfLength,  int caseSensitive)
 {
-	size_t *RetVal = NULL;
-	size_t index = 0;
+	size_t inLen = (inStringLength == (size_t)(-1)) ? strnlen_s(inString, sizeof(ILibScratchPad)) : inStringLength;
+	size_t searchLen = (indexOfLength == (size_t)(-1)) ? strnlen_s(indexOf, sizeof(ILibScratchPad)) : indexOfLength;
+	size_t index;
 
-	while (inStringLength-index >= indexOfLength)
+	if (searchLen > inLen) { return(-1); }
+
+	for (index = 0; index <= inLen - searchLen; ++index)
 	{
-		if (caseSensitive!=0 && memcmp(inString+index,indexOf,indexOfLength)==0)
+		if (caseSensitive != 0 ? memcmp(inString + index, indexOf, searchLen) == 0 : strncasecmp(inString + index, indexOf, searchLen) == 0)
 		{
-			RetVal = &index;
-			break;
+			return(index > INT32_MAX ? -1 : (int)index);
 		}
-		else if (caseSensitive==0 && strncasecmp(inString+index,indexOf,indexOfLength)==0)
-		{
-			RetVal = &index;
-			break;
-		}
-		++index;
 	}
-	return((RetVal == NULL || *RetVal > INT32_MAX) ? -1 : (int)*RetVal);
+	return(-1);
 }
 /*! \fn ILibString_IndexOf(const char *inString, int inStringLength, const char *indexOf, int indexOfLength)
 \brief Returns the position index of the first occurance of a given substring
@@ -9335,24 +9332,21 @@ int ILibString_IndexOf(const char *inString, size_t inStringLength, const char *
 */
 int ILibString_LastIndexOfEx(const char *inString, size_t inStringLength, const char *lastIndexOf, size_t lastIndexOfLength, int caseSensitive)
 {
-	size_t *RetVal = NULL;
-	size_t index = ((inStringLength == 0 || inStringLength == (size_t)(-1))? strnlen_s(inString, sizeof(ILibScratchPad)) : inStringLength) - (lastIndexOfLength < 0 ? strnlen_s(lastIndexOf, sizeof(ILibScratchPad)) : lastIndexOfLength);
+	size_t inLen = (inStringLength == 0 || inStringLength == (size_t)(-1)) ? strnlen_s(inString, sizeof(ILibScratchPad)) : inStringLength;
+	size_t searchLen = (lastIndexOfLength == (size_t)(-1)) ? strnlen_s(lastIndexOf, sizeof(ILibScratchPad)) : lastIndexOfLength;
+	size_t index;
 
-	while (index >= 0)
+	if (searchLen == 0 || searchLen > inLen) { return(-1); }
+
+	for (index = inLen - searchLen; ; --index)
 	{
-		if (caseSensitive!=0 && memcmp(inString+index,lastIndexOf,lastIndexOfLength)==0)
+		if (caseSensitive != 0 ? memcmp(inString + index, lastIndexOf, searchLen) == 0 : strncasecmp(inString + index, lastIndexOf, searchLen) == 0)
 		{
-			RetVal = &index;
-			break;
+			return(index > INT32_MAX ? -1 : (int)index);
 		}
-		else if (caseSensitive==0 && strncasecmp(inString+index,lastIndexOf,lastIndexOfLength)==0)
-		{
-			RetVal = &index;
-			break;
-		}
-		--index;
+		if (index == 0) { break; }
 	}
-	return((RetVal == NULL || *RetVal > INT32_MAX) ? -1 : (int)(*RetVal));
+	return(-1);
 }
 /*! \fn ILibString_LastIndexOf(const char *inString, int inStringLength, const char *lastIndexOf, int lastIndexOfLength)
 \brief Returns the position index of the last occurance of a given substring
@@ -9651,6 +9645,109 @@ void ILibAppendStringToDiskEx2(char *FileName, char *data, int dataLen, uint64_t
 		{
 			if (fwrite(data, sizeof(char), dataLen, SourceFile)) {}
 		}
+		fclose(SourceFile);
+	}
+}
+static int ILibRenameFileOnDisk(char *source, char *destination)
+{
+#ifdef WIN32
+	WCHAR SourceW[4096];
+	WCHAR DestW[4096];
+	ILibUTF8ToWideEx(source, -1, SourceW, (int)sizeof(SourceW) / 2);
+	ILibUTF8ToWideEx(destination, -1, DestW, (int)sizeof(DestW) / 2);
+	DeleteFileW(DestW); // MoveFileW fails if the destination already exists; POSIX rename() replaces it
+	return(MoveFileW(SourceW, DestW) ? 0 : 1);
+#else
+	return(rename(source, destination));
+#endif
+}
+void ILibAppendStringToDiskEx3(char *FileName, char *data, int dataLen, uint64_t maxSize, int capMode, int maxCount)
+{
+	FILE *SourceFile = NULL;
+	uint64_t curSize;
+
+	if (maxSize == 0) { ILibAppendStringToDiskEx2(FileName, data, dataLen, 0); return; } // 0 == unbounded, no cap policy to apply
+
+#ifdef WIN32
+	_wfopen_s(&SourceFile, ILibUTF8ToWide(FileName, -1), L"ab");
+#else
+	SourceFile = fopen(FileName, "ab");
+#endif
+	if (SourceFile == NULL) { return; }
+
+	fseek(SourceFile, 0, SEEK_END);
+#ifdef WIN32
+	curSize = (uint64_t)_ftelli64(SourceFile);
+#else
+	curSize = (uint64_t)ftell(SourceFile);
+#endif
+
+	if (curSize < maxSize)
+	{
+		if (fwrite(data, sizeof(char), dataLen, SourceFile)) {}
+		if (capMode == ILibAppendStringToDisk_Cap_Stop)
+		{
+			// Stop mode goes silent once capped; leave a one-time marker on the entry that crosses the limit.
+			fseek(SourceFile, 0, SEEK_END);
+#ifdef WIN32
+			if ((uint64_t)_ftelli64(SourceFile) >= maxSize)
+#else
+			if ((uint64_t)ftell(SourceFile) >= maxSize)
+#endif
+			{
+				char *capMsg = "\r\n[log size limit reached - logging suspended until the file is rotated or removed]";
+				if (fwrite(capMsg, sizeof(char), (int)strnlen_s(capMsg, 128), SourceFile)) {}
+			}
+		}
+		fclose(SourceFile);
+		return;
+	}
+
+	if (capMode == ILibAppendStringToDisk_Cap_Truncate)
+	{
+		fclose(SourceFile);
+#ifdef WIN32
+		_wfopen_s(&SourceFile, ILibUTF8ToWide(FileName, -1), L"wb");
+#else
+		SourceFile = fopen(FileName, "wb");
+#endif
+		if (SourceFile != NULL)
+		{
+			if (fwrite(data, sizeof(char), dataLen, SourceFile)) {}
+			fclose(SourceFile);
+		}
+	}
+	else if (capMode == ILibAppendStringToDisk_Cap_Rotate)
+	{
+		int i;
+		char rotateFrom[4096];
+		char rotateTo[4096];
+		fclose(SourceFile);
+		if (maxCount < 1) { maxCount = 1; }
+
+		// Shift .1 .. .(maxCount-1) up one (oldest .maxCount is overwritten), then current file becomes .1
+		for (i = maxCount - 1; i >= 1; --i)
+		{
+			sprintf_s(rotateFrom, sizeof(rotateFrom), "%s.%d", FileName, i);
+			sprintf_s(rotateTo, sizeof(rotateTo), "%s.%d", FileName, i + 1);
+			ILibRenameFileOnDisk(rotateFrom, rotateTo);
+		}
+		sprintf_s(rotateTo, sizeof(rotateTo), "%s.1", FileName);
+		ILibRenameFileOnDisk(FileName, rotateTo);
+
+#ifdef WIN32
+		_wfopen_s(&SourceFile, ILibUTF8ToWide(FileName, -1), L"ab");
+#else
+		SourceFile = fopen(FileName, "ab");
+#endif
+		if (SourceFile != NULL)
+		{
+			if (fwrite(data, sizeof(char), dataLen, SourceFile)) {}
+			fclose(SourceFile);
+		}
+	}
+	else
+	{
 		fclose(SourceFile);
 	}
 }
@@ -10967,6 +11064,8 @@ void ILib6to4(struct sockaddr* addr)
 // Log a critical error to file
 char ILibCriticalLogBuffer[sizeof(ILibScratchPad)];
 uint64_t ILibCriticalLog_MaxSize = ILIBCRITICALLOG_DEFAULT_MAXSIZE;
+int ILibCriticalLog_CapMode = ILibAppendStringToDisk_Cap_Stop;
+int ILibCriticalLog_RotateCount = 1;
 
 char* ILibCriticalLog (const char* msg, const char* file, int line, int user1, int user2)
 {
@@ -10980,7 +11079,7 @@ char* ILibCriticalLog (const char* msg, const char* file, int line, int user1, i
 	{
 		len = sprintf_s(ILibCriticalLogBuffer, sizeof(ILibCriticalLogBuffer), "\r\n[%s] [%s] %s", timeStamp, g_ILibCrashID_HASH != NULL ? g_ILibCrashID_HASH : "", msg);
 	}
-	if (len > 0 && len < (int)sizeof(ILibCriticalLogBuffer) && ILibCriticalLogFilename != NULL) ILibAppendStringToDiskEx2(ILibCriticalLogFilename, ILibCriticalLogBuffer, len, ILibCriticalLog_MaxSize);
+	if (len > 0 && len < (int)sizeof(ILibCriticalLogBuffer) && ILibCriticalLogFilename != NULL) ILibAppendStringToDiskEx3(ILibCriticalLogFilename, ILibCriticalLogBuffer, len, ILibCriticalLog_MaxSize, ILibCriticalLog_CapMode, ILibCriticalLog_RotateCount);
 	if (file != NULL)
 	{
 		ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "%s:%d (%d,%d) %s", file, line, user1, user2, msg);
@@ -11061,12 +11160,24 @@ void* ILibSpawnNormalThreadEx(voidfp1 method, void* arg, int detached)
 	pthread_t newThread;
 	fptr = (void*(*)(void*))method;
 #if defined(ILIB_NO_TIMEDJOIN)
+	if (detached != 0)
+	{
+		result = (intptr_t)pthread_create(&newThread, NULL, fptr, arg);
+		if (result == 0) { pthread_detach(newThread); }
+		return(result == 0 ? (void*)newThread : NULL);
+	}
 	ILibThread_AppleThread *ret = (ILibThread_AppleThread*)ILibMemory_SmartAllocate(sizeof(ILibThread_AppleThread));
 	ret->method = method; ret->arg = arg;
-	if (detached != 0) { sem_init(&(ret->s), 0, 0); ret->joinable = 1; }
+	ret->joinable = 1;
+	sem_init(&(ret->s), 0, 0);
 	result = (intptr_t)pthread_create(&newThread, NULL, ILibThread_AppleThread_Start, ret);
+	if (result != 0)
+	{
+		sem_destroy(&(ret->s));
+		ILibMemory_Free(ret);
+		return(NULL);
+	}
 	ret->tid = newThread;
-	if (detached != 0) { pthread_detach(newThread); }
 	return(ret);
 #else
 	result = (intptr_t)pthread_create(&newThread, NULL, fptr, arg);
@@ -11092,8 +11203,12 @@ int ILibThread_TimedJoinEx(void *thr, struct timespec* timeout)
 	if (ILibMemory_CanaryOK(thr) && ((ILibThread_AppleThread*)thr)->joinable != 0)
 	{
 		ILibThread_AppleThread *ath = (ILibThread_AppleThread*)thr;
-		if ((ret = sem_timedwait(&(ath->s), timeout)) == 0) { sem_destroy(&(ath->s)); }
-		ILibMemory_Free(thr);
+		if ((ret = sem_timedwait(&(ath->s), timeout)) == 0)
+		{
+			pthread_join(ath->tid, NULL);
+			sem_destroy(&(ath->s));
+			ILibMemory_Free(thr);
+		}
 	}
 	return(ret);
 #else
@@ -11103,7 +11218,6 @@ int ILibThread_TimedJoinEx(void *thr, struct timespec* timeout)
 struct timespec *ILibThread_ms2ts(uint32_t ms, struct timespec *ts)
 {
 	struct timeval tv;
-	long lv;
 
 	gettimeofday(&tv, NULL);
 	ts->tv_sec = tv.tv_sec;
@@ -11111,12 +11225,8 @@ struct timespec *ILibThread_ms2ts(uint32_t ms, struct timespec *ts)
 
 	ts->tv_sec += (ms / 1000);
 	ts->tv_nsec += ((ms % 1000) * 1000000);
-
-	if ((lv = ts->tv_nsec % 1000000000) > 0)
-	{
-		ts->tv_sec += 1;
-		ts->tv_nsec = lv;
-	}
+	ts->tv_sec += ts->tv_nsec / 1000000000;
+	ts->tv_nsec %= 1000000000;
 
 	return(ts);
 }
@@ -11141,6 +11251,7 @@ void ILibThread_Join(void *thr)
 		if (ILibMemory_CanaryOK(thr) && ((ILibThread_AppleThread*)thr)->joinable!=0)
 		{
 			pthread_join(((ILibThread_AppleThread*)thr)->tid, NULL);
+			sem_destroy(&(((ILibThread_AppleThread*)thr)->s));
 			ILibMemory_Free(thr);
 		}
 	#else
@@ -11489,4 +11600,3 @@ void ILibSpinLock_Lock(ILibSpinLock *lock)
 	}
 }
 #endif
-

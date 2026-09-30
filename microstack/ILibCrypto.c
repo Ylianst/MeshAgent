@@ -34,8 +34,24 @@ limitations under the License.
 #include <openssl/rand.h>
 #include <openssl/err.h>
 #include <openssl/hmac.h>
-#ifdef _POSIX
+#if defined(_POSIX) || defined(__APPLE__)
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <poll.h>
+#include <signal.h>
+#include <time.h>
+#include <errno.h>
+#include <dirent.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <strings.h>
+#include <pthread.h>
+#ifdef __APPLE__
+#include <CoreFoundation/CoreFoundation.h>
+#include <Security/Security.h>
+#endif
 #endif
 #else
 #ifdef WIN32
@@ -522,68 +538,406 @@ void __fastcall util_openssl_uninit()
 #endif
 }
 
-int __fastcall util_load_system_certs(SSL_CTX *ctx) 
+// In milliseconds
+#ifndef ILibCrypto_OPENSSL_SUBPROCESS_TIMEOUT
+#define ILibCrypto_OPENSSL_SUBPROCESS_TIMEOUT 3000
+#endif
+
+// OS/Distro CA bundles, checked after the directories
+#ifndef ILibCrypto_KNOWN_CERT_FILES
+#define ILibCrypto_KNOWN_CERT_FILES \
+	"/etc/ssl/certs/ca-certificates.crt", \
+	"/etc/pki/tls/certs/ca-bundle.crt", \
+	"/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem", \
+	"/etc/ssl/ca-bundle.pem", \
+	"/etc/ssl/cert.pem", \
+	"/private/etc/ssl/cert.pem", \
+	"/usr/local/share/certs/ca-root-nss.crt"
+#endif
+
+// Well-known CA certificate directories, checked in order
+#ifndef ILibCrypto_KNOWN_CERT_DIRS
+#define ILibCrypto_KNOWN_CERT_DIRS \
+	"/etc/ssl/certs", \
+	"/etc/pki/tls/certs", \
+	"/usr/local/etc/openssl/certs", \
+	"/etc/openssl/certs", \
+	"/System/Library/OpenSSL/certs", \
+	"/usr/local/ssl/certs"
+#endif
+
+// Absolute paths for the openssl binary, anti path-hijack measure
+#ifndef ILibCrypto_OPENSSL_BINDIRS
+#define ILibCrypto_OPENSSL_BINDIRS \
+	"/usr/bin/openssl", \
+	"/bin/openssl", \
+	"/usr/local/bin/openssl", \
+	"/usr/sbin/openssl"
+#endif
+
+// Built once and use for every SSL_CTX
+static X509_STORE *g_ILibCrypto_certStore = NULL;
+
+#ifdef WIN32
+static INIT_ONCE g_ILibCrypto_certStoreOnce = INIT_ONCE_STATIC_INIT;
+static HCERTSTORE g_ILibCrypto_winRoot = NULL;
+static CRITICAL_SECTION g_ILibCrypto_winRootLock;
+
+// windows variant for a lazy CApath lookup. The same subject can appear more than once in the
+// ROOT store (renewed roots keep the subject but change the key), so walk every match and cache
+// them all in the store -- like OpenSSL's own hash_dir lookup -- and let the verifier pick by key.
+static int ILibCrypto_WinGetBySubject(X509_LOOKUP *lu, X509_LOOKUP_TYPE type, X509_NAME *name, X509_OBJECT *ret)
+{
+	const unsigned char *der = NULL;
+	size_t derLen = 0;
+	CERT_NAME_BLOB blob;
+	const CERT_CONTEXT *wctx = NULL;
+	X509_STORE *cache = X509_LOOKUP_get_store(lu);
+	X509 *x, *keep = NULL;
+	int ok = 0;
+
+	if (type != X509_LU_X509 || name == NULL || g_ILibCrypto_winRoot == NULL) { return 0; }
+	if (X509_NAME_get0_der(name, &der, &derLen) != 1 || der == NULL) { return 0; }
+
+	blob.cbData = (DWORD)derLen;
+	blob.pbData = (BYTE*)der;
+
+	// A store handle is not documented as safe for concurrent use, so lock as this store is shared by every SSL_CTX
+	EnterCriticalSection(&g_ILibCrypto_winRootLock);
+	while ((wctx = CertFindCertificateInStore(g_ILibCrypto_winRoot, X509_ASN_ENCODING, 0, CERT_FIND_SUBJECT_NAME, &blob, wctx)) != NULL)
+	{
+		const unsigned char *p = wctx->pbCertEncoded;
+		if ((x = d2i_X509(NULL, &p, wctx->cbCertEncoded)) != NULL)
+		{
+			if (cache != NULL) { X509_STORE_add_cert(cache, x); }	// takes its own reference
+			if (keep != NULL) { X509_free(keep); }
+			keep = x;
+		}
+	}
+	// the failing find call already released the last context
+	LeaveCriticalSection(&g_ILibCrypto_winRootLock);
+
+	if (keep != NULL)
+	{
+		ok = X509_OBJECT_set1_X509(ret, keep);		// takes its own reference
+		X509_free(keep);
+	}
+	return ok;
+}
+
+// Build the trust store used process-wide
+static BOOL CALLBACK ILibCrypto_BuildCertStore(PINIT_ONCE once, PVOID param, PVOID *context)
+{
+	X509_STORE *store;
+	X509_LOOKUP_METHOD *method;
+	const CERT_CONTEXT *wctx = NULL;
+	BIO *in;
+	X509 *x;
+
+	UNREFERENCED_PARAMETER(once);
+	UNREFERENCED_PARAMETER(param);
+	UNREFERENCED_PARAMETER(context);
+
+	if ((store = X509_STORE_new()) == NULL) { return TRUE; }
+	InitializeCriticalSection(&g_ILibCrypto_winRootLock);
+	if ((g_ILibCrypto_winRoot = CertOpenSystemStoreW(0, L"ROOT")) == NULL)
+	{
+		g_ILibCrypto_certStore = store;
+		return TRUE;
+	}
+
+	// Prefer on-demand lookups
+	if ((method = X509_LOOKUP_meth_new("windows-root-store")) != NULL)
+	{
+		if (X509_LOOKUP_meth_set_get_by_subject(method, ILibCrypto_WinGetBySubject) == 1 &&
+			X509_STORE_add_lookup(store, method) != NULL)
+		{
+			g_ILibCrypto_certStore = store;
+			return TRUE;
+		}
+		X509_LOOKUP_meth_free(method);
+	}
+
+	// Fallback: copy the whole store in, as before.
+	for (;;)
+	{
+		if ((wctx = CertEnumCertificatesInStore(g_ILibCrypto_winRoot, wctx)) == NULL) { break; }
+		if ((in = BIO_new_mem_buf(wctx->pbCertEncoded, wctx->cbCertEncoded)) == NULL) { continue; }
+		if ((x = d2i_X509_bio(in, NULL)) != NULL)
+		{
+			X509_STORE_add_cert(store, x);
+			X509_free(x);
+		}
+		BIO_free(in);
+	}
+	CertCloseStore(g_ILibCrypto_winRoot, 0);
+	g_ILibCrypto_winRoot = NULL;
+	g_ILibCrypto_certStore = store;
+	return TRUE;
+}
+#else
+static pthread_once_t g_ILibCrypto_certStoreOnce = PTHREAD_ONCE_INIT;
+
+// Check location by parsing into tmp store so nothing is retained
+static int ILibCrypto_ProbeCerts(const char *file)
+{
+	X509_STORE *tmp = X509_STORE_new();
+	int n = 0;
+
+	if (tmp == NULL) { return 0; }
+	if (X509_STORE_load_locations(tmp, file, NULL) == 1)
+	{
+		n = sk_X509_OBJECT_num(X509_STORE_get0_objects(tmp));
+	}
+	X509_STORE_free(tmp);
+	return n > 0;
+}
+
+// A valid certdir has hash entries from 'openssl rehash'. Max 5 attempts for a valid one.
+// A valid dir is lazy registered, so new certs are picked up and saves on resources
+static int ILibCrypto_TryCertDir(X509_STORE *store, const char *dir)
+{
+	struct stat st;
+	DIR *d;
+	struct dirent *e;
+	char sample[PATH_MAX];
+	int tried = 0, found = 0;
+
+	// Must be absolute: the store is built lazily and must not depend on cwd
+	if (dir == NULL || dir[0] != '/' || stat(dir, &st) != 0 || !S_ISDIR(st.st_mode)) { return 0; }
+	if ((d = opendir(dir)) == NULL) { return 0; }
+	while (found == 0 && tried < 5 && (e = readdir(d)) != NULL)
+	{
+		const char *p = e->d_name;
+		int i;
+		for (i = 0; i < 8 && ((p[i] >= '0' && p[i] <= '9') || (p[i] >= 'a' && p[i] <= 'f') || (p[i] >= 'A' && p[i] <= 'F')); ++i) { }
+		if (i != 8 || p[8] != '.' || p[9] == 0) { continue; }
+		for (i = 9; p[i] >= '0' && p[i] <= '9'; ++i) { }
+		if (p[i] != 0) { continue; }
+		if (sprintf_s(sample, sizeof(sample), "%s/%s", dir, p) < 0) { break; }	// truncated: no entry in this dir can fit
+		++tried;
+		found = ILibCrypto_ProbeCerts(sample);
+	}
+	closedir(d);
+
+	return found != 0 && X509_STORE_load_locations(store, NULL, dir) == 1;
+}
+
+// Millisecond monotonic clock for the subprocess deadline, so a wall-clock step (NTP) cannot
+// stretch or collapse the timeout. Needs macOS 10.12+
+static long long ILibCrypto_Now(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (long long)ts.tv_sec * 1000LL + ts.tv_nsec / 1000000;
+}
+
+// use 'openssl version -d' to get the configurated path. Use execve with a timer, minimal env instead of popen.
+static int ILibCrypto_QueryOpenSSLCertDir(X509_STORE *store, const char *opensslPath)
+{
+	int pipefd[2];
+	pid_t pid;
+	char buf[256];	// openssl output buffer
+	ssize_t total = 0, r;
+	long long deadline;
+	char *tokenized;
+	int i, found = 0;
+
+	if (pipe(pipefd) != 0) { return 0; }
+	// Close-on-exec, so another thread's concurrent fork+exec cannot inherit the write end and
+	// keep EOF from ever arriving. Our own child re-opens stdout via dup2, which clears the flag.
+	fcntl(pipefd[0], F_SETFD, FD_CLOEXEC);
+	fcntl(pipefd[1], F_SETFD, FD_CLOEXEC);
+
+	if ((pid = fork()) == 0)
+	{
+		// child: put us in our own process group so the group can be killed
+		ignore_result(setpgid(0, 0));
+		close(pipefd[0]);
+		dup2(pipefd[1], STDOUT_FILENO);
+		close(pipefd[1]);
+
+		char *childArgv[] = { (char*)opensslPath, (char*)"version", (char*)"-d", NULL };
+		char *childEnvp[] = { (char*)"PATH=/usr/bin:/bin", NULL };
+		execve(opensslPath, childArgv, childEnvp);	// replace process image with openssl, success ends here, else _exit
+		_exit(127);
+	}
+	if (pid < 0) { close(pipefd[0]); close(pipefd[1]); return 0; }
+
+	// also in parent to be sure the group exists
+	ignore_result(setpgid(pid, pid));
+
+	close(pipefd[1]);
+	deadline = ILibCrypto_Now() + ILibCrypto_OPENSSL_SUBPROCESS_TIMEOUT * 1000LL;	// timeout is in seconds, the clock in ms
+
+	// read childprocess output into buf
+	for (;;)
+	{
+		long remaining = (long)(deadline - ILibCrypto_Now());
+		struct pollfd pfd;
+		int pr;
+
+		if (remaining <= 0 || total >= (ssize_t)sizeof(buf) - 1) { break; }
+
+		pfd.fd = pipefd[0];
+		pfd.events = POLLIN;
+		pfd.revents = 0;
+		// poll() is never restarted by SA_RESTART, and this process installs signal handlers without SA_RESTART
+		// (and our own child exiting raises SIGCHLD), so EINTR is expected here
+		pr = poll(&pfd, 1, (int)remaining);
+		if (pr < 0) { if (errno == EINTR) { continue; } break; }
+		if (pr == 0) { break; }		// timed out
+
+		r = read(pipefd[0], buf + total, sizeof(buf) - 1 - total);
+		if (r < 0) { if (errno == EINTR) { continue; } break; }
+		if (r == 0) { break; }		// EOF, child output finished
+		total += r;
+	}
+	close(pipefd[0]);
+	buf[total] = 0;		// 0-terminate the output
+
+	// Kill now, wait for the pid after parsing the output
+	kill(-pid, SIGKILL);
+	kill(pid, SIGKILL);
+
+	// Output looks like: OPENSSLDIR: "/usr/lib/ssl"
+	char *save = NULL;
+	for (tokenized = strtok_r(buf, "\"", &save); tokenized != NULL; tokenized = strtok_r(NULL, "\"", &save))
+	{
+		size_t tlen, off;
+
+		// must be absolute and at least one segment
+		if (tokenized[0] != '/' || tokenized[1] == '\0') { continue; }
+
+		// Append "/certs" in place
+		tlen = strnlen_s(tokenized, sizeof(buf));
+		off = (size_t)(tokenized - buf) + tlen;
+		if (off + 7 <= sizeof(buf))
+		{
+			memcpy_s(tokenized + tlen, sizeof(buf) - off, "/certs", 7);
+			found = ILibCrypto_TryCertDir(store, tokenized);
+			tokenized[tlen] = 0;	// restore -> bare directory
+		}
+		if (found == 0) { found = ILibCrypto_TryCertDir(store, tokenized); }
+		break;
+	}
+
+	// Should already be gone. Bounded reap: EINTR is expected here (see above), and a child wedged
+	// in uninterruptible sleep would otherwise stall every thread waiting on pthread_once.
+	for (i = 0; i < 200; ++i)
+	{
+		pid_t w = waitpid(pid, NULL, WNOHANG);
+		if (w == pid || (w < 0 && errno != EINTR)) { break; }
+		{ struct timespec ts = { 0, 1000000 }; nanosleep(&ts, NULL); }   // 1ms
+	}
+
+	return found;
+}
+
+#ifdef __APPLE__
+// Use keychain as trusted store. Fallback to static file (/etc/ssl/cert.pem on macos)
+// TODO: add admin installed root/distrust
+static int ILibCrypto_MacLoadAnchors(X509_STORE *store)
+{
+	CFArrayRef anchors = NULL;
+	CFIndex i, n;
+
+	if (SecTrustCopyAnchorCertificates(&anchors) != errSecSuccess || anchors == NULL) { return 0; }
+	n = CFArrayGetCount(anchors);
+	for (i = 0; i < n; ++i)
+	{
+		SecCertificateRef cert = (SecCertificateRef)CFArrayGetValueAtIndex(anchors, i);
+		const unsigned char *p;
+		CFDataRef der;
+		X509 *x;
+
+		if (cert == NULL || (der = SecCertificateCopyData(cert)) == NULL) { continue; }
+		p = CFDataGetBytePtr(der);
+		if ((x = d2i_X509(NULL, &p, (long)CFDataGetLength(der))) != NULL)
+		{
+			X509_STORE_add_cert(store, x);		// takes its own reference
+			X509_free(x);
+		}
+		CFRelease(der);
+	}
+	CFRelease(anchors);
+	return sk_X509_OBJECT_num(X509_STORE_get0_objects(store)) > 0;
+}
+#endif
+
+// Build the process-wide trust store
+static void ILibCrypto_BuildCertStore(void)
+{
+	static const char * const known_cert_files[] = { ILibCrypto_KNOWN_CERT_FILES, NULL };
+	static const char * const known_cert_dirs[] = { ILibCrypto_KNOWN_CERT_DIRS, NULL };
+	static const char * const openssl_bins[] = { ILibCrypto_OPENSSL_BINDIRS, NULL };
+	const char *envFile = getenv(X509_get_default_cert_file_env());
+	const char *envDir = getenv(X509_get_default_cert_dir_env());
+	X509_STORE *store = X509_STORE_new();
+	char absFile[PATH_MAX], absDir[PATH_MAX];
+	struct stat bs;
+	int i, loaded = 0;
+
+	if (store == NULL) { return; }
+	g_ILibCrypto_certStore = store;
+
+	// 1: if SSL_CERT_FILE or SSL_CERT_DIR are defined, use those. Relative paths are resolved
+	// first; realpath() returns NULL on failure, which the checks below treat as unset.
+	if (envFile != NULL && envFile[0] != 0 && envFile[0] != '/') { envFile = realpath(envFile, absFile); }
+	if (envDir != NULL && envDir[0] != 0 && envDir[0] != '/') { envDir = realpath(envDir, absDir); }
+
+	if (envFile != NULL && envFile[0] == '/' && X509_STORE_load_locations(store, envFile, NULL) == 1) { loaded = 1; }
+	if (ILibCrypto_TryCertDir(store, envDir)) { loaded = 1; }
+	if (loaded != 0) { return; }
+
+#ifdef __APPLE__
+	// 2a: explicit SSL_CERT_* overrides the keychain
+	if (ILibCrypto_MacLoadAnchors(store)) { return; }
+#endif
+
+	// 2b: try for a rehashed directory, lazy registered so cheaper than 3
+	for (i = 0; known_cert_dirs[i] != NULL; ++i)
+	{
+		if (ILibCrypto_TryCertDir(store, known_cert_dirs[i])) { return; }
+	}
+
+	// 3: try to load a bundle, loads all certs, more resource intensive
+	for (i = 0; known_cert_files[i] != NULL; ++i)
+	{
+		if (X509_STORE_load_locations(store, known_cert_files[i], NULL) == 1) { return; }
+	}
+
+	// Last resort: openssl at fixed absolute paths, root owned and non-group writable
+	for (i = 0; openssl_bins[i] != NULL; ++i)
+	{
+		if (stat(openssl_bins[i], &bs) == 0 && S_ISREG(bs.st_mode) && bs.st_uid == 0 &&
+			(bs.st_mode & (S_IWGRP | S_IWOTH)) == 0)
+		{
+			if (ILibCrypto_QueryOpenSSLCertDir(store, openssl_bins[i])) { return; }
+			break;
+		}
+	}
+
+	X509_STORE_set_default_paths(store);
+}
+#endif
+
+int __fastcall util_load_system_certs(SSL_CTX *ctx)
 {
 	#ifdef WIN32
-        X509_STORE *xs = SSL_CTX_get_cert_store(ctx);
-	    HCERTSTORE s = CertOpenSystemStoreW(0, L"ROOT");
-        BIO *in;
-        X509 *x;
-	    const CERT_CONTEXT *wctx = NULL;
-        for (;;) {
-            wctx = CertEnumCertificatesInStore(s, wctx);
-            if (!wctx)
-                break;
-            in = BIO_new_mem_buf(wctx->pbCertEncoded, wctx->cbCertEncoded);
-            x = d2i_X509_bio(in, NULL);
-            X509_STORE_add_cert(xs, x);
-            X509_free(x);
-            BIO_free(in);
-        }
-
-        CertFreeCertificateContext(wctx);
-        CertCloseStore(s, 0);
+		InitOnceExecuteOnce(&g_ILibCrypto_certStoreOnce, ILibCrypto_BuildCertStore, NULL, NULL);
 	#else
-	    const char *cert_dir = X509_get_default_cert_dir();
-	    struct stat s;
-		int err = stat(cert_dir, &s);
-		// The system we are on uses a different SSL dir than our statically included openssl. Try to grab it from the locally installed openssl distribution.
-		if (err == -1) {
-    		char buf[1024] = {0};
-    		char dest[1024] = {0};
-
-    		FILE *output;
-			// Running "openssl version -d" should give us the directory of the locally installed openssl. We can then use that directory to load the certs from that distribution.
-			// However, this could be a security risk as we are running "openssl" as root.
-    		if ((output = popen("openssl version -d", "r")) == NULL) {
-		        return -1;
-		    }
-		    char *tokenized;
-		    while (fgets(buf, 1024, output) != NULL) {
-		        tokenized = strtok(buf, "\"");
-		        while(tokenized != NULL) {
-		        	if (tokenized[0] == '/') {
-		        		strcat_s(dest, sizeof(dest), tokenized);
-		        		strcat_s(dest, sizeof(dest), "/certs");
-		        		// Some systems use a /certs dir, some don't. Test for both.
-		        		err = stat(dest, &s);
-		        		if (err) {
-		        			SSL_CTX_load_verify_locations(ctx, NULL, tokenized);
-		        		} else {
-		        			SSL_CTX_load_verify_locations(ctx, NULL, dest);
-		        		}
-		        		break;
-		        	}
-		        	tokenized = strtok(NULL, "\"");
-		        }
-		    }
-		    if (pclose(output)) {
-		        return -1;
-		    }
-		} else {
-			SSL_CTX_set_default_verify_paths(ctx);
-		}
+		pthread_once(&g_ILibCrypto_certStoreOnce, ILibCrypto_BuildCertStore);
 	#endif
+
+	if (g_ILibCrypto_certStore != NULL && X509_STORE_up_ref(g_ILibCrypto_certStore) == 1)
+	{
+		SSL_CTX_set_cert_store(ctx, g_ILibCrypto_certStore);
+	}
+	else
+	{
+		SSL_CTX_set_default_verify_paths(ctx);
+	}
 	return 0;
 }
 

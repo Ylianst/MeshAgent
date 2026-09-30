@@ -104,24 +104,30 @@ typedef enum AgentIdentifiers
 // Commands 0 to 9 are reserved for client/server authentication, once authenticated they can't be used and must not be processed.
 // Commands 10 and above must only be processed if the server is authenticated. All these commands have 2 bytes commandid + 2 bytes requestid.
 // Commands with an id that starts with '{' (123, 0x7B) are reserved for JSON commands, that is commands 31488 (0x7B00) to 31743 (0x7BFF)
+// The MeshCommands_Binary enum below and the name switch in MeshCommand_Name() in agentcore.c are generated from this list, so adding a command here updates both.
+
+#define MESH_COMMANDS(X)                                                                                                                                       \
+	X(MeshCommand_AuthRequest,           1)  /* Server web certificate public key sha384 hash + agent or server nonce */                                        \
+	X(MeshCommand_AuthVerify,            2)  /* Agent or server signature */                                                                                   \
+	X(MeshCommand_AuthInfo,              3)  /* Agent information */                                                                                           \
+	X(MeshCommand_AuthConfirm,           4)  /* Server confirm to the agent that is it authenticated */                                                        \
+	X(MeshCommand_ServerId,              5)  /* Optional, agent sends the expected serverid to the server. Useful if the server has many server certificates. */ \
+	X(MeshCommand_CoreModule,           10)  /* New core modules to be used instead of the old one, if empty, remove the core module */                        \
+	X(MeshCommand_CompressedCoreModule, 20)                                                                                                                    \
+	X(MeshCommand_CoreModuleHash,       11)  /* Request/return the SHA384 hash of the core module */                                                           \
+	X(MeshCommand_AgentCommitDate,      30)  /* Commit Date that the agent was built with */                                                                   \
+	X(MeshCommand_AgentHash,            12)  /* Request/return the SHA384 hash of the agent executable */                                                      \
+	X(MeshCommand_AgentUpdate,          13)  /* Indicate the start and end of the mesh agent binary transfer */                                                \
+	X(MeshCommand_AgentUpdateBlock,     14)  /* Part of the mesh agent sent from the server to the agent, confirmation/flowcontrol from agent to server */      \
+	X(MeshCommand_AgentTag,             15)  /* Send the mesh agent tag to the server */                                                                       \
+	X(MeshCommand_CoreOk,               16)  /* Sent by the server to indicate the meshcore is ok */                                                           \
+	X(MeshCommand_HostInfo,             31)  /* Host OS and CPU Architecture */
+
 typedef enum MeshCommands_Binary
 {
-	MeshCommand_AuthRequest				= 1,    // Server web certificate public key sha384 hash + agent or server nonce
-	MeshCommand_AuthVerify				= 2,    // Agent or server signature
-	MeshCommand_AuthInfo				= 3,	// Agent information
-	MeshCommand_AuthConfirm             = 4,	// Server confirm to the agent that is it authenticated
-	MeshCommand_ServerId				= 5,	// Optional, agent sends the expected serverid to the server. Useful if the server has many server certificates.
-	MeshCommand_CoreModule				= 10,	// New core modules to be used instead of the old one, if empty, remove the core module
-	MeshCommand_CompressedCoreModule	= 20,
-	MeshCommand_CoreModuleHash			= 11,	// Request/return the SHA384 hash of the core module
-	MeshCommand_AgentCommitDate			= 30,	// Commit Date that the agent was built with
-	MeshCommand_AgentHash				= 12,	// Request/return the SHA384 hash of the agent executable
-	MeshCommand_AgentUpdate				= 13,   // Indicate the start and end of the mesh agent binary transfer
-	MeshCommand_AgentUpdateBlock		= 14,   // Part of the mesh agent sent from the server to the agent, confirmation/flowcontrol from agent to server
-	MeshCommand_AgentTag				= 15,	// Send the mesh agent tag to the server
-	MeshCommand_CoreOk					= 16,	// Sent by the server to indicate the meshcore is ok
-	MeshCommand_HostInfo				= 31,	// Host OS and CPU Architecture
-
+#define MESH_COMMAND_ENUM(id, value) id = value,
+	MESH_COMMANDS(MESH_COMMAND_ENUM)
+#undef MESH_COMMAND_ENUM
 } MeshCommands_Binary;
 
 #pragma pack(push,1)
@@ -187,6 +193,7 @@ typedef struct MeshAgentHostContainer
 	DpiAwarenessFunc dpiAwareness;
 	char DNS_LOCK[255];
 	char ID_LOCK[255];
+	int authenticodeChecked;
 #endif
 
 	int showModuleNames;
@@ -224,6 +231,7 @@ typedef struct MeshAgentHostContainer
 #endif
 	struct util_cert selfcert;
 	struct util_cert selftlscert;
+	struct util_cert clientcert;			// Optional mTLS client cert, set with the "ClientCertPem" setting
 	char serverWebHash[UTIL_SHA384_HASHSIZE];
 #endif
 
@@ -289,8 +297,10 @@ fakeUpdate:					If set, when the agent self-updates, it will update to the same 
 forceUpdate:				If set, will cause the agent to perform a self-update on next start.
 ignoreProxyFile:			If set, will cause the agent to ignore any proxy settings
 logUpdate:					If set, will cause the agent to log self-update status
+logRotate:					If set to N>0, rotates the log file at maxLogSize, keeping N older copies (meshagent.log.1..N)
+logTruncate:				If set, clears and continues the log at maxLogSize instead of stopping. Ignored if logRotate is set
 jsDebugPort:				Specify a JS Debugger Port
-maxLogSize:					Specifies the maximum size of the error log file. 
+maxLogSize:					Maximum size in bytes of the log file (default 524288). When reached, logging stops unless logRotate/logTruncate is set.
 nocertstore:				If set on Windows, will force the Agent to use OpenSSL instead of WinCrypto for cert generation/storage.
 readonly:					If set, forces the agent to open the database in readonly mode
 readmsh:					If set while db is in readonly mode, it will cache the local msh file in the readonly db

@@ -38,6 +38,7 @@ Here is a list of the possible keys that are currently supported by the agent. N
 |---|---|
 | `AgentCapabilities` | Bitmask specifying supported agent capabilities. |
 | `agentName` | If set, sent to the server instead of the hostname. |
+| `ClientCertPem` | Path to a PEM file holding a private key followed by a certificate. If set, this certificate is presented as the TLS client certificate on the control channel and on relay tunnels, for example when the server sits behind a reverse proxy that requires mTLS. Does not affect the agent identity certificate or the NodeID. |
 | `compactDirtyMinimum` | Minimum dirty bytes threshold for the `db.compact()` operation. |
 | `consoleTextMaxRate` | Rate limit for `sendConsoleText`. Default is 10 messages per second. |
 | `controlChannelDebug` | If set, logs/displays control channel messages (except JSON messages). |
@@ -50,8 +51,10 @@ Here is a list of the possible keys that are currently supported by the agent. N
 | `forceUpdate` | If set, causes the agent to perform a self-update on next start. |
 | `ignoreProxyFile` | If set, causes the agent to ignore any proxy settings. |
 | `logUpdate` | If set, causes the agent to log self-update status. |
+| `logRotate` | If set to N (greater than 0), rotates the log file when it reaches `maxLogSize`, keeping N older copies (`meshagent.log.1` … `meshagent.log.N`). |
+| `logTruncate` | If set, clears the log file and continues when it reaches `maxLogSize` instead of stopping. Ignored if `logRotate` is set. |
 | `jsDebugPort` | Specifies a JS debugger port. |
-| `maxLogSize` | Maximum size of the error log file. |
+| `maxLogSize` | Maximum size in bytes of the log file (`meshagent.log`). Default 524288 (512 KiB). When reached, logging stops by default unless `logRotate` or `logTruncate` is set. |
 | `nocertstore` | Windows only. Forces the agent to use OpenSSL instead of WinCrypto for cert generation/storage. |
 | `readonly` | If set, forces the agent to open the database in read-only mode. |
 | `readmsh` | If set while db is in read-only mode, caches the local `.msh` file in the read-only db. |
