@@ -1291,7 +1291,10 @@ void* kvm_server_mainloop_x11(void* parm)
 
 	unsigned short currentDisplayId = 0;
 
-	if (sessionUid != 0)
+	// Only a root agent has anything to drop. An agent that runs as an ordinary user (a per-user install, a container)
+	// is already no more privileged than the session it captures, and initgroups() would fail for it with EPERM, which
+	// aborted the capture child and left the remote desktop stuck in setup.
+	if (sessionUid != 0 && geteuid() == 0)
 	{
 		// Full drop, not bare setuid: keeping gid 0 / root's supplementary groups would leave the
 		// X11 slave more privileged than the session user, and continuing as root after a failed
