@@ -92,9 +92,16 @@ jobs:
 
         # Fail loudly here rather than at link time: if Opus ended up on the
         # dynamic CRT it will carry a DEFAULTLIB directive naming MSVCRT.
-        $dumpbin = @("${env:ProgramFiles}\Microsoft Visual Studio\2022",
-                     "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022") |
-                   Where-Object { Test-Path $_ } |
+        #
+        # Look wherever Visual Studio is installed, whatever its version: the x64 and x86 jobs run on windows-2022 (Visual
+        # Studio 2022) but the ARM64 image ships Visual Studio 2026 (folder "18"), which a search limited to a "2022" folder
+        # never finds. vswhere reports the real install paths; the two folders are a fallback if it is missing.
+        $vsRoots = @()
+        $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+        if (Test-Path $vswhere) { $vsRoots += @(& $vswhere -all -products '*' -property installationPath) }
+        $vsRoots += @("${env:ProgramFiles}\Microsoft Visual Studio", "${env:ProgramFiles(x86)}\Microsoft Visual Studio")
+        $dumpbin = $vsRoots |
+                   Where-Object { $_ -and (Test-Path $_) } |
                    ForEach-Object { Get-ChildItem $_ -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue } |
                    Select-Object -First 1
         if (-not $dumpbin) { throw "dumpbin.exe not found; cannot verify the CRT" }
