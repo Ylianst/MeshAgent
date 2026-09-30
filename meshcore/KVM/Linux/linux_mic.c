@@ -47,6 +47,7 @@ limitations under the License.
 
 #include "meshcore/meshdefines.h"
 #include "meshcore/KVM/kvm_mic.h"
+#include "linux_kvm_pipe.h"
 #include "opus/opus.h"
 
 /* Only for type/struct/enum definitions (pa_source_info, pa_context_state_t,
@@ -205,9 +206,7 @@ static void mic_send(const unsigned char *payload, int payloadLen, int type)
 
     if (g_slave_pipe_fd >= 0)
     {
-        ssize_t written = write(g_slave_pipe_fd, buf, (size_t)total);
-        (void)written;
-        fsync(g_slave_pipe_fd);
+        (void)kvm_slave_write_from_thread(g_slave_pipe_fd, buf, (size_t)total);
     }
     else if (g_writeHandler != NULL)
     {
@@ -241,9 +240,7 @@ static void send_caps(ILibTransport_DoneState(*writeHandler)(char*, int, void*),
     /* Send through the same path as audio frames so ordering is preserved. */
     if (g_slave_pipe_fd >= 0)
     {
-        ssize_t written = write(g_slave_pipe_fd, (char*)caps, MIC_CAPS_LEN);
-        (void)written;
-        fsync(g_slave_pipe_fd);
+        (void)kvm_slave_write_from_thread(g_slave_pipe_fd, (char*)caps, MIC_CAPS_LEN);
     }
     else if (writeHandler != NULL)
     {
@@ -266,9 +263,7 @@ static void notify_js(int command)
 
     if (g_slave_pipe_fd >= 0)
     {
-        ssize_t written = write(g_slave_pipe_fd, (char*)frame, sizeof(frame));
-        (void)written;
-        fsync(g_slave_pipe_fd);
+        (void)kvm_slave_write_from_thread(g_slave_pipe_fd, (char*)frame, sizeof(frame));
     }
     else if (g_writeHandler != NULL)
     {
@@ -298,9 +293,7 @@ static void notify_js_consent_needed(int skipPrompt)
 
     if (g_slave_pipe_fd >= 0)
     {
-        ssize_t written = write(g_slave_pipe_fd, (char*)frame, sizeof(frame));
-        (void)written;
-        fsync(g_slave_pipe_fd);
+        (void)kvm_slave_write_from_thread(g_slave_pipe_fd, (char*)frame, sizeof(frame));
     }
     else if (g_writeHandler != NULL)
     {
@@ -655,9 +648,7 @@ send:
 
     if (g_slave_pipe_fd >= 0)
     {
-        ssize_t written = write(g_slave_pipe_fd, (char*)outFrame, (size_t)outLen);
-        (void)written;
-        fsync(g_slave_pipe_fd);
+        (void)kvm_slave_write_from_thread(g_slave_pipe_fd, (char*)outFrame, (size_t)outLen);
     }
     else if (writeHandler != NULL)
     {

@@ -54,6 +54,7 @@ limitations under the License.
 
 #include "meshcore/meshdefines.h"
 #include "meshcore/KVM/kvm_cam.h"
+#include "linux_kvm_pipe.h"
 
 /* Vendored rather than the system copy so the header always matches the
  * libturbojpeg.a this build links (see the makefile's KVM block). */
@@ -221,9 +222,7 @@ static void cam_write_out(const char *buf, int len)
     pthread_mutex_lock(&g_sendLock);
     if (g_slave_pipe_fd >= 0)
     {
-        ssize_t written = write(g_slave_pipe_fd, buf, (size_t)len);
-        (void)written;
-        fsync(g_slave_pipe_fd);
+        (void)kvm_slave_write_from_thread(g_slave_pipe_fd, buf, (size_t)len);
     }
     else if (g_writeHandler != NULL)
     {

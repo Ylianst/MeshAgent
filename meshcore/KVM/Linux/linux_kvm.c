@@ -17,6 +17,7 @@ limitations under the License.
 #include "linux_kvm.h"
 #include "linux_kvm_wayland.h"
 #include "linux_kvm_drm.h"
+#include "linux_kvm_pipe.h"
 #include "meshcore/meshdefines.h"
 #include "microstack/ILibParsers.h"
 #include "microstack/ILibAsyncSocket.h"
@@ -49,12 +50,6 @@ limitations under the License.
 #include "meshcore/KVM/kvm_mic.h"
 #include "meshcore/KVM/kvm_cam.h"
 extern int slave2master[2];
-static ILibTransport_DoneState kvm_audio_pipe_write(char *buf, int len, void *reserved)
-{
-	(void)reserved;
-	if (slave2master[1] > 0) { write(slave2master[1], buf, len); fsync(slave2master[1]); }
-	return ILibTransport_DoneState_COMPLETE;
-}
 #endif
 
 #define EXIT_SUCCESS 0
@@ -179,6 +174,34 @@ static void kvm_slave_send(const void *buffer, size_t len)
 		ignore_result(write(slave2master[1], buffer, len));
 	}
 }
+
+// The capture thread: the thread that runs kvm_server_mainloop() and so handles the viewer's input.
+static pthread_t g_kvmCaptureThread;
+static int g_kvmCaptureThreadSet = 0;
+
+// For the audio, microphone and camera threads. They share the pipe with the capture thread's tile stream, which on the
+// DRM backend is non-blocking: see linux_kvm_pipe.h for why a plain write() is not enough there.
+int kvm_slave_write_from_thread(int fd, const char *buffer, size_t len)
+{
+	return kvm_pipe_write_packet(fd, buffer, len, &g_shutdown);
+}
+
+#if defined(_KVM_AUDIO)
+// The write handler the audio, microphone and camera modules are given. It is called on the capture thread by the input
+// handlers (capability replies), and on the modules' own threads. The capture thread must go through the DRM writer on the
+// DRM backend, which keeps draining viewer input while it waits for room; the modules' threads must not, that writer
+// shares state with the capture thread, so they take the packet lock instead.
+static ILibTransport_DoneState kvm_audio_pipe_write(char *buf, int len, void *reserved)
+{
+	(void)reserved;
+	if (slave2master[1] > 0)
+	{
+		if (g_kvmBackendDRM != 0 && g_kvmCaptureThreadSet != 0 && pthread_equal(pthread_self(), g_kvmCaptureThread)) { kvm_slave_send(buf, (size_t)len); }
+		else { (void)kvm_slave_write_from_thread(slave2master[1], buf, (size_t)len); }
+	}
+	return ILibTransport_DoneState_COMPLETE;
+}
+#endif
 
 int remoteMouseX = 0, remoteMouseY = 0;
 
@@ -1695,6 +1718,8 @@ void* kvm_server_mainloop_x11(void* parm)
 void* kvm_server_mainloop(void* parm)
 {
 	int sessionUid = (int)(intptr_t)parm;
+	g_kvmCaptureThread = pthread_self();
+	g_kvmCaptureThreadSet = 1;
 	kvm_screenreader_mode_t screenreaderMode = kvm_screenreader_mode_for_uid(sessionUid);
 	if (screenreaderMode == KVM_SCREENREADER_MODE_DRM)
 	{

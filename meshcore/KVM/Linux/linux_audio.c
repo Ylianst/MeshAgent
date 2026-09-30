@@ -28,6 +28,7 @@ limitations under the License.
 
 #include "meshcore/meshdefines.h"
 #include "meshcore/KVM/kvm_audio.h"
+#include "linux_kvm_pipe.h"
 #include "opus/opus.h"
 
 /* -----------------------------------------------------------------------
@@ -84,8 +85,7 @@ static void audio_send_frame(const unsigned char *opus_data, int opus_len)
     memcpy(buf + 7, opus_data, opus_len);
 
     if (g_slave_pipe_fd >= 0) {
-        write(g_slave_pipe_fd, buf, total);
-        fsync(g_slave_pipe_fd);
+        (void)kvm_slave_write_from_thread(g_slave_pipe_fd, buf, (size_t)total);
     } else if (g_writeHandler) {
         /* fallback: parent-mode (before fork) or non-Linux platforms */
         g_writeHandler(buf, total, g_reserved);
