@@ -71,13 +71,17 @@ jobs:
       # The makefile now gates the Bootlin cross-toolchain behind CROSS=1, so a plain build uses
       # the container's native gcc and strip (an arm64 container, so the binary is aarch64).
       # bookworm (glibc 2.36) runs on Pi OS Bookworm and Trixie; Debian 11 bullseye is EOL and 404s.
+      #
+      # AUDIO=1 CAMERA=1: MeshCentral serves this one file, meshagent_aarch64, to devices reporting ARCHID 26 or 32, so it
+      # is what every ARM64 device downloads, and it must carry the microphone/camera/audio support like the x86 builds do
+      # (lib-opus/linux/aarch64 is committed). libpulse-dev is needed for the PulseAudio headers.
       - name: Build aarch64 (ARCHID=32) in an older-glibc container
         run: |
           docker run --rm -v "${{ github.workspace }}":/src -w /src debian:bookworm bash -c '
             apt-get update &&
-            apt-get install -y git build-essential pkg-config libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev &&
+            apt-get install -y git build-essential pkg-config libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev libpulse-dev &&
             git config --global --add safe.directory /src &&
-            make -j4 linux ARCHID=32
+            make -j4 linux ARCHID=32 AUDIO=1 CAMERA=1
           '
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7.0.1
