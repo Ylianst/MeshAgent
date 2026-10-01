@@ -18,7 +18,7 @@ jobs:
         run: |
           sudo dpkg --add-architecture i386 &&
           sudo apt clean all && sudo apt update && 
-          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg62-dev build-essential musl-tools &&
+          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg62-dev build-essential gcc-multilib musl-tools &&
           sudo apt-get install -y linux-libc-dev:i386 libc6-dev-i386 libjpeg62-dev:i386 &&
           sudo apt-get install -y libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev
       - name: Restore the Bootlin x86 toolchains
@@ -28,24 +28,34 @@ jobs:
             ${{ runner.temp }}/x86-i686--glibc--stable
             ${{ runner.temp }}/x86-64-core-i7--glibc--stable
           key: bootlin-x86-2017.05-toolchains-1-1
-      # -march=x86-64 in BOOTLIN_CC64 because Bootlin's x86-64 toolchain defaults to -march=corei7
-      # -idirafter for the proper searchpath order
+      # The runner's gcc and binutils compile, and the Bootlin sysroot supplies the glibc 2.24 headers and libraries, so the floor stays at 2.24.
+      # -B and -L are needed next to --sysroot, because --sysroot alone linked the runner's own glibc (floor 2.34). -march=x86-64 because the sysroot comes from the corei7 toolchain.
+      # -idirafter keeps the runner's headers (X11, DRM, libjpeg) behind the sysroot's own.
       - name: Install Bootlin x86 glibc 2.24 toolchains
         run: |
           { [ -d "$RUNNER_TEMP/x86-i686--glibc--stable" ] || curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/x86-i686/tarballs/x86-i686--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP"; } &&
           { [ -d "$RUNNER_TEMP/x86-64-core-i7--glibc--stable" ] || curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/x86-64-core-i7/tarballs/x86-64-core-i7--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP"; } &&
-          echo "BOOTLIN_CC32=$RUNNER_TEMP/x86-i686--glibc--stable/bin/i686-linux-gcc -idirafter /usr/include/i386-linux-gnu -idirafter /usr/include" >> "$GITHUB_ENV" &&
-          echo "BOOTLIN_CC64=$RUNNER_TEMP/x86-64-core-i7--glibc--stable/bin/x86_64-linux-gcc -march=x86-64 -mtune=generic -idirafter /usr/include/x86_64-linux-gnu -idirafter /usr/include" >> "$GITHUB_ENV"
+          S32="$RUNNER_TEMP/x86-i686--glibc--stable/i686-buildroot-linux-gnu/sysroot" &&
+          S64="$RUNNER_TEMP/x86-64-core-i7--glibc--stable/x86_64-buildroot-linux-gnu/sysroot" &&
+          echo "SYSROOT_CC32=gcc -m32 -mtune=generic --sysroot=$S32 -B$S32/usr/lib -L$S32/lib -L$S32/usr/lib -idirafter /usr/include/i386-linux-gnu -idirafter /usr/include" >> "$GITHUB_ENV" &&
+          echo "SYSROOT_CC64=gcc -march=x86-64 -mtune=generic --sysroot=$S64 -B$S64/usr/lib -L$S64/lib -L$S64/usr/lib -idirafter /usr/include/x86_64-linux-gnu -idirafter /usr/include" >> "$GITHUB_ENV"
       - name: Build 32 Bit Linux
-        run: make -j4 linux ARCHID=5 CC="$BOOTLIN_CC32" && make clean
+        run: make -j4 linux ARCHID=5 CC="$SYSROOT_CC32" && make clean
       - name: Build 64 Bit Linux
-        run: make -j4 linux ARCHID=6 CC="$BOOTLIN_CC64" && make clean
+        run: make -j4 linux ARCHID=6 CC="$SYSROOT_CC64" && make clean
       - name: Build 32 Bit NOKVM Linux
-        run: make -j4 linux ARCHID=19 CC="$BOOTLIN_CC32" && make clean
+        run: make -j4 linux ARCHID=19 CC="$SYSROOT_CC32" && make clean
       - name: Build 64 Bit NOKVM Linux
-        run: make -j4 linux ARCHID=20 CC="$BOOTLIN_CC64" && make clean
+        run: make -j4 linux ARCHID=20 CC="$SYSROOT_CC64" && make clean
       - name: Build 64 Bit Alpine Linux
         run: make -j4 linux ARCHID=33 && make clean
+      - name: Check the glibc floor
+        run: |
+          for f in meshagent_x86 meshagent_x86-64 meshagent_x86_nokvm meshagent_x86-64_nokvm; do
+            v=$(objdump -T "$f" | grep -o 'GLIBC_2\.[0-9]*' | sort -uV | tail -1)
+            echo "$f floor $v, gcc $(gcc -dumpfullversion)"
+            [ "$(printf '%s\nGLIBC_2.24\n' "$v" | sort -V | tail -1)" = GLIBC_2.24 ] || { echo "$f needs $v, above GLIBC_2.24"; exit 1; }
+          done
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -62,7 +72,7 @@ jobs:
       - name: Install Packages
         run: |
           sudo apt clean all && sudo apt update &&
-          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev
+          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
       - name: Restore the Bootlin ARM toolchains
         uses: actions/cache@v6
         with:
@@ -70,20 +80,36 @@ jobs:
             ${{ runner.temp }}/aarch64--glibc--stable
             ${{ runner.temp }}/armv6-eabihf--glibc--stable
           key: bootlin-arm-2017.05-toolchains-1-1
+      # Same idea as the x86 job: the cross gcc from apt, with glibc 2.24 headers and libraries from the Bootlin sysroots.
+      # -isystem puts the sysroot headers first, because apt's cross gcc otherwise finds its own newer glibc headers and the link fails on __isoc23_sscanf, fcntl64 and __gmtime64_r.
+      # The strip directories exist because the makefile appends the file name to STRIP, so a STRIP= on the make command line breaks the strip step.
       - name: Install Bootlin aarch64 and armv6 hard-float glibc 2.24 toolchains
         run: |
           { [ -d "$RUNNER_TEMP/aarch64--glibc--stable" ] || curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP"; } &&
           { [ -d "$RUNNER_TEMP/armv6-eabihf--glibc--stable" ] || curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/armv6-eabihf/tarballs/armv6-eabihf--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP"; } &&
-          echo "BOOTLIN_CC_AARCH64=$RUNNER_TEMP/aarch64--glibc--stable/bin/aarch64-linux-gcc -idirafter $GITHUB_WORKSPACE/lib-jpeg-turbo/includes -idirafter /usr/include" >> "$GITHUB_ENV" &&
-          echo "BOOTLIN_CC_ARMV6=$RUNNER_TEMP/armv6-eabihf--glibc--stable/bin/arm-linux-gcc -idirafter $GITHUB_WORKSPACE/lib-jpeg-turbo/includes -idirafter /usr/include" >> "$GITHUB_ENV"
+          SA="$RUNNER_TEMP/aarch64--glibc--stable/aarch64-buildroot-linux-gnu/sysroot" &&
+          SH="$RUNNER_TEMP/armv6-eabihf--glibc--stable/arm-buildroot-linux-gnueabihf/sysroot" &&
+          mkdir -p "$RUNNER_TEMP/strip-a64" "$RUNNER_TEMP/strip-arm" &&
+          ln -sf "$(command -v aarch64-linux-gnu-strip)" "$RUNNER_TEMP/strip-a64/strip" &&
+          ln -sf "$(command -v arm-linux-gnueabihf-strip)" "$RUNNER_TEMP/strip-arm/strip" &&
+          echo "SYSROOT_CC_AARCH64=aarch64-linux-gnu-gcc --sysroot=$SA -B$SA/usr/lib -L$SA/lib -L$SA/usr/lib -isystem $SA/usr/include -idirafter $GITHUB_WORKSPACE/lib-jpeg-turbo/includes -idirafter /usr/include" >> "$GITHUB_ENV" &&
+          echo "SYSROOT_CC_ARMV6=arm-linux-gnueabihf-gcc -marm -mcpu=arm1176jzf-s -mfpu=vfp -mfloat-abi=hard --sysroot=$SH -B$SH/usr/lib -L$SH/lib -L$SH/usr/lib -isystem $SH/usr/include -idirafter $GITHUB_WORKSPACE/lib-jpeg-turbo/includes -idirafter /usr/include" >> "$GITHUB_ENV"
       - name: Build ARM64 Linux (ARCHID=26)
-        run: PATH="$RUNNER_TEMP/aarch64--glibc--stable/aarch64-buildroot-linux-gnu/bin:$PATH" make -j4 linux ARCHID=26 CC="$BOOTLIN_CC_AARCH64" && make clean
+        run: PATH="$RUNNER_TEMP/strip-a64:$PATH" make -j4 linux ARCHID=26 CC="$SYSROOT_CC_AARCH64" && make clean
       - name: Build aarch64 (ARCHID=32)
-        run: PATH="$RUNNER_TEMP/aarch64--glibc--stable/aarch64-buildroot-linux-gnu/bin:$PATH" make -j4 linux ARCHID=32 CC="$BOOTLIN_CC_AARCH64" && make clean
+        run: PATH="$RUNNER_TEMP/strip-a64:$PATH" make -j4 linux ARCHID=32 CC="$SYSROOT_CC_AARCH64" && make clean
       # 32-bit Raspberry Pi. Bootlin's armv6-eabihf toolchain defaults to -mcpu=arm1176jzf-s with hard-float VFP,
       # so this armhf binary runs on every 32-bit Pi, Zero/1 (armv6) through 2/3/4 (armv7).
       - name: Build armhf (ARCHID=25)
-        run: PATH="$RUNNER_TEMP/armv6-eabihf--glibc--stable/arm-buildroot-linux-gnueabihf/bin:$PATH" make -j4 linux ARCHID=25 CC="$BOOTLIN_CC_ARMV6" && make clean
+        run: PATH="$RUNNER_TEMP/strip-arm:$PATH" make -j4 linux ARCHID=25 CC="$SYSROOT_CC_ARMV6" && make clean
+      - name: Check the glibc floor
+        run: |
+          for f in meshagent_arm64 meshagent_aarch64 meshagent_armhf; do
+            case $f in meshagent_armhf) od=arm-linux-gnueabihf-objdump;; *) od=aarch64-linux-gnu-objdump;; esac
+            v=$($od -T "$f" | grep -o 'GLIBC_2\.[0-9]*' | sort -uV | tail -1)
+            echo "$f floor $v, gcc $(aarch64-linux-gnu-gcc -dumpfullversion)"
+            [ "$(printf '%s\nGLIBC_2.24\n' "$v" | sort -V | tail -1)" = GLIBC_2.24 ] || { echo "$f needs $v, above GLIBC_2.24"; exit 1; }
+          done
       - name: Upload ARM64 Artifacts
         uses: actions/upload-artifact@v7
         with:
