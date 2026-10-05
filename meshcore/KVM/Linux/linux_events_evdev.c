@@ -941,6 +941,14 @@ void kvm_events_evdev_wake()
 	ignore_result(kvm_events_evdev_sync());
 	if (kvm_events_evdev_write(EV_REL, REL_WHEEL, -1) != 0) { return; }
 	ignore_result(kvm_events_evdev_sync());
+	// Hyprland never wakes DPMS on a wheel tick, only on pointer motion or a key press, so nudge
+	// the pointer as well, which leaves it at the centre of the desktop. Two positions, because the
+	// kernel drops an ABS value that did not change.
+	if (kvm_events_evdev_write(EV_ABS, ABS_X, 32767) != 0) { return; }
+	if (kvm_events_evdev_write(EV_ABS, ABS_Y, 32767) != 0) { return; }
+	ignore_result(kvm_events_evdev_sync());
+	if (kvm_events_evdev_write(EV_ABS, ABS_X, 32768) != 0) { return; }
+	ignore_result(kvm_events_evdev_sync());
 }
 
 void kvm_events_evdev_key_action(unsigned char vk, int up)
