@@ -1001,6 +1001,7 @@ typedef struct ILibBaseChain
 	void *WatchDogThread;
 	int nowatchdog;
 #ifdef WIN32
+	unsigned int apcWaitCount;
 	HANDLE WatchDogTerminator;
 #else
 	int WatchDogTerminator[2];
@@ -2186,11 +2187,19 @@ int ILibChain_WindowsSelect(void *chain, fd_set *readset, fd_set *writeset, fd_s
 	if (waitListCount == 0)
 	{
 		SleepEx(waitTimeout, TRUE);
+		((ILibBaseChain*)chain)->PostSelectCount++;
 		slct = -1;
 	}
 	else
 	{
-		while ((slct = WaitForMultipleObjectsEx(waitListCount, waitList, FALSE, waitTimeout, TRUE)) == WAIT_IO_COMPLETION && ((ILibBaseChain*)chain)->UnblockFlag == 0) {}
+		while ((slct = WaitForMultipleObjectsEx(waitListCount, waitList, FALSE, waitTimeout, TRUE)) == WAIT_IO_COMPLETION && ((ILibBaseChain*)chain)->UnblockFlag == 0)
+		{
+			((ILibBaseChain*)chain)->apcWaitCount++;
+		}
+
+		// The wait is over here. The handle handlers below run on this thread, so for the watchdog they must count as work and not as waiting.
+		// Counted after the whole function, a handler that hung in here looked like an idle wait and was never caught.
+		((ILibBaseChain*)chain)->PostSelectCount++;
 		ILibGetTimeOfDay(&currentTime);
 		if (slct != WAIT_IO_COMPLETION && (slct - (int)WAIT_OBJECT_0 >= 0) && (slct - (int)WAIT_OBJECT_0 < waitListCount))
 		{
@@ -2578,6 +2587,7 @@ ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibC
 			root->continuationState = ILibChain_ContinuationState_END_CONTINUE;
 			ret = ILibChain_Continue_Result_ERROR_EMPTY_SET;
 			slct = -1;
+			chain->PostSelectCount++;
 		}
 		else
 		{
@@ -2585,8 +2595,8 @@ ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibC
 		}
 #else
 		slct = select(FD_SETSIZE, &readset, &writeset, &errorset, &tv);
-#endif
 		chain->PostSelectCount++;
+#endif
 
 		if (slct == -1)
 		{
@@ -3156,71 +3166,175 @@ char* ILibChain_Debug(void *chain, char* buffer, int bufferLen)
 
 
 #ifdef ILibChain_WATCHDOG_TIMEOUT
+// The watchdog checks the chainloop counters every ILibChain_WATCHDOG_WAKE_SEC (override with -DILibChain_WATCHDOG_WAKE_MS), default 10s for timeouts less than 60s, otherwise 30s
+// A hang is ended between ILibChain_WATCHDOG_TIMEOUT and ILibChain_WATCHDOG_TIMEOUT + ILibChain_WATCHDOG_WAKE_MS after it began
+#ifndef ILibChain_WATCHDOG_WAKE_MS
+#define ILibChain_WATCHDOG_WAKE_MS ((ILibChain_WATCHDOG_TIMEOUT) >= 60*1000 ? 30*1000 : 10*1000)
+#endif
+#define ILibChain_WATCHDOG_WAKE_SEC (ILibChain_WATCHDOG_WAKE_MS/1000)
 void ILibChain_WatchDogStart(void *obj)
 {
-	char msg[4096];
+	char msg[4096], err[160];
 	ILibBaseChain *chain = (ILibBaseChain*)obj;
-	
-#ifndef WIN32
+	unsigned int currentPreCount = 0, lastPreCount = 0, currentPostCount = 0, stuck = 0, recreated = 0, noProgressChecks = 0;
+#ifdef WIN32
+	DWORD w;
+	unsigned int terr, apcWaitStartPreCount = 0, lastApcWaitCount = 0, apcWaitChecks = 0;
+#else
 	fd_set readset, writeset, errorset;
-	int slct;
+	int slct, tp[2], pipeGone = 0;
+	char c;
+	long long stamp = ILibGetUptime(), elapsed;
 	struct timeval tv;
-	long stamp = ILibGetTimeStamp();
 	tv.tv_usec = 0;
-	tv.tv_sec = ILibChain_WATCHDOG_TIMEOUT / 1000;
+	tv.tv_sec = ILibChain_WATCHDOG_WAKE_SEC;
 #endif
-	int Pre1 = 0, Pre2 = 0, Post1 = 0;
 	sprintf_s(msg, sizeof(msg), "Microstack STUCK: @ ");
 	
 #ifdef WIN32
-	while (WaitForSingleObject(chain->WatchDogTerminator, ILibChain_WATCHDOG_TIMEOUT) == WAIT_TIMEOUT)
+	for (;;)
+	{
+		w = WaitForSingleObject(chain->WatchDogTerminator, ILibChain_WATCHDOG_WAKE_MS);	// blocks until termsignal or timeout
+		if (w == WAIT_OBJECT_0)
+		{
+			if (chain->TerminateFlag != 0) { break; }	// normal agent exit
+			ResetEvent(chain->WatchDogTerminator);
+			continue;
+		}
+		if (w != WAIT_TIMEOUT)
+		{
+			// The terminator event was closed from under this thread, so make a new one
+			terr = (unsigned int)GetLastError();
+			if (++recreated > 3)
+			{
+				sprintf_s(err, sizeof(err), "Microstack watchdog: WaitForSingleObject() failed with error %u, the terminator event was closed again after 3 recreations, exiting", terr);
+				ILIBCRITICALEXITMSG(254, err);
+			}
+			if ((chain->WatchDogTerminator = CreateEvent(NULL, TRUE, FALSE, NULL)) == NULL)
+			{
+				sprintf_s(err, sizeof(err), "Microstack watchdog: WaitForSingleObject() failed with error %u and CreateEvent() failed with error %u, exiting", terr, (unsigned int)GetLastError());
+				ILIBCRITICALEXITMSG(254, err);
+			}
+			sprintf_s(err, sizeof(err), "Microstack watchdog: WaitForSingleObject() failed with error %u, the terminator event was created again", terr);
+			ILIBLOGMESSSAGE(err);
+			continue;
+		}
 #else
 	FD_ZERO(&readset);
 	FD_ZERO(&errorset);
 	FD_ZERO(&writeset);
 	FD_SET(chain->WatchDogTerminator[0], &readset);
-	while((slct = select(FD_SETSIZE, &readset, &writeset, &errorset, &tv)) == 0 || slct == EINTR)
-#endif
+	for (;;)
 	{
-#ifndef WIN32
-		tv.tv_usec = 0;
-		tv.tv_sec = ILibChain_WATCHDOG_TIMEOUT / 1000;
-
-		if (slct == EINTR)
+		slct = select(FD_SETSIZE, &readset, &writeset, &errorset, &tv);	// select() blocks up to tv, unless otherwise interrupted
+		if (slct > 0)
 		{
-			slct = (int)(ILibGetTimeStamp() - stamp);
-			if (slct < ILibChain_WATCHDOG_TIMEOUT)
+			slct = (int)read(chain->WatchDogTerminator[0], &c, 1);
+			if (slct == 1)
 			{
-				tv.tv_sec = (ILibChain_WATCHDOG_TIMEOUT - slct) / 1000;
+				if (chain->TerminateFlag != 0) { break; }	// normal agent exit
 				continue;
 			}
+			// Zero bytes is EOF, the write end was closed from under this thread
+			pipeGone = 1;
+			slct = -1;
 		}
-		stamp = ILibGetTimeStamp();
+		else if (slct < 0 && errno != EINTR)
+		{
+			// A failed kernel allocation is retried after a second, so the thread does not spin. Any other error means the terminator pipe is gone or the call is wrong.
+			if (errno == ENOMEM) { sleep(1); }
+			else { pipeGone = 1; }
+		}
+		if (pipeGone != 0)
+		{
+			// The terminator pipe is unusable, so the thread makes a new one and goes on. The old descriptor numbers may belong to another file now and are not closed.
+			pipeGone = 0;
+			if (++recreated > 3)
+			{
+				ILIBCRITICALEXITMSG(254, "Microstack watchdog: the terminator pipe was closed again after 3 recreations, exiting");
+			}
+			if (pipe(tp) != 0)
+			{
+				sprintf_s(err, sizeof(err), "Microstack watchdog: pipe() failed with errno %d, exiting", errno);
+				ILIBCRITICALEXITMSG(254, err);
+			}
+			if (tp[0] >= FD_SETSIZE) { ILIBCRITICALEXITMSG(254, "Microstack watchdog: the new terminator pipe is above FD_SETSIZE, exiting"); }
+			fcntl(tp[0], F_SETFL, O_NONBLOCK | fcntl(tp[0], F_GETFL, 0));
+			chain->WatchDogTerminator[1] = tp[1];
+			chain->WatchDogTerminator[0] = tp[0];
+			ILIBLOGMESSSAGE("Microstack watchdog: the terminator pipe was created again");
+		}
+		// The fd sets are undefined after an interrupted select(), so they are set again
 		FD_ZERO(&readset);
 		FD_ZERO(&errorset);
 		FD_ZERO(&writeset);
 		FD_SET(chain->WatchDogTerminator[0], &readset);
-#endif
-		Pre1 = chain->PreSelectCount;
-		Post1 = chain->PostSelectCount;
-
-		if (Pre1 == Post1)
+		tv.tv_usec = 0;
+		elapsed = (slct < 0) ? (ILibGetUptime() - stamp) : ILibChain_WATCHDOG_WAKE_MS;
+		if (elapsed >= 0 && elapsed < ILibChain_WATCHDOG_WAKE_MS)
 		{
-			if (Pre1 == Pre2 && Pre2 != 0)
-			{
-				// STUCK!
-#ifdef WIN32
-				ILibChain_Debug(chain, msg+20, sizeof(msg)-20);
-				ILIBCRITICALEXITMSG(254, msg);
-#else
-				pthread_kill(chain->ChainThreadID, SIGUSR1);
-				break;
+			// continue waiting remainder
+			tv.tv_sec = (long)((ILibChain_WATCHDOG_WAKE_MS - elapsed) / 1000);
+			if (tv.tv_sec < 1) { tv.tv_sec = 1; }
+			continue;
+		}
+		tv.tv_sec = ILibChain_WATCHDOG_WAKE_SEC;
+		stamp = ILibGetUptime();
 #endif
+		currentPreCount = chain->PreSelectCount;
+		currentPostCount = chain->PostSelectCount;
+
+		if (currentPreCount == currentPostCount)	// counters the same: between waits
+		{
+			if (currentPreCount == lastPreCount)	// no activity done on chain, possible hang
+			{
+				if (((unsigned long long)(++noProgressChecks) * ILibChain_WATCHDOG_WAKE_MS) >= ILibChain_WATCHDOG_TIMEOUT) { stuck = 1; }
 			}
 			else
 			{
-				Pre2 = Pre1;
+				// no hang, reset
+				lastPreCount = currentPreCount;
+				noProgressChecks = 0;
 			}
+		}
+#ifdef WIN32
+		else if (apcWaitStartPreCount != currentPreCount || lastApcWaitCount != chain->apcWaitCount)		// currentPreCount != currentPostCount, a wait. Check Asynchronous Procedure Call hang
+		{
+			// A new wait, or an APC returned since the last sample, reset
+			apcWaitStartPreCount = currentPreCount;
+			lastApcWaitCount = chain->apcWaitCount;
+			apcWaitChecks = 0;
+		}
+		else if (((unsigned long long)(++apcWaitChecks) * ILibChain_WATCHDOG_WAKE_MS) >= ((unsigned long long)chain->currentWaitTimeout + ILibChain_WATCHDOG_TIMEOUT))
+		{
+			// Stuck in the wait. APCs run inside it on the loop thread. It outlasted its own timeout by a full watchdog timeout and no APC returned, so one of them hangs.
+			stuck = 1;
+		}
+#endif
+		if (stuck == 1)
+		{
+#ifdef WIN32
+			__try { ILibChain_Debug(chain, msg+20, sizeof(msg)-20); } __except (EXCEPTION_EXECUTE_HANDLER) { }
+			printf("%s", ILibCriticalLog(msg, __FILE__, __LINE__, 0, 0)); fflush(stdout);
+			TerminateProcess(GetCurrentProcess(), 254);
+#else
+			ILibChain_Link *stuckLink = (chain->node != NULL) ? (ILibChain_Link*)ILibLinkedList_GetDataFromNode(chain->node) : NULL;
+			char *stuckIn = (stuckLink == NULL) ? "outside the link handlers" : ((stuckLink->MetaData != NULL) ? stuckLink->MetaData : "a link without a description");
+#ifdef _NOILIBSTACKDEBUG
+			sprintf_s(msg, sizeof(msg), "Microstack STUCK: the event loop made no progress for %u to %u seconds (select count %u) in [%s], ending the process\r\n", noProgressChecks * ILibChain_WATCHDOG_WAKE_SEC, (noProgressChecks + 1) * ILibChain_WATCHDOG_WAKE_SEC, currentPreCount, stuckIn);
+			ILibCriticalLog(msg, __FILE__, __LINE__, 254, 0);
+			_exit(254);
+#else
+			pthread_kill(chain->ChainThreadID, SIGUSR1);
+			// The handler logs the backtrace on the stuck thread. With core dumps enabled it returns instead of exiting, and it can hang on the heap lock that thread holds.
+			// So this thread ends the process itself after 10 seconds.
+			slct = 10;
+			while (slct > 0) { slct = (int)sleep((unsigned int)slct); }
+			sprintf_s(msg, sizeof(msg), "Microstack STUCK: 10 seconds after SIGUSR1 (select count %u) in [%s], ending the process\r\n", currentPreCount, stuckIn);
+			ILibCriticalLog(msg, __FILE__, __LINE__, 254, 0);
+			_exit(254);
+#endif
+#endif
 		}
 	}
 }
@@ -4005,6 +4119,12 @@ void ILibChain_PartialStart(void *Chain)
 {
 	if (Chain == NULL) { return; }
 	ILibBaseChain *chain = (ILibBaseChain*)Chain;
+#if defined(ILibChain_WATCHDOG_TIMEOUT)
+	char err[128];
+#ifndef WIN32
+	int flags;
+#endif
+#endif
 
 #ifdef WIN32
 	memset(chain->WaitHandles, 0, sizeof(chain->WaitHandles));
@@ -4022,17 +4142,25 @@ void ILibChain_PartialStart(void *Chain)
 
 	if (gILibChain == NULL) { gILibChain = Chain; } // Set the global instance if it's not already set
 #if defined(ILibChain_WATCHDOG_TIMEOUT)
+	// Failing here means the process is out of descriptors, handles or memory at start, so nothing after it would work either. Exiting matches the other ILIBCRITICALEXIT sites.
 #ifdef WIN32
 	chain->WatchDogTerminator = CreateEvent(NULL, TRUE, FALSE, NULL);
-#else
-	if (pipe(chain->WatchDogTerminator) == 0)
+	if (chain->WatchDogTerminator == NULL)
 	{
-		int flags = fcntl(chain->WatchDogTerminator[0], F_GETFL, 0);
-		fcntl(chain->WatchDogTerminator[0], F_SETFL, O_NONBLOCK | flags);
-#ifndef _NOILIBSTACKDEBUG
-		signal(SIGUSR1, ILib_POSIX_CrashHandler);
-#endif
+		sprintf_s(err, sizeof(err), "Microstack watchdog: CreateEvent() failed with error %u", (unsigned int)GetLastError());
+		ILIBCRITICALEXITMSG(254, err);
 	}
+#else
+	if (pipe(chain->WatchDogTerminator) != 0)
+	{
+		sprintf_s(err, sizeof(err), "Microstack watchdog: pipe() failed with errno %d", errno);
+		ILIBCRITICALEXITMSG(254, err);
+	}
+	flags = fcntl(chain->WatchDogTerminator[0], F_GETFL, 0);
+	fcntl(chain->WatchDogTerminator[0], F_SETFL, O_NONBLOCK | flags);
+#ifndef _NOILIBSTACKDEBUG
+	signal(SIGUSR1, ILib_POSIX_CrashHandler);
+#endif
 #endif
 #endif
 
@@ -4097,6 +4225,7 @@ ILibExportMethod void ILibStartChain(void *Chain)
 	if (chain->TerminateFlag == 0 && chain->nowatchdog == 0)
 	{
 		chain->WatchDogThread = ILibSpawnNormalThread(ILibChain_WatchDogStart, chain);
+		if (chain->WatchDogThread == NULL) { ILIBCRITICALEXITMSG(254, "Microstack watchdog: the thread could not be started"); }
 	}
 #endif
 
@@ -4185,8 +4314,8 @@ ILibExportMethod void ILibStartChain(void *Chain)
 			}
 		}
 		slct = select(FD_SETSIZE, &readset, &writeset, &errorset, &tv);
-#endif
 		chain->PostSelectCount++;
+#endif
 
 		if (slct == -1)
 		{
