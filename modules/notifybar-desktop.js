@@ -599,10 +599,9 @@ function x_notifybar(title)
             require('monitor-info')._X11.Xutf8SetWMProperties(m[i].display, this.notifybar._windows.peek().notifybar, require('_GenericMarshal').CreateVariable(this.notifybar.title), 0, 0, 0, 0, 0, 0);
 
             require('monitor-info').setWindowSizeHints(m[i].display, this.notifybar._windows.peek().notifybar, start, 0, barWidth, 1, barWidth, 1, barWidth, 1);
-            require('monitor-info').hideWindowIcon(m[i].display, this.notifybar._windows.peek().root, this.notifybar._windows.peek().notifybar);
+            require('monitor-info').setInitialWindowState(m[i].display, this.notifybar._windows.peek().notifybar, ['_NET_WM_STATE_ABOVE', '_NET_WM_STATE_SKIP_TASKBAR']);
 
             require('monitor-info').setAllowedActions(m[i].display, this.notifybar._windows.peek().notifybar, require('monitor-info').MOTIF_FLAGS.MWM_FUNC_CLOSE);
-            require('monitor-info').setAlwaysOnTop(m[i].display, this.notifybar._windows.peek().root, this.notifybar._windows.peek().notifybar);
 
 
             var wm_delete_window_atom = require('monitor-info')._X11.XInternAtom(m[i].display, require('_GenericMarshal').CreateVariable('WM_DELETE_WINDOW'), 0).Val;

@@ -367,12 +367,6 @@ function monitorinfo()
         this._kvmcheck = function _kvmcheck()
         {
             var retry = false;
-            if (this._kvmcheck_wayland())
-            {
-                this.kvm_x11_serverFound = true;
-                this.emit('kvmSupportDetected', true);
-                return;
-            }
             if (!(this.Location_X11LIB && this.Location_X11TST && this.Location_X11EXT))
             {
                 this._check();
@@ -433,7 +427,18 @@ function monitorinfo()
                     this._X11.CreateMethod('XStringToKeysym');
                     this._X11.CreateMethod('XChangeKeyboardMapping');
                 }
+            }
 
+            // Wayland capture doesn't need X, but the privacy bar still draws through Xwayland
+            if (this._kvmcheck_wayland())
+            {
+                this.kvm_x11_serverFound = true;
+                this.emit('kvmSupportDetected', true);
+                return;
+            }
+
+            if (this._X11)
+            {
                 var ch = require('child_process').execFile('/bin/sh', ['sh']);
                 ch.stderr.on('data', function () { });
                 ch.stdout.str = ''; ch.stdout.on('data', function (c) { this.str += c.toString(); });
@@ -529,6 +534,17 @@ function monitorinfo()
             if (maxHeight != null) { sizeHints.Deref(this._gm.PointerSize + 28, 4).toBuffer().writeUInt32LE(maxHeight); }
 
             this._X11.XSetNormalHints(display, window, sizeHints);
+        }
+        this.setInitialWindowState = function setInitialWindowState(display, window, states)
+        {
+            // The WM drops _NET_WM_STATE client messages for unmapped windows, and only reads this property at map time
+            var wmNetWmState = this._X11.XInternAtom(display, this._gm.CreateVariable('_NET_WM_STATE'), 0);
+            var atoms = this._gm.CreateVariable(states.length * this._gm.PointerSize);
+            for (var i = 0; i < states.length; ++i)
+            {
+                this._X11.XInternAtom(display, this._gm.CreateVariable(states[i]), 0).pointerBuffer().copy(atoms.Deref(i * this._gm.PointerSize, this._gm.PointerSize).toBuffer());
+            }
+            this._X11.XChangeProperty(display, window, wmNetWmState, XA_ATOM, 32, PropModeReplace, atoms, states.length);
         }
         this.setAlwaysOnTop = function setAlwaysOnTop(display, rootWindow, window)
         {
