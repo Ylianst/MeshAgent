@@ -1,0 +1,76 @@
+name: OpenBSD Build
+run-name: Build OpenBSD versions of MeshAgent
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      openbsd: ${{ steps.chk.outputs.openbsd }}
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # A pull request compares against its base branch, a push against the commit before it.
+      - id: chk
+        name: Find the builds this change needs
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bash .github/scripts/changed-targets.sh "$BASE_SHA"
+
+  openbsd-build-x86-64:
+    name: OpenBSD ${{ matrix.rel }} x86_64, ${{ matrix.label }} release (ARCHID=37)
+    needs: changes
+    if: needs.changes.outputs.openbsd == 'true'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # One binary per OpenBSD release, because libc's major number changes almost every release and the loader
+        # refuses any other major. OpenBSD supports only the current and the previous release.
+        # The current release keeps the 'meshagent_openbsd_x86-64' name, the previous one gets the release appended.
+        # When there is a new release, fetch-openbsd-key.sh can be used to add the new pubkey to the repo
+        include:
+          - rel: "7.9"
+            label: current
+          # - rel: "7.8"
+          #   label: previous
+    env:
+      OPENBSD_REL: ${{ matrix.rel }}
+      # Empty for the current release. A plain '' in the true branch would fall through to the false branch
+      SUFFIX: ${{ matrix.label == 'previous' && format('-{0}', matrix.rel) || '' }}
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+      - name: Install clang, lld and signify
+        run: sudo apt-get -qq update && sudo apt-get -qq -y install clang lld signify-openbsd
+      # The sysroot is extracted from about 400 MB of OpenBSD sets, so it is cached per release and fetched only once.
+      - name: Restore the OpenBSD sysroot
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/openbsd-sysroot
+          key: openbsd-sysroot-${{ env.OPENBSD_REL }}-${{ hashFiles('.github/scripts/fetch-openbsd-sysroot.sh', '.github/scripts/openbsd-*-base.pub') }}
+      - name: Fetch the OpenBSD sysroot
+        run: bash .github/scripts/fetch-openbsd-sysroot.sh "$OPENBSD_REL" "$RUNNER_TEMP/openbsd-sysroot"
+      # silence echo output with make -s and most noise from CC with '-Wno-date-time -Wno-unused-command-line-argument -Wno-deprecated-non-prototype'
+      - name: Build meshagent (x86_64)
+        run: |
+          OSSL="$GITHUB_WORKSPACE/openssl/1.1.1w"
+          make -s -j4 openbsd ARCHID=37 EXENAME2="$SUFFIX" CC="clang -target x86_64-unknown-openbsd$OPENBSD_REL -Wno-date-time -Wno-unused-command-line-argument -Wno-deprecated-non-prototype --sysroot=$RUNNER_TEMP/openbsd-sysroot -fuse-ld=lld -I$OSSL/openbsd-x86_64/include -I$OSSL/include -L$OSSL/openbsd-x86_64/lib"
+      - name: Verify the binary targets OpenBSD
+        run: |
+          file "meshagent_openbsd_x86-64$SUFFIX"
+          file "meshagent_openbsd_x86-64$SUFFIX" | grep -q OpenBSD
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: meshagent-openbsd-x86_64${{ env.SUFFIX }}
+          path: ${{ github.workspace }}/meshagent_openbsd_x86-64${{ env.SUFFIX }}
