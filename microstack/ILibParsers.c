@@ -950,7 +950,7 @@ typedef struct ILibChain_WaitHandleInfo
 	void *node;
 	ILibChain_WaitHandleHandler handler;
 	void *user;
-	struct timeval expiration;
+	long long expiration;
 	char metaData[];
 }ILibChain_WaitHandleInfo;
 #endif
@@ -2179,7 +2179,7 @@ int ILibChain_WindowsSelect(void *chain, fd_set *readset, fd_set *writeset, fd_s
 {
 	int slct = -1;
 	int i;
-	struct timeval currentTime;
+	long long currentTime;
 	struct timeval tv;
 
 	if (((ILibBaseChain*)chain)->TerminateFlag != 0) { waitTimeout = 0; }
@@ -2191,7 +2191,7 @@ int ILibChain_WindowsSelect(void *chain, fd_set *readset, fd_set *writeset, fd_s
 	else
 	{
 		while ((slct = WaitForMultipleObjectsEx(waitListCount, waitList, FALSE, waitTimeout, TRUE)) == WAIT_IO_COMPLETION && ((ILibBaseChain*)chain)->UnblockFlag == 0) {}
-		ILibGetTimeOfDay(&currentTime);
+		currentTime = ILibGetUptime();
 		if (slct != WAIT_IO_COMPLETION && (slct - (int)WAIT_OBJECT_0 >= 0) && (slct - (int)WAIT_OBJECT_0 < waitListCount))
 		{
 			if (waitList[ILibChain_HandleInfoIndex(slct)] != NULL)
@@ -2226,9 +2226,9 @@ int ILibChain_WindowsSelect(void *chain, fd_set *readset, fd_set *writeset, fd_s
 		{
 			for (i = 0; i < waitListCount; ++i)
 			{
-				if (waitList[ILibChain_HandleInfoIndex(i)] != NULL && tvnonzero(&(((ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(i)])->expiration)))
+				if (waitList[ILibChain_HandleInfoIndex(i)] != NULL && ((ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(i)])->expiration != 0)
 				{
-					if (tv2LTEtv1(&currentTime, &(((ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(i)])->expiration)))
+					if (((ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(i)])->expiration <= currentTime)
 					{
 						// TIMEOUT occured
 						if (((ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(i)])->handler != NULL)
@@ -2336,13 +2336,14 @@ void ILibChain_SetupWindowsWaitObject(HANDLE* waitList, int *waitListCount, stru
 	if (readset->fd_count == 0 && writeset->fd_count == 0 && ILibLinkedList_GetNode_Head(handleList) == NULL)
 	{
 		*waitListCount = 0;
-		*timeout = tv->tv_sec * 1000;
+		*timeout = (tv->tv_sec * 1000) + (tv->tv_usec / 1000);
 		return;
 	}
 	int chkIndex;
 	void *node;
-	struct timeval currentTime;
-	struct timeval expirationTime;
+	long long currentTime;
+	long long expirationTime;
+	long long remainingMs;
 	int i;
 	int x = 0;
 	long flags;
@@ -2382,10 +2383,8 @@ void ILibChain_SetupWindowsWaitObject(HANDLE* waitList, int *waitListCount, stru
 		if (FD_ISSET(selectHandles[i], errorset)) { flags |= FD_CLOSE; }
 		WSAEventSelect((SOCKET)selectHandles[i], waitList[i], flags);
 	}
-	ILibGetTimeOfDay(&currentTime);
-	memcpy_s(&expirationTime, sizeof(struct timeval), &currentTime, sizeof(struct timeval));
-	expirationTime.tv_sec += tv->tv_sec;
-	expirationTime.tv_usec += tv->tv_usec;
+	currentTime = ILibGetUptime();
+	expirationTime = currentTime + (((long long)tv->tv_sec) * 1000) + (tv->tv_usec / 1000);
 	node = ILibLinkedList_GetNode_Head(handleList);
 	while (node != NULL)
 	{
@@ -2414,24 +2413,20 @@ void ILibChain_SetupWindowsWaitObject(HANDLE* waitList, int *waitListCount, stru
 			}
 			waitList[i] = (HANDLE)ILibLinkedList_GetDataFromNode(node);
 			waitList[ILibChain_HandleInfoIndex(i)] = (HANDLE)ILibMemory_Extra(node);
-			if (((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration.tv_sec != 0 || ((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration.tv_usec != 0)
+			if (((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration != 0)
 			{
-				// Timeout was specified
-				if (tv2LTtv1(&expirationTime, &(((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration)))
+				if (((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration < expirationTime)
 				{
-					expirationTime.tv_sec = ((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration.tv_sec;
-					expirationTime.tv_usec = ((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration.tv_usec;
+					expirationTime = ((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration;
 
-					// If the expiration happens in the past, we need to set the timeout to zero
-					if (tv2LTtv1(&expirationTime, &currentTime)) { expirationTime.tv_sec = currentTime.tv_sec; expirationTime.tv_usec = currentTime.tv_usec; }
+					if (expirationTime < currentTime) { expirationTime = currentTime; }
 				}
 			}
 		}
 		node = ILibLinkedList_GetNextNode(node);
 	}
-	expirationTime.tv_sec -= currentTime.tv_sec; if (expirationTime.tv_sec < 0) { expirationTime.tv_sec = 0; }
-	expirationTime.tv_usec -= currentTime.tv_usec; if (expirationTime.tv_usec < 0) { expirationTime.tv_usec = 0; }
-	*timeout = (DWORD)((expirationTime.tv_sec * 1000) + (expirationTime.tv_usec * 0.001));
+	remainingMs = expirationTime - currentTime;
+	*timeout = (DWORD)(remainingMs < 0 ? 0 : remainingMs);
 	*waitListCount = x;
 }
 #endif
@@ -3861,24 +3856,12 @@ void ILibChain_WaitHandle_RestoreState(void *chain, void *state)
 {
 	ILibChain_WaitHandleInfo *info = (ILibChain_WaitHandleInfo*)state;
 	int msTIMEOUT = -1;
-	struct timeval current;
 
-	if (tvnonzero(&(info->expiration)))
+	if (info->expiration != 0)
 	{
-		// Expiration was specified
-		ILibGetTimeOfDay(&current);
-		
-		if (tv2LTEtv1(&(info->expiration), &current))
-		{
-			// Expiration happened in the past
-			msTIMEOUT = 1;
-		}
-		else
-		{
-			// Expiration is in the future
-			msTIMEOUT = ILibGetMillisecondTimeSpan(&(info->expiration), &current);
-		}
-	}	
+		long long remaining = info->expiration - ILibGetUptime();
+		msTIMEOUT = remaining > 0 ? (int)remaining : 1;
+	}
 
 	ILibChain_AddWaitHandleEx(chain, info->node, msTIMEOUT, info->handler, info->user, info->metaData);
 	ILibMemory_Free(info);
@@ -3947,9 +3930,11 @@ void ILibChain_AddWaitHandleEx(void *chain, HANDLE h, int msTIMEOUT, ILibChain_W
 		info->user = user;
 		if (msTIMEOUT != INFINITE && msTIMEOUT >= 0)
 		{
-			ILibGetTimeOfDay(&(info->expiration));
-			info->expiration.tv_sec += (long)(msTIMEOUT / 1000);
-			info->expiration.tv_usec += ((msTIMEOUT % 1000) * 1000);
+			info->expiration = ILibGetUptime() + msTIMEOUT;
+		}
+		else
+		{
+			info->expiration = 0;
 		}
 	}
 }
@@ -9980,10 +9965,15 @@ void ILibGetTimeOfDay(struct timeval *tp)
 	tp->tv_sec = (long)(posixTime / 10000000); // 100 ns intervals to second intervals
 	tp->tv_usec = (long)((posixTime / 10) - (tp->tv_sec * 1000000)); 
 #else
-	__time64_t t;
-	_time64(&t);
-	tp->tv_usec = 0;
-	tp->tv_sec = (long)t;
+	// FILETIME counts 100 ns units from 1601, so subtract 116444736000000000 to count from 1970.
+	FILETIME ft;
+	ULARGE_INTEGER now;
+	GetSystemTimeAsFileTime(&ft);
+	now.LowPart = ft.dwLowDateTime;
+	now.HighPart = ft.dwHighDateTime;
+	now.QuadPart -= 116444736000000000ULL;
+	tp->tv_sec = (long)(now.QuadPart / 10000000ULL);
+	tp->tv_usec = (long)((now.QuadPart % 10000000ULL) / 10);
 #endif
 }
 #endif
