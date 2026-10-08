@@ -2,7 +2,12 @@ name: FreeBSD Build
 run-name: Build FreeBSD versions of MeshAgent
 on:
   push:
+    branches: ['**']
   pull_request:
+  workflow_call:
+permissions:
+  contents: read
+
 jobs:
   freebsd-build-x86-64:
     name: FreeBSD x86_64 (ARCHID=30)
@@ -29,5 +34,6 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v7.0.1
         with:
+          if-no-files-found: error
           name: meshagent-freebsd-x86_64
-          path: ${{ github.workspace }}/meshagent_*
+          path: ${{ github.workspace }}/meshagent_freebsd_x86-64
