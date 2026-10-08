@@ -1,0 +1,8 @@
+{
+  "name": "meshagent-update-modules",
+  "private": true,
+  "description": "Optional dependency for tools/update-modules.js under node: pako gives the same deflate bytes as the agent's stock zlib, node's own zlib does not.",
+  "dependencies": {
+    "pako": "^2.2.0"
+  }
+}
