@@ -40,15 +40,15 @@ jobs:
           echo "SYSROOT_CC32=gcc -m32 -mtune=generic --sysroot=$S32 -B$S32/usr/lib -L$S32/lib -L$S32/usr/lib -idirafter /usr/include/i386-linux-gnu -idirafter /usr/include" >> "$GITHUB_ENV" &&
           echo "SYSROOT_CC64=gcc -march=x86-64 -mtune=generic --sysroot=$S64 -B$S64/usr/lib -L$S64/lib -L$S64/usr/lib -idirafter /usr/include/x86_64-linux-gnu -idirafter /usr/include" >> "$GITHUB_ENV"
       - name: Build 32 Bit Linux
-        run: make -j4 linux ARCHID=5 CC="$SYSROOT_CC32" && make clean
+        run: make -s -j4 linux ARCHID=5 CC="$SYSROOT_CC32" && make clean
       - name: Build 64 Bit Linux
-        run: make -j4 linux ARCHID=6 CC="$SYSROOT_CC64" && make clean
+        run: make -s -j4 linux ARCHID=6 CC="$SYSROOT_CC64" && make clean
       - name: Build 32 Bit NOKVM Linux
-        run: make -j4 linux ARCHID=19 CC="$SYSROOT_CC32" && make clean
+        run: make -s -j4 linux ARCHID=19 CC="$SYSROOT_CC32" && make clean
       - name: Build 64 Bit NOKVM Linux
-        run: make -j4 linux ARCHID=20 CC="$SYSROOT_CC64" && make clean
+        run: make -s -j4 linux ARCHID=20 CC="$SYSROOT_CC64" && make clean
       - name: Build 64 Bit Alpine Linux
-        run: make -j4 linux ARCHID=33 && make clean
+        run: make -s -j4 linux ARCHID=33 && make clean
       - name: Check the glibc floor
         run: |
           for f in meshagent_x86 meshagent_x86-64 meshagent_x86_nokvm meshagent_x86-64_nokvm; do
@@ -95,13 +95,13 @@ jobs:
           echo "SYSROOT_CC_AARCH64=aarch64-linux-gnu-gcc --sysroot=$SA -B$SA/usr/lib -L$SA/lib -L$SA/usr/lib -isystem $SA/usr/include -idirafter $GITHUB_WORKSPACE/lib-jpeg-turbo/includes -idirafter /usr/include" >> "$GITHUB_ENV" &&
           echo "SYSROOT_CC_ARMV6=arm-linux-gnueabihf-gcc -marm -mcpu=arm1176jzf-s -mfpu=vfp -mfloat-abi=hard --sysroot=$SH -B$SH/usr/lib -L$SH/lib -L$SH/usr/lib -isystem $SH/usr/include -idirafter $GITHUB_WORKSPACE/lib-jpeg-turbo/includes -idirafter /usr/include" >> "$GITHUB_ENV"
       - name: Build ARM64 Linux (ARCHID=26)
-        run: PATH="$RUNNER_TEMP/strip-a64:$PATH" make -j4 linux ARCHID=26 CC="$SYSROOT_CC_AARCH64" && make clean
+        run: PATH="$RUNNER_TEMP/strip-a64:$PATH" make -s -j4 linux ARCHID=26 CC="$SYSROOT_CC_AARCH64" && make clean
       - name: Build aarch64 (ARCHID=32)
-        run: PATH="$RUNNER_TEMP/strip-a64:$PATH" make -j4 linux ARCHID=32 CC="$SYSROOT_CC_AARCH64" && make clean
+        run: PATH="$RUNNER_TEMP/strip-a64:$PATH" make -s -j4 linux ARCHID=32 CC="$SYSROOT_CC_AARCH64" && make clean
       # 32-bit Raspberry Pi. Bootlin's armv6-eabihf toolchain defaults to -mcpu=arm1176jzf-s with hard-float VFP,
       # so this armhf binary runs on every 32-bit Pi, Zero/1 (armv6) through 2/3/4 (armv7).
       - name: Build armhf (ARCHID=25)
-        run: PATH="$RUNNER_TEMP/strip-arm:$PATH" make -j4 linux ARCHID=25 CC="$SYSROOT_CC_ARMV6" && make clean
+        run: PATH="$RUNNER_TEMP/strip-arm:$PATH" make -s -j4 linux ARCHID=25 CC="$SYSROOT_CC_ARMV6" && make clean
       - name: Check the glibc floor
         run: |
           for f in meshagent_arm64 meshagent_aarch64 meshagent_armhf; do
