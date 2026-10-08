@@ -6254,43 +6254,52 @@ int MeshAgent_System(char *cmd)
 
 #endif
 
-// Duktape's voluntary GC trigger scales with heap size, so a steady stream of short-lived
-// EventEmitter/child_process/ScriptContainer graphs climbs to ever higher plateaus before a
-// sweep runs. The worst offender is MeshCentral's once-a-second getclip clipboard poll during
-// a Desktop session: each poll spawns session-lookup children plus a clipboard read container,
-// all finalizable (so refcounting cannot reclaim them), and that churn outpaces voluntary GC,
-// growing the main agent RSS without bound. Force a mark-and-sweep once
-// the script heap grows past a fixed delta since the last one, so the churn is reclaimed
-// promptly and RSS stays bounded regardless of which object types are involved. The check is a
-// cheap counter comparison; the sweep only runs while the heap is actually growing.
+// Exited children leave garbage in reference cycles, which only a mark-and-sweep frees, and Duktape's own sweep fires too rarely for that.
+// This timer sweeps the core heap once it grows past MESHAGENT_GC_GROWTH_BYTES since the last sweep, or after MESHAGENT_GC_IDLE_SWEEP_MS with growth > 0.
+// The freed pages go back to the system with malloc_trim() on glibc after MESHAGENT_GC_TRIM_MIN_BYTES were freed and at most once per MESHAGENT_GC_TRIM_SPACING_MS.
+// Musl has no heap management functions, for windows _heapmin() could be considered and for macos malloc_zone_pressure_relief()
 extern size_t ILibDuktape_ScriptContainer_TotalAllocations;
 static size_t g_meshCoreGcMark = 0;
-#define MESHAGENT_GC_GROWTH_BYTES (1024 * 1024)
+static MeshAgentHostContainer *g_meshCoreGcAgent = NULL;
+#define MESHAGENT_GC_GROWTH_BYTES (2 * 1024 * 1024)		// minimum amount of heap growth before a GC sweep
+#define MESHAGENT_GC_TIMER_MS 4000						// growth check interval
+#define MESHAGENT_GC_TRIM_MIN_BYTES (1024 * 1024)		// Minimum amount freed by the GC sweeps before a malloc_trim() can be triggered
+#define MESHAGENT_GC_TRIM_SPACING_MS 60000				// Shortest time between two malloc_trim() calls
+#define MESHAGENT_GC_TRIM_PAD (128 * 1024)				// Free space left at the top of the heap by malloc_trim(), 128KB is glibc's own default
+#define MESHAGENT_GC_IDLE_SWEEP_MS 60000				// Time without a sweep after which any growth under MESHAGENT_GC_GROWTH_BYTES is swept anyway
+static size_t g_meshCoreGcFreedSinceTrim = 0;
+static long long g_meshCoreGcLastSweep = 0;
+static long long g_meshCoreGcLastTrim = 0;
+
 void MeshAgent_HeapGcTimerSink(void *object)
 {
-	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)object;
+	MeshAgentHostContainer *agent = *((MeshAgentHostContainer**)object);
 	if (agent == NULL || agent->chain == NULL || ILibIsChainBeingDestroyed(agent->chain)) { return; }
 	if (agent->meshCoreCtx != NULL && duk_ctx_is_alive(agent->meshCoreCtx) && !duk_ctx_shutting_down(agent->meshCoreCtx))
 	{
 		size_t total = ILibDuktape_ScriptContainer_TotalAllocations;
-		if (total > g_meshCoreGcMark + MESHAGENT_GC_GROWTH_BYTES)
+		long long now = ILibGetUptime();
+		if (total > g_meshCoreGcMark + MESHAGENT_GC_GROWTH_BYTES || (total > g_meshCoreGcMark && now - g_meshCoreGcLastSweep >= MESHAGENT_GC_IDLE_SWEEP_MS))
 		{
 			duk_gc(agent->meshCoreCtx, 0);
+			g_meshCoreGcLastSweep = now;
 			g_meshCoreGcMark = ILibDuktape_ScriptContainer_TotalAllocations;	// post-sweep baseline
-#if defined(__linux__) && defined(__GLIBC__)
-			// The finalizers duk_gc just ran free large native buffers (child pipe buffers,
-			// readable paused_data). glibc keeps those pages, so return them to the OS or RSS
-			// stays at the high-water mark and still looks like a leak. glibc only: MUSL (Alpine)
-			// has no malloc_trim and hands freed pages back on its own, so it just skips this.
-			malloc_trim(0);
-#endif
+			g_meshCoreGcFreedSinceTrim += total - g_meshCoreGcMark;
 		}
 		else if (total < g_meshCoreGcMark)
 		{
 			g_meshCoreGcMark = total;	// heap shrank (e.g. core restart); re-baseline downward
 		}
+#if defined(__linux__) && defined(__GLIBC__)
+		if (g_meshCoreGcFreedSinceTrim >= MESHAGENT_GC_TRIM_MIN_BYTES && now - g_meshCoreGcLastTrim >= MESHAGENT_GC_TRIM_SPACING_MS)
+		{
+			malloc_trim(MESHAGENT_GC_TRIM_PAD);
+			g_meshCoreGcLastTrim = now;
+			g_meshCoreGcFreedSinceTrim = 0;
+		}
+#endif
 	}
-	ILibLifeTime_AddEx(ILibGetBaseTimer(agent->chain), agent, 2000, MeshAgent_HeapGcTimerSink, NULL);
+	ILibLifeTime_AddEx(ILibGetBaseTimer(agent->chain), &g_meshCoreGcAgent, MESHAGENT_GC_TIMER_MS, MeshAgent_HeapGcTimerSink, NULL);
 }
 
 int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **param)
@@ -6394,9 +6403,12 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 
 	void *reserved[] = { agentHost, &paramLen, param };
 
-	// Keep the script heap bounded against short-lived spawn churn (see MeshAgent_HeapGcTimerSink).
+	// Start the timer that keeps the script heap small
 	g_meshCoreGcMark = 0;
-	ILibLifeTime_AddEx(ILibGetBaseTimer(agentHost->chain), agentHost, 2000, MeshAgent_HeapGcTimerSink, NULL);
+	g_meshCoreGcAgent = agentHost;
+	g_meshCoreGcLastSweep = ILibGetUptime();
+	g_meshCoreGcLastTrim = g_meshCoreGcLastSweep;
+	ILibLifeTime_AddEx(ILibGetBaseTimer(agentHost->chain), &g_meshCoreGcAgent, MESHAGENT_GC_TIMER_MS, MeshAgent_HeapGcTimerSink, NULL);
 
 	// Check to see if we are running as just a JavaScript Engine
 	if (agentHost->meshCoreCtx_embeddedScript != NULL || (paramLen >= 2 && ILibString_EndsWith(param[1], -1, ".js", 3) != 0) || (paramLen >= 2 && ILibString_EndsWith(param[1], -1, ".zip", 4) != 0))
