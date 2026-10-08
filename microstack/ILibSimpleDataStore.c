@@ -509,56 +509,34 @@ FILE* ILibSimpleDataStore_OpenFileEx3(char* filePath, int forceTruncateIfNonZero
 {
 	FILE* f = NULL;
 	if (created != NULL) { *created = 0; }
-
-#ifdef WIN32
-	if (readonly == 0)
-	{
-		HANDLE h = NULL;
-		if (forceTruncateIfNonZero != 0)
-		{
-			h = CreateFileW(ILibUTF8ToWide(filePath, -1), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, TRUNCATE_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-			if (h == INVALID_HANDLE_VALUE && GetLastError() == ERROR_FILE_NOT_FOUND)
-			{
-				if (created != NULL) { *created = 1; }
-				h = CreateFileW(ILibUTF8ToWide(filePath, -1), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
-			}
-		}
-		else
-		{
-			h = CreateFileW(ILibUTF8ToWide(filePath, -1), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-			if (h == INVALID_HANDLE_VALUE && GetLastError() == ERROR_FILE_NOT_FOUND)
-			{
-				if (created != NULL) { *created = 1; }
-				h = CreateFileW(ILibUTF8ToWide(filePath, -1), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
-			}
-		}
-		int fd = _open_osfhandle((intptr_t)h, _O_RDWR);
-		if (fd == -1) { CloseHandle(h); return(NULL); }
-		f = _fdopen(fd, "wb+N");
-		if (f == NULL) { CloseHandle(h); return(NULL); }
-	}
-	else
-	{
-		HANDLE h = CreateFileW(ILibUTF8ToWide(filePath, -1), GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-		if (h == INVALID_HANDLE_VALUE) { return(NULL); }
-		int fd = _open_osfhandle((intptr_t)h, _O_RDONLY);
-		if (fd == -1) { CloseHandle(h); return(NULL); }
-		f = _fdopen(fd, "rb");
-		if (f == NULL) { CloseHandle(h); return(NULL); }
-	}
-#else
-	char *flag = readonly == 0 ? "rb+": "rb";
-
-	if (forceTruncateIfNonZero != 0 || (f = fopen(filePath, flag)) == NULL)
+	if (readonly != 0) { return(ILibFile_Open(filePath, "rb")); }
+	
+	// forceTruncateIfNonZero: start from an empty file instead of the existing one. Only compacting uses it for its .tmp copy
+	if (forceTruncateIfNonZero == 0) { f = ILibFile_Open(filePath, "rb+"); }
+	if (f == NULL)
 	{
 		if (created != NULL) { *created = 1; }
-		f = fopen(filePath, "wb+");
+		// x makes a second agent racing on a missing file fail with EEXIST instead of truncating the store the first one just created.
+		f = ILibFile_Open(filePath, forceTruncateIfNonZero != 0 ? "wb+" : "wb+x");
 	}
-	if (f == NULL) { return NULL; } // If we failed to open the file, stop now.
-	if (readonly == 0 && flock(fileno(f), LOCK_EX | LOCK_NB) != 0) { fclose(f); return NULL; } // Request exclusive lock on this file, no blocking.
-#endif
+	if (f == NULL) { return(NULL); }
 
-	return f;
+	// One writer, readers allowed
+	#ifdef WIN32
+	{
+		// https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-lockfileex
+		// A windows lock is mandatory, covers a byte range and a reader can only read outside that locked range.
+		// Lock one byte past any offset the store can use, so readers aren't blocked.
+		OVERLAPPED ov = { 0 };
+		ov.Offset = 0xFFFFFFFF; ov.OffsetHigh = 0x7FFFFFFF;
+		if (!LockFileEx((HANDLE)_get_osfhandle(_fileno(f)), LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &ov)) { fclose(f); return(NULL); }
+	}
+#else
+	// On POSIX a lock is advisory, so readers can read regardless
+	// LOCK_EX: exclusive lock, LOCK_NB:nonblocking request (don't wait for a lock)
+	if (flock(fileno(f), LOCK_EX | LOCK_NB) != 0) { fclose(f); return(NULL); }
+#endif
+	return(f);
 }
 #define ILibSimpleDataStore_OpenFile(filePath) ILibSimpleDataStore_OpenFileEx2(filePath, 0, 0)
 #define ILibSimpleDataStore_OpenFileEx(filePath, forceTruncate) ILibSimpleDataStore_OpenFileEx2(filePath, forceTruncate, 0)

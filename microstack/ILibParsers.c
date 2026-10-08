@@ -59,6 +59,9 @@ limitations under the License.
 #define _CRTDBG_MAP_ALLOC
 #include <crtdbg.h>
 #endif
+#ifdef WIN32
+#include <io.h>
+#endif
 
 #ifdef WIN32
 	#include <winsock2.h>
@@ -9531,6 +9534,70 @@ char *ILibString_ToLower(const char *inString, size_t length)
 	ILibToLower(inString, length, RetVal);
 	return RetVal;
 }
+
+// https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/fsopen-wfsopen?view=msvc-170
+// https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew
+// https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/open-osfhandle?view=msvc-170
+// https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/fdopen-wfdopen?view=msvc-170
+// https://nodejs.org/docs/latest/api/fs.html#file-system-flags
+// Open file like Node does (opens every file binary, shared for read, write and delete, and non-inheritable by child processes)
+// and accept only r(ead), w(rite), a(ppend), +(read and write), x(fail if exists) for mode.
+// POSIX supports this out of the box, except non-inheritable, which is the fcntl(FD_CLOEXEC) after the fopen.
+// 'rx' is refused with EINVAL on every platform, as Node doesn't have that mode.
+// On windows, _wfopen_s and _wfsopen() lack FILE_SHARE_DELETE, so to circumvent that and get the Node functionality,
+// the handle is made with CreateFileW (which does accept all share flags), get a filedescriptor with _open_osfhandle() and put into FILE* f afterwards.
+// 'N' in mode should give a EINVAL, but is ignored for compatibility, and non-inheritable is forced anyway for Node compliance through NULL in the securityAttributes of CreateFileW() and _O_NOINHERIT
+// Binary is also forced (b in mode and no _O_TEXT in oflags for _open_osfhandle()), POSIX is always binary
+// CRT is stricter in the mode letters (no ax for example), and mode can be reduced to 3 variants (r+b, rb, wb), because the other attributes are sent through access/disposition/o_flags.
+// 'x' becomes CREATE_NEW, which makes CreateFileW fail if the file exists.
+
+FILE* ILibFile_Open(char *path, char *mode)
+{
+	FILE *f = NULL;
+	char *p;
+#ifdef WIN32
+	DWORD access, disposition;
+	int oflags = _O_NOINHERIT, fd, update;
+	HANDLE h;
+	char *fmode;
+#endif
+
+	if (mode[0] != 'r' && mode[0] != 'w' && mode[0] != 'a') { errno = EINVAL; return(NULL); }
+	for (p = mode + 1; *p != 0; ++p)
+	{
+		if (*p == '+' || *p == 'b' || *p == 'N') { continue; }
+		if (*p == 'x' && mode[0] != 'r') { continue; }
+		errno = EINVAL;
+		return(NULL);
+	}
+
+#ifdef WIN32
+	switch (mode[0])
+	{
+		case 'r': access = FILE_GENERIC_READ;  disposition = OPEN_EXISTING; break;
+		case 'w': access = FILE_GENERIC_WRITE; disposition = CREATE_ALWAYS; break;
+		default:  access = FILE_GENERIC_WRITE; disposition = OPEN_ALWAYS; oflags |= _O_APPEND; break;
+	}
+	update = (strchr(mode, '+') != NULL);
+	if (update != 0) { access = FILE_GENERIC_READ | FILE_GENERIC_WRITE; }
+	if (strchr(mode, 'x') != NULL) { disposition = CREATE_NEW; }
+	// FILE_APPEND_DATA without FILE_WRITE_DATA makes the kernel place every write at the end, so two appending processes cannot interleave into each other's data.
+	if (mode[0] == 'a') { access = (access & ~FILE_WRITE_DATA) | FILE_APPEND_DATA; }
+
+	fmode = update != 0 ? "r+b" : (mode[0] == 'r' ? "rb" : "wb");
+
+	// _O_NOINHERIT is still needed next to the NULL security attributes, because _spawn and _exec copy every CRT descriptor without it into the child's CRT table (lpReserved2) even when the OS handle cannot be inherited.
+	h = CreateFileW(ILibUTF8ToWide(path, -1), access, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, disposition, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) { return(NULL); }
+	if ((fd = _open_osfhandle((intptr_t)h, oflags)) == -1) { CloseHandle(h); return(NULL); }
+	if ((f = _fdopen(fd, fmode)) == NULL) { _close(fd); return(NULL); }	// _close() also closes the handle
+#else
+	f = fopen(path, mode);
+	if (f != NULL) { fcntl(fileno(f), F_SETFD, FD_CLOEXEC); }
+#endif
+	return(f);
+}
+
 /*! \fn ILibReadFileFromDiskEx(char **Target, char *FileName)
 \brief Reads a file into a char *
 \par
@@ -9545,11 +9612,7 @@ int ILibReadFileFromDiskEx(char **Target, char *FileName)
 	int SourceFileLength = 0;
 	FILE *SourceFile = NULL;
 
-#ifdef WIN32
-	_wfopen_s(&SourceFile, ILibUTF8ToWide(FileName, -1), L"rb");
-#else
-	SourceFile = fopen(FileName, "rb");
-#endif
+	SourceFile = ILibFile_Open(FileName, "rb");
 	if (SourceFile == NULL) { *Target = NULL; return 0; }
 
 	fseek(SourceFile, 0, SEEK_END);
@@ -9605,11 +9668,7 @@ void ILibWriteStringToDiskEx(char *FileName, char *data, int dataLen)
 {
 	FILE *SourceFile = NULL;
 
-#ifdef WIN32
-	_wfopen_s(&SourceFile, ILibUTF8ToWide(FileName, -1), L"wb");
-#else
-	SourceFile = fopen(FileName, "wb");
-#endif
+	SourceFile = ILibFile_Open(FileName, "wb");
 	
 	if (SourceFile != NULL)
 	{
@@ -9621,11 +9680,7 @@ void ILibAppendStringToDiskEx2(char *FileName, char *data, int dataLen, uint64_t
 {
 	FILE *SourceFile = NULL;
 
-#ifdef WIN32
-	_wfopen_s(&SourceFile, ILibUTF8ToWide(FileName, -1), L"ab");
-#else
-	SourceFile = fopen(FileName, "ab");
-#endif
+	SourceFile = ILibFile_Open(FileName, "ab");
 	
 	if (SourceFile != NULL)
 	{
@@ -9668,11 +9723,7 @@ void ILibAppendStringToDiskEx3(char *FileName, char *data, int dataLen, uint64_t
 
 	if (maxSize == 0) { ILibAppendStringToDiskEx2(FileName, data, dataLen, 0); return; } // 0 == unbounded, no cap policy to apply
 
-#ifdef WIN32
-	_wfopen_s(&SourceFile, ILibUTF8ToWide(FileName, -1), L"ab");
-#else
-	SourceFile = fopen(FileName, "ab");
-#endif
+	SourceFile = ILibFile_Open(FileName, "ab");
 	if (SourceFile == NULL) { return; }
 
 	fseek(SourceFile, 0, SEEK_END);
@@ -9706,11 +9757,7 @@ void ILibAppendStringToDiskEx3(char *FileName, char *data, int dataLen, uint64_t
 	if (capMode == ILibAppendStringToDisk_Cap_Truncate)
 	{
 		fclose(SourceFile);
-#ifdef WIN32
-		_wfopen_s(&SourceFile, ILibUTF8ToWide(FileName, -1), L"wb");
-#else
-		SourceFile = fopen(FileName, "wb");
-#endif
+		SourceFile = ILibFile_Open(FileName, "wb");
 		if (SourceFile != NULL)
 		{
 			if (fwrite(data, sizeof(char), dataLen, SourceFile)) {}
@@ -9735,11 +9782,7 @@ void ILibAppendStringToDiskEx3(char *FileName, char *data, int dataLen, uint64_t
 		sprintf_s(rotateTo, sizeof(rotateTo), "%s.1", FileName);
 		ILibRenameFileOnDisk(FileName, rotateTo);
 
-#ifdef WIN32
-		_wfopen_s(&SourceFile, ILibUTF8ToWide(FileName, -1), L"ab");
-#else
-		SourceFile = fopen(FileName, "ab");
-#endif
+		SourceFile = ILibFile_Open(FileName, "ab");
 		if (SourceFile != NULL)
 		{
 			if (fwrite(data, sizeof(char), dataLen, SourceFile)) {}
@@ -9788,8 +9831,8 @@ int ILibFile_CopyTo(char *source, char *destination)
 	ILibUTF8ToWideEx(destination, -1, DestW, (int)sizeof(DestW) / 2);
 	return(CopyFileW(SourceW, DestW, FALSE) ? 0 : 1);
 #else
-	FILE *from = fopen(source, "rb");
-	FILE *to = fopen(destination, "wb");
+	FILE *from = ILibFile_Open(source, "rb");
+	FILE *to = ILibFile_Open(destination, "wb");
 	size_t bytesRead;
 	int ret = 0;
 	while ((bytesRead = fread(ILibScratchPad, 1, sizeof(ILibScratchPad), from)) > 0)
@@ -11346,11 +11389,7 @@ void ILibLinkedList_FileBacked_Reset(ILibLinkedList_FileBacked_Root *root)
 	FILE* source = (FILE*)ptr[0];
 	fclose(source);
 	source = NULL;
-#ifdef WIN32
-	_wfopen_s(&source, ILibUTF8ToWide((char*)ptr[1], -1), L"wb+N");
-#else
-	source = fopen((char*)ptr[1], "wb+");
-#endif
+	source = ILibFile_Open((char*)ptr[1], "wb+");
 	ptr[0] = source;
 	root->head = root->tail = 0;
 	ILibLinkedList_FileBacked_SaveRoot(root);
@@ -11420,17 +11459,10 @@ ILibLinkedList_FileBacked_Root* ILibLinkedList_FileBacked_Create(char* path, uns
 	FILE* source;
 	ILibLinkedList_FileBacked_Root *retVal = NULL;
 
-#ifdef WIN32
-	if (_wfopen_s(&source, ILibUTF8ToWide(path, -1), L"rb+N") != 0)
+	if ((source = ILibFile_Open(path, "rb+")) == NULL)
 	{
-		_wfopen_s(&source, ILibUTF8ToWide(path, -1), L"wb+N");
+		source = ILibFile_Open(path, "wb+");
 	}
-#else
-	if ((source = fopen(path, "rb+")) == NULL)
-	{
-		source = fopen(path, "wb+");
-	}
-#endif
 	
 	if (source == NULL) { return(NULL); }
 
