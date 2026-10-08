@@ -231,7 +231,7 @@ char *ILibWideToUTF8_stupidEx(WCHAR* wstr, int wstrBYTESIZE, char *buffer, int b
 
 
 int ILibGetLocalTime(char *dest, int destLen);
-long ILibGetTimeStamp();
+long long ILibGetTimeStamp();
 
 #ifdef ILibEXPORT
 #ifdef WIN32
