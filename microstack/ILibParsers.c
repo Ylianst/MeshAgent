@@ -2455,7 +2455,9 @@ ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibC
 	ILibChain_Link *module;
 	int slct = 0, vX = 0, mX = 0;
 	struct timeval tv;
-	struct timeval startTime;
+	long long startTick;
+	long long elapsed = 0;
+	int remaining = 0;
 	fd_set readset;
 	fd_set errorset;
 	fd_set writeset;
@@ -2467,7 +2469,7 @@ ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibC
 	root->continuationState = ILibChain_ContinuationState_CONTINUE;
 	currentNode = root->node;
 
-	gettimeofday(&startTime, NULL);
+	startTick = ILibGetUptime();
 	ILibRemoteLogging_printf(ILibChainGetLogger(chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "ContinueChain...");
 
 #ifdef WIN32
@@ -2479,20 +2481,26 @@ ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibC
 	{
 		if (maxTimeout > 0)
 		{
-			gettimeofday(&tv, NULL);
-			if (tv.tv_sec > (startTime.tv_sec + maxTimeout / 1000))
+			elapsed = ILibGetUptime() - startTick;
+			if (elapsed >= maxTimeout)
 			{
 				root->continuationState = ILibChain_ContinuationState_END_CONTINUE;
 				ret = ILibChain_Continue_Result_TIMEOUT;
 				break;
 			}
+			remaining = (int)(maxTimeout - elapsed);
+		}
+		else if (maxTimeout == 0)
+		{
+			// Make maxTimeout=0 behave like undefined=-1, wait until end
+			maxTimeout = -1;
 		}
 		slct = 0;
 		FD_ZERO(&readset);
 		FD_ZERO(&errorset);
 		FD_ZERO(&writeset);
-		tv.tv_sec = maxTimeout < 0 ? UPNP_MAX_WAIT : maxTimeout / 1000;
-		tv.tv_usec = 0;
+		tv.tv_sec = maxTimeout < 0 ? UPNP_MAX_WAIT : remaining / 1000;
+		tv.tv_usec = maxTimeout < 0 ? 0 : 1000 * (remaining % 1000);
 
 		//
 		// Iterate through all the PreSelect function pointers in the chain
@@ -2573,7 +2581,7 @@ ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibC
 		chain->currentWaitTimeout = 0;
 
 		ILibChain_SetupWindowsWaitObject(chain->WaitHandles, &x, &tv, &(chain->currentWaitTimeout), &readset, &writeset, &errorset, chain->auxSelectHandles, handles);
-		if (x == 0 && (maxTimeout < 0 && chain->currentWaitTimeout == UPNP_MAX_WAIT))
+		if (x == 0 && (maxTimeout < 0 && chain->currentWaitTimeout == UPNP_MAX_WAIT * 1000))
 		{
 			root->continuationState = ILibChain_ContinuationState_END_CONTINUE;
 			ret = ILibChain_Continue_Result_ERROR_EMPTY_SET;
