@@ -32,6 +32,7 @@ limitations under the License.
 
 #define ILibDuktape_ChildProcess_Process	"\xFF_ChildProcess_Process"
 #define ILibDuktape_ChildProcess_MemBuf		"\xFF_ChildProcess_MemBuf"
+#define ILibDuktape_ChildProcess_WAITEXIT_DEFAULT_MS	60000
 extern int g_displayFinalizerMessages;
 
 typedef struct ILibDuktape_ChildProcess_SubProcess
@@ -248,7 +249,10 @@ duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 {
 	ILibChain_Continue_Result continueResult;
 	int ret = 0;
-	int timeout = duk_is_number(ctx, 0) ? duk_require_int(ctx, 0) : -1;
+	int timeout = duk_is_number(ctx, 0) ? duk_require_int(ctx, 0) : ILibDuktape_ChildProcess_WAITEXIT_DEFAULT_MS;
+	ILibDuktape_ChildProcess_SubProcess *sp;
+	int flagSet = 0;
+	if (timeout == 0) { timeout = -1; }	// waitExit(0) waits forever
 	void *chain = Duktape_GetChain(ctx);
 	if (ILibIsChainBeingDestroyed(chain))
 	{
@@ -267,6 +271,7 @@ duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 	{
 		duk_push_int(ctx, 1);								// [spawnedProcess][flag]
 		duk_put_prop_string(ctx, -2, "\xFF_WaitExit");		// [spawnedProcess]
+		flagSet = 1;
 	}
 
 	void *mods[] = { ILibGetBaseTimer(Duktape_GetChain(ctx)), Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Manager), ILibDuktape_Process_GetSignalListener(ctx) };
@@ -278,8 +283,14 @@ duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 #else
 	continueResult = ILibChain_Continue(chain, (ILibChain_Link**)mods, 3, timeout);
 #endif
+	// Clear the flag this call set, because the child's later exit would otherwise end whatever unrelated wait is running then.
+	if (flagSet) { duk_del_prop_string(ctx, -1, "\xFF_WaitExit"); }
 	switch (continueResult)
 	{
+		case ILibChain_Continue_Result_TIMEOUT:
+			sp = (ILibDuktape_ChildProcess_SubProcess*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_ChildProcess_MemBuf);
+			ret = (sp != NULL && sp->childProcess == NULL) ? 0 : ILibDuktape_Error(ctx, "waitExit() timed out after %d ms", timeout);
+			break;
 		case ILibChain_Continue_Result_ERROR_INVALID_STATE:
 			ret = ILibDuktape_Error(ctx, "waitExit() already in progress");
 			break;
