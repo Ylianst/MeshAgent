@@ -26,9 +26,8 @@ extern struct tileInfo_t **g_tileInfo;
 extern unsigned char *jpeg_buffer;
 extern int jpeg_buffer_length;
 
-int tilebuffersize = 0;
-void* tilebuffer = NULL;
 int COMPRESSION_QUALITY = 50;
+static int COMPRESSION_TYPE = 1;
 
 #if defined(JPEGMAXBUF)
 	#define MAX_TILE_SIZE JPEGMAXBUF
@@ -41,20 +40,6 @@ int COMPRESSION_QUALITY = 50;
  * INTERNAL FUNCTIONS
  ******************************************************************************/
 
-//Extracts the required tile buffer from the desktop buffer
-int get_tile_buffer(int x, int y, void **buffer, long long bufferSize, void *desktop, long long desktopsize, int tilewidth, int tileheight)
-{
-	char *target = *buffer;
-	int height = 0;
-	
-	for (height = y; height < y + tileheight; height++) {
-		memcpy_s(target, (size_t)bufferSize - (target - (char*)*buffer), (void *)(((char *)desktop) + (3 * ((height * adjust_screen_size(SCREEN_WIDTH)) + x))), (size_t)(tilewidth * 3));
-		target = (char *) (target + (3 * tilewidth));
-	}
-	
-	return 0;
-}
-
 //This function returns 0 and *buffer != NULL if everything was good. retval = jpegsize if the captured image was too large.
 int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void* desktop, long long desktopsize, void ** buffer, long long *bufferSize)
 {
@@ -62,18 +47,10 @@ int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void*
 	*buffer = NULL;
 	*bufferSize = 0;
 	
-	// Make sure a tile buffer is available. Most of the time, this is skipped.
-	if (tilebuffersize != captureWidth * captureHeight * 3)
-	{
-		if (tilebuffer != NULL) free(tilebuffer);
-		tilebuffersize = captureWidth * captureHeight * 3;
-		if ((tilebuffer = malloc(tilebuffersize)) == NULL) return 0;
-	}
-	
-	//Get the final coalesced tile
-	get_tile_buffer(x, y, &tilebuffer, tilebuffersize, desktop, desktopsize, captureWidth, captureHeight);
-	
-	write_JPEG_buffer(tilebuffer, captureWidth, captureHeight, COMPRESSION_QUALITY);
+	// Rows remain spaced by the padded desktop width, even for a narrow tile.
+	size_t row_stride = (size_t)adjust_screen_size(SCREEN_WIDTH) * 3;
+	JSAMPLE *pixels = (JSAMPLE *)desktop + (size_t)y * row_stride + (size_t)x * 3;
+	write_image_buffer(pixels, captureWidth, captureHeight, row_stride, COMPRESSION_TYPE, COMPRESSION_QUALITY);
 
 #if MAX_TILE_SIZE > 0
 	if (jpeg_buffer_length > MAX_TILE_SIZE)
@@ -536,6 +513,7 @@ int getScreenBuffer(unsigned char **desktop, long long *desktopsize, CGImageRef 
 // Set the compression quality
 void set_tile_compression(int type, int level)
 {
+	COMPRESSION_TYPE = type;
 	if (level > 0 && level <= 100) {
 		COMPRESSION_QUALITY = level;
 	}
@@ -543,6 +521,4 @@ void set_tile_compression(int type, int level)
 		COMPRESSION_QUALITY = 60;
 	}
 	
-	//  TODO Make sure the all the types are handled. We ignore the type variable for now.
 }
-
