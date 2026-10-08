@@ -18,10 +18,10 @@ tags. A rerun cannot overwrite an existing release. Version tags with a suffix,
 such as `1.2.0-beta.1`, create prerelease drafts. Keep the prerelease flag when
 publishing beta builds. PR builds remain Actions artifacts.
 
-Each release includes `agent-release.json`, containing its repository, tag,
-source commit, asset names, sizes and full-file SHA384 checksums. Generate these
-checksums after signing or changing any file. MeshCentral uses them to verify
-downloads; its native update hash can differ after server signing.
+MeshCentral verifies default downloads against the sizes and SHA384 hashes
+pinned in its own `agents/agent-defaults.json`, and imported files against the
+SHA256 digest GitHub records for each asset. Releases therefore carry no
+checksum file, and signing or replacing a file in a draft needs no extra step.
 
 The workflow uses the repository's `GITHUB_TOKEN` with write access confined to
 the release job. Build jobs need only read access. Public release downloads do
@@ -46,8 +46,8 @@ preserves the existing September binaries; new beta builds use version tags
 such as `1.2.0-beta.1`.
 
 Migration tags identify the packaging commit. `.github/release-migration.json`
-and the release manifest record the source repository, archive commit, paths,
-sizes and hashes of the preserved files.
+records the source repository, archive commit, paths, sizes and hashes of the
+preserved files.
 
 MeshCentral can pin older platforms to this migration release while selecting
 new builds for other platforms. Its scheduled checks report stable releases and

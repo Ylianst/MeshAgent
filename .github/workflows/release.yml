@@ -3,7 +3,8 @@ name: Agent Release
 on:
   push:
     tags:
-      - '*.*.*'
+      - '[0-9]+.[0-9]+.[0-9]+*'
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
   workflow_dispatch:
 
 permissions:
@@ -48,8 +49,8 @@ jobs:
           pattern: meshagent-*
           path: release
           merge-multiple: true
-      - name: Verify release files and write checksums
-        run: node .github/scripts/agent-release.js manifest "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" release
+      - name: Verify release files
+        run: node .github/scripts/agent-release.js check "$GITHUB_REF_NAME" release
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}

@@ -17,23 +17,19 @@ async function inspect(filename) {
 }
 
 async function main() {
-    const [mode, repository, version, directory, sourceDirectory] = process.argv.slice(2);
-    if (!/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(repository || '') || !directory) throw new Error('Usage: node .github/scripts/agent-release.js manifest|migrate owner/repository tag|profile directory [source-directory]');
+    const [mode, version, directory, sourceDirectory] = process.argv.slice(2);
+    if (!version || !directory) throw new Error('Usage: node .github/scripts/agent-release.js check|migrate tag|profile directory [source-directory]');
     let release;
-    if (mode === 'manifest') {
-        if (!/^v?\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(version || '')) throw new Error('Use a versioned release tag.');
+    if (mode === 'check') {
+        if (!/^v?\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(version)) throw new Error('Use a versioned release tag.');
         const names = require('../release-files.json');
-        release = { repository, tag: version, files: [] };
-        for (const name of names) {
-            release.files.push({ filename: name, asset: name, ...await inspect(path.join(directory, name)) });
-        }
+        release = { tag: version, files: names };
+        for (const name of names) await inspect(path.join(directory, name));
         const extra = (await fs.promises.readdir(directory)).filter(name => !names.includes(name));
         if (extra.length) throw new Error('Unexpected release files: ' + extra.join(', '));
-        if (/^[a-f0-9]{40}$/.test(process.env.GITHUB_SHA || '')) release.commit = process.env.GITHUB_SHA;
     } else if (mode === 'migrate') {
-        const profile = require('../release-migration.json')[version];
-        if (!profile) throw new Error('Unknown migration profile.');
-        release = { repository, ...profile };
+        release = require('../release-migration.json')[version];
+        if (!release) throw new Error('Unknown migration profile.');
         await fs.promises.mkdir(directory, { recursive: false });
         for (const file of release.files) {
             const target = path.join(directory, file.filename);
@@ -56,8 +52,7 @@ async function main() {
     } else {
         throw new Error('Unknown release operation.');
     }
-    await fs.promises.writeFile(path.join(directory, 'agent-release.json'), JSON.stringify({ schemaVersion: 1, releases: [release] }, null, 2) + '\n', { flag: 'wx' });
-    console.log('Prepared ' + release.files.length + ' files for ' + repository + ' ' + release.tag);
+    console.log('Verified ' + release.files.length + ' files for ' + release.tag);
 }
 
 main().catch(err => { console.error(err.message); process.exitCode = 1; });

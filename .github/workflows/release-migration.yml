@@ -28,14 +28,15 @@ jobs:
       - name: Restore and verify original files
         env:
           PROFILE: ${{ inputs.profile }}
-        run: node .github/scripts/agent-release.js migrate "$GITHUB_REPOSITORY" "$PROFILE" release
+        run: node .github/scripts/agent-release.js migrate "$PROFILE" release
       - name: Create draft migration release
         env:
           GH_TOKEN: ${{ github.token }}
+          PROFILE: ${{ inputs.profile }}
         shell: bash
         run: |
-          tag=$(jq -r '.releases[0].tag' release/agent-release.json)
+          tag=$(jq -r --arg profile "$PROFILE" '.[$profile].tag' .github/release-migration.json)
           flags=()
           if [[ "$tag" == testing-* ]]; then flags+=(--prerelease); fi
-          printf '%s\n' 'Preserved binaries from MeshCentral 1.2.6. These files have not been rebuilt. Source paths and checksums are recorded in agent-release.json.' > release-notes.txt
+          printf '%s\n' 'Preserved binaries from MeshCentral 1.2.6. These files have not been rebuilt. Source paths and checksums are recorded in .github/release-migration.json.' > release-notes.txt
           gh release create "$tag" release/* --target "$GITHUB_SHA" --draft --latest=false --title "$tag" --notes-file release-notes.txt "${flags[@]}"
