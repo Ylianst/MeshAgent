@@ -718,20 +718,61 @@ function UserSessions()
         {
             if (require('fs').watch)
             {
-                this._linuxWatcher = require('fs').watch('/var/run/utmp');
-                this._linuxWatcher.on('change', function (a, b)
+                // Which sessions exist, and which one is active on seat0. Only a change in
+                // this is a login, logout or user switch. logind also rewrites a session's
+                // file for other reasons (idle hint, for one, which remote input changes),
+                // and 'changed' restarts the KVM capture, so emitting on every rewrite
+                // would keep resetting a remote desktop session (e.g. back to all monitors).
+                var linux_sessionsSnapshot = function linux_sessionsSnapshot()
                 {
-                    if (require('user-sessions').hasLoginCtl)
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                    child.stderr.on('data', function (c) { });
+                    child.stdin.write("loginctl list-sessions --no-legend 2>/dev/null | awk '{ print $1, $2, $3, $4 }' | sort; ");
+                    child.stdin.write("loginctl show-seat seat0 -p ActiveSession 2>/dev/null\nexit\n");
+                    child.waitExit();
+                    return (child.stdout.str);
+                };
+                var linux_sessionsChanged = function linux_sessionsChanged(a, b)
+                {
+                    // Logging in or out touches several files in quick succession, and the
+                    // login screen is still the active session for part of that time, so
+                    // wait for things to settle and read the state once, at the end.
+                    if (linux_sessionsChanged.timer != null) { clearTimeout(linux_sessionsChanged.timer); }
+                    linux_sessionsChanged.timer = setTimeout(function ()
                     {
-                        linux_Onchange_checkLoginCtl.counter = 0;
-                        linux_Onchange_checkLoginCtl.timer = null;
-                        linux_Onchange_checkLoginCtl();
-                    }
-                    else
-                    {
-                        require('user-sessions').emit('changed');
-                    }
-                });
+                        linux_sessionsChanged.timer = null;
+                        if (require('user-sessions').hasLoginCtl)
+                        {
+                            var snapshot = linux_sessionsSnapshot();
+                            if (snapshot == linux_sessionsChanged.last) { return; }
+                            linux_sessionsChanged.last = snapshot;
+                            linux_Onchange_checkLoginCtl.counter = 0;
+                            linux_Onchange_checkLoginCtl.timer = null;
+                            linux_Onchange_checkLoginCtl();
+                        }
+                        else
+                        {
+                            require('user-sessions').emit('changed');
+                        }
+                    }, 1000);
+                };
+                linux_sessionsChanged.timer = null;
+                linux_sessionsChanged.last = this.hasLoginCtl ? linux_sessionsSnapshot() : null;
+
+                // utmp is no longer written on systemd 258 and later (Ubuntu 26.04, for
+                // example), so watching only it means no login or logout is ever noticed.
+                // fs.watch() does not throw for a missing path, it just never fires.
+                this._linuxWatcher = require('fs').watch('/var/run/utmp');
+                this._linuxWatcher.on('change', linux_sessionsChanged);
+
+                // systemd-logind keeps one file per session here and rewrites it when the
+                // session is created, activated, locked or removed.
+                if (require('fs').existsSync('/run/systemd/sessions'))
+                {
+                    this._linuxSessionsWatcher = require('fs').watch('/run/systemd/sessions');
+                    this._linuxSessionsWatcher.on('change', linux_sessionsChanged);
+                }
             }
             
             this.getUidConfig = function getUidConfig() {
