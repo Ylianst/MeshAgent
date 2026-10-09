@@ -189,27 +189,6 @@ typedef struct ILibDuktape_fs_watcherData
 }ILibDuktape_fs_watcherData;
 #endif
 
-#ifndef WIN32
-
-// Helper method used to manipulate linux paths, so that it's high level behavior matches Windows.
-char ILibDuktape_fs_linuxPath[1024];
-char* ILibDuktape_fs_fixLinuxPath(char *path)
-{
-	int start = 0;
-	int end = strnlen_s(path, sizeof(ILibDuktape_fs_linuxPath));
-	int len = end;
-	if (end > (sizeof(ILibDuktape_fs_linuxPath)-1)) { return(NULL); }
-
-	//if (path[0] == '/') { start = 1; }	else { ++len; }
-	if (path[end - 1] == '*') { --end; --len; }
-
-	ILibDuktape_fs_linuxPath[0] = '/';
-	memcpy_s(ILibDuktape_fs_linuxPath, sizeof(ILibDuktape_fs_linuxPath), path + start, end);
-	ILibDuktape_fs_linuxPath[len] = 0;	// Klocwork is being retarded, as it is too stupid to notice the size check at the top of this func
-	return(ILibDuktape_fs_linuxPath);
-}
-#endif
-
 int ILibDuktape_fs_seek64(FILE *f, int64_t position)
 {
 #ifdef WIN32
@@ -354,7 +333,7 @@ int ILibDuktape_fs_openSyncEx(duk_context *ctx, char *path, char *flags, char *m
 		duk_push_int(ctx, retVal);										// [fs][nextFD]
 		duk_put_prop_string(ctx, -2, FS_NextFD);						// [fs]
 		duk_pop(ctx);													// ...            
-		return retVal; // Klocwork is being retarded, because f is saved six lines above
+		return retVal;
 	}
 	else
 	{																	// [fs]
@@ -367,11 +346,7 @@ int ILibDuktape_fs_openSyncEx(duk_context *ctx, char *path, char *flags, char *m
 duk_ret_t ILibDuktape_fs_openSync(duk_context *ctx)
 {
 	int nargs = duk_get_top(ctx);
-#ifdef WIN32
 	char *path = (char*)duk_require_string(ctx, 0);
-#else
-	char *path = ILibDuktape_fs_fixLinuxPath((char*)duk_require_string(ctx, 0));
-#endif
 	if (duk_is_string(ctx, 1))
 	{
 		// If flags are passed in as a string, then the Descriptor returned is mapped from a FILE*
@@ -1132,11 +1107,7 @@ duk_ret_t ILibDuktape_fs_writeStream_finalizer(duk_context *ctx)
 duk_ret_t ILibDuktape_fs_createWriteStream(duk_context *ctx)
 {
 	int nargs = duk_get_top(ctx);
-#ifdef WIN32
 	char *path = (char*)duk_require_string(ctx, 0);
-#else
-	char *path = ILibDuktape_fs_fixLinuxPath((char*)duk_require_string(ctx, 0));
-#endif
 	char *flags = "wb";
 	int fd = 0;
 	FILE *f;
@@ -1305,11 +1276,7 @@ int ILibDuktape_fs_readStream_unshift(struct ILibDuktape_readableStream *sender,
 duk_ret_t ILibDuktape_fs_createReadStream(duk_context *ctx)
 {
 	int nargs = duk_get_top(ctx);
-#ifdef WIN32
 	char *path = (char*)duk_require_string(ctx, 0);
-#else
-	char *path = ILibDuktape_fs_fixLinuxPath((char*)duk_require_string(ctx, 0));
-#endif
 	char *flags = "rb";
 	int fd = 0;
 	FILE *f;
@@ -1425,9 +1392,13 @@ duk_ret_t ILibDuktape_fs_readdirSync(duk_context *ctx)
 
 	char *path = (char*)ILibDuktape_String_AsWide(ctx, 0, &pathLen);
 #else
-	char *path = ILibDuktape_fs_fixLinuxPath((char*)duk_require_string(ctx, 0));
+	duk_size_t pathLen;
+	char *path = (char*)duk_require_lstring(ctx, 0, &pathLen);
 	struct dirent *dir;
 	DIR *d;
+
+	// A trailing "/*" removes the last '*' so opendir() won't fail on it
+	if (pathLen > 1 && path[pathLen - 1] == '*' && path[pathLen - 2] == '/') { path = (char*)duk_push_lstring(ctx, path, pathLen - 1); duk_replace(ctx, 0); }
 #endif
 
 	duk_push_array(ctx);								// [retVal]
@@ -1565,7 +1536,7 @@ duk_ret_t ILibDuktape_fs_statSync(duk_context *ctx)
 	return 1;
 #else
 	struct stat result;
-	char *path = ILibDuktape_fs_fixLinuxPath((char*)duk_require_string(ctx, 0));
+	char *path = (char*)duk_require_string(ctx, 0);
 	memset(&result, 0, sizeof(struct stat));
 	if (stat(path, &result) != 0) { return(ILibDuktape_Error(ctx, "fs.statSync(): Path Error [%s]", path)); }
 
@@ -2109,7 +2080,7 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 #ifdef WIN32
 	WCHAR *path = (WCHAR*)ILibDuktape_String_AsWide(ctx, 0, NULL);
 #else
-	char *path = ILibDuktape_fs_fixLinuxPath((char*)duk_require_string(ctx, 0));
+	char *path = (char*)duk_require_string(ctx, 0);
 #endif
 	int nargs = duk_get_top(ctx);
 	int i;
@@ -2303,7 +2274,7 @@ duk_ret_t ILibDuktape_fs_unlink(duk_context *ctx)
 #ifdef WIN32
 	char *path = ILibDuktape_String_AsWide(ctx, 0, NULL);
 #else
-	char *path = ILibDuktape_fs_fixLinuxPath((char*)duk_require_string(ctx, 0));
+	char *path = (char*)duk_require_string(ctx, 0);
 #endif
 
 #ifdef WIN32
@@ -2329,7 +2300,7 @@ duk_ret_t ILibDuktape_fs_rmdirSync(duk_context *ctx)
 	ILibDuktape_String_WideToUTF8(ctx, path);
 	if (_wrmdir((const wchar_t*)path) != 0)
 #else
-	char *path = ILibDuktape_fs_fixLinuxPath((char*)duk_require_string(ctx, 0));
+	char *path = (char*)duk_require_string(ctx, 0);
 	if (rmdir(path) != 0)
 #endif
 	{
@@ -2402,8 +2373,8 @@ duk_ret_t ILibDuktape_fs_mkdirSync(duk_context *ctx)
 	}
 #else
 	int mode = 0777;
-	char *path = ILibDuktape_fs_fixLinuxPath((char*)duk_require_string(ctx, 0));
-	if (path == NULL) { return(ILibDuktape_Error(ctx, "fs.mkdirSync(): Path too long")); }
+	duk_size_t pathLen;
+	char *path = (char*)duk_require_lstring(ctx, 0, &pathLen);
 
 	if (duk_is_object(ctx, 1))
 	{
@@ -2418,7 +2389,11 @@ duk_ret_t ILibDuktape_fs_mkdirSync(duk_context *ctx)
 	if (recursive)
 	{
 		int firstLen = -1;
-		char *p = path;
+		char *p;
+
+		path = (char*)duk_push_fixed_buffer(ctx, pathLen + 1);
+		memcpy_s(path, pathLen + 1, duk_get_string(ctx, 0), pathLen + 1);
+		p = path;
 
 		if (*p == '/') { ++p; }
 
