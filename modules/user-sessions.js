@@ -734,20 +734,21 @@ function UserSessions()
             {
                 var min = this.minUid();
                 var sessions = linux_logindSessions();
-                var i, firstActive = -1, consoleSeen = false;
+                var i, firstActive = -1, seatSeen = false;
                 ret = [];
                 for (i = 0; i < sessions.length; ++i)
                 {
                     var s = sessions[i];
-                    if (parseInt(s.User) < min || !linux_isLoginSession(s)) { continue; }
                     var isConsole = linux_isConsoleSession(s);
-                    if (isConsole) { consoleSeen = true; }
+                    if (isConsole) { seatSeen = true; }
+                    if (parseInt(s.User) < min || !linux_isLoginSession(s)) { continue; }
                     if (firstActive < 0 && s.State == 'active') { firstActive = ret.length; }
                     ret.push({ Username: s.Name, Domain: '', SessionId: s.Id, State: (isConsole && s.Active == 'yes') ? 'Active' : 'Online', uid: s.User, StationName: (!isConsole && s.TTY != '') ? s.TTY : 'Console' });
                 }
-                // Headless: no seat, so keep showing the first session logind calls active (an SSH
-                // login) the way this always did, rather than nobody.
-                if (!consoleSeen && firstActive >= 0) { ret[firstActive].State = 'Active'; }
+                // Headless: no seat at all, so keep showing the first session logind calls active (an
+                // SSH login) the way this always did, rather than nobody. A greeter holding the seat
+                // is not headless, so SSH logins stay Online there.
+                if (!seatSeen && firstActive >= 0) { ret[firstActive].State = 'Active'; }
             }
             
             if (ret == null)
