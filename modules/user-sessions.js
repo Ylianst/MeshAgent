@@ -557,67 +557,162 @@ function UserSessions()
             throw ('username: ' + username + ' NOT FOUND');
         };
         
-        function linux_Onchange_checkLoginCtl()
+        function linux_sh(cmd)
         {
-            if (linux_Onchange_checkLoginCtl.counter > 10)
-            {
-                console.info1("emitting 'changed' because giving up");
-                require('user-sessions').emit('changed');
-                return;
-            }
-
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
             child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
-
-            child.stdin.write("loginctl list-sessions | tr '\\n' '`' | awk '{");
-            child.stdin.write('printf "[";');
-            child.stdin.write('del="";');
-            child.stdin.write('n=split($0, lines, "`");');
-            child.stdin.write('for(i=2;i<n;++i)');
-            child.stdin.write('{');
-            child.stdin.write('   split(lines[i], tok, " ");');
-            child.stdin.write('   if(tok[4]=="") { continue; }');
-            child.stdin.write('   printf "%s{\\"Username\\": \\"%s\\", \\"SessionId\\": \\"%s\\", \\"State\\": \\"Online\\", \\"uid\\": \\"%s\\"}", del, tok[3], tok[1], tok[2];');
-            child.stdin.write('   del=",";');
-            child.stdin.write('}');
-            child.stdin.write('printf "]";');
-            child.stdin.write("}'\nexit\n");
+            child.stdin.write(cmd + '\nexit\n');
             child.waitExit();
+            return (child.stdout.str);
+        }
 
-            var info1 = JSON.parse(child.stdout.str);
-            var sids = [];
-            var i;
-            for (i = 0; i < info1.length; ++i) { sids.push(info1[i].SessionId); }
-
-            console.info1('SIDs => ' + JSON.stringify(sids));
-
-            child = require('child_process').execFile('/bin/sh', ['sh']);
-            child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write("loginctl show-session -p State " + sids.join(' ') + " | grep State= | tr '\\n' '`' | awk -F'`' '{");
-            child.stdin.write('   for(n=1;n<NF;++n)');
-            child.stdin.write('   {');
-            child.stdin.write('      if($n=="State=active") { print n; break; }');
-            child.stdin.write('   }');
-            child.stdin.write("}'\nexit\n");
-            child.waitExit();
-
-
-            if(child.stdout.str.trim() != '')
+        // Every logind session as { Id, User, Name, Seat, TTY, Class, State, Active }. Read from
+        // show-session properties because the list-sessions columns moved between systemd releases,
+        // one call per session because show-session stops at the first id that vanished meanwhile.
+        function linux_logindSessions()
+        {
+            var ret = [], ids = [], i;
+            var lines = linux_sh('loginctl list-sessions --no-legend 2>/dev/null').split('\n');
+            for (i = 0; i < lines.length; ++i)
             {
-                // There was an active session
-                console.info1('Active Sessions found');
-                linux_Onchange_checkLoginCtl.counter = 0;
-                linux_Onchange_checkLoginCtl.timer = null;
-                require('user-sessions').emit('changed');
+                var id = lines[i].trim().split(' ')[0];
+                if (id != '') { ids.push(id); }
             }
-            else
+            if (ids.length == 0) { return (ret); }
+            var cmd = '';
+            for (i = 0; i < ids.length; ++i)
             {
-                // No sessions were active, so we need to try again
-                console.info1('No Active Sessions found, try again');
-                linux_Onchange_checkLoginCtl.counter++;
-                linux_Onchange_checkLoginCtl.timer = setTimeout(linux_Onchange_checkLoginCtl, 500);
+                cmd += 'loginctl show-session -p Id -p User -p Name -p Seat -p TTY -p Class -p State -p Active "' + ids[i] + '" 2>/dev/null; echo; ';
+            }
+            var blocks = linux_sh(cmd).split('\n\n');
+            for (i = 0; i < blocks.length; ++i)
+            {
+                var s = { Id: '', User: '', Name: '', Seat: '', TTY: '', Class: '', State: '', Active: '' };
+                var kv = blocks[i].split('\n');
+                for (var k = 0; k < kv.length; ++k)
+                {
+                    var eq = kv[k].indexOf('=');
+                    if (eq > 0) { s[kv[k].substring(0, eq)] = kv[k].substring(eq + 1).trim(); }
+                }
+                if (s.Id != '') { ret.push(s); }
+            }
+            return (ret);
+        }
+        // logind reports every seatless session (SSH, systemd 256+ "manager") as active, so only a
+        // seat-attached session can be the console.
+        function linux_isConsoleSession(s) { return (s.Seat != ''); }
+        // Greeter, lock screen and service-manager sessions are not someone logged in
+        function linux_isLoginSession(s)
+        {
+            return (s.Class != 'greeter' && s.Class != 'lock-screen' && s.Class.indexOf('manager') != 0 && s.Class.indexOf('background') != 0);
+        }
+        // What a 'changed' consumer can observe: the login sessions and which one holds the console.
+        // Greeter, manager and background sessions, idle/lock hints and device lists also rewrite
+        // logind state but are left out on purpose.
+        function linux_sessionSignature(sessions)
+        {
+            var parts = [];
+            for (var i = 0; i < sessions.length; ++i)
+            {
+                var s = sessions[i];
+                if (!linux_isLoginSession(s)) { continue; }
+                parts.push(s.Id + ':' + s.User + ':' + s.Seat + ':' + s.TTY + ':' + s.Class + ':' + (linux_isConsoleSession(s) ? s.Active : ''));
+            }
+            parts.sort();
+            return (parts.join('|'));
+        }
+
+        function linux_Onchange()
+        {
+            if (!(require('user-sessions').hasLoginCtl && require('fs').existsSync('/run/systemd/sessions')))
+            {
+                // without logind state there is nothing to compare against, so emit like before
+                require('user-sessions').emit('changed');
+                return;
+            }
+            // a pending check (debounce or retry) will see whatever state this event leads to
+            if (linux_Onchange_checkLoginCtl.timer != null) { return; }
+            linux_Onchange_checkLoginCtl.timer = setTimeout(linux_Onchange_run, 1000);
+        }
+        function linux_Onchange_run()
+        {
+            linux_Onchange_checkLoginCtl.timer = null;
+            linux_Onchange_checkLoginCtl.counter = 0;
+            linux_Onchange_checkLoginCtl();
+        }
+        function linux_Onchange_checkLoginCtl()
+        {
+            var state = linux_Onchange_checkLoginCtl;
+            state.timer = null;
+            var sessions;
+            try
+            {
+                sessions = linux_logindSessions();
+            }
+            catch (e)
+            {
+                // Timers also fire inside another caller's waitExit(), and only one can be in
+                // progress. Look again once it has returned; the last snapshot stays the baseline.
+                if (e.toString().indexOf('already in progress') >= 0) { state.timer = setTimeout(linux_Onchange_checkLoginCtl, 500); }
+                else { console.info1('loginctl failed: ' + e); }
+                return;
+            }
+            var sig = linux_sessionSignature(sessions);
+            var consoleActive = false, loginActive = false;
+            for (var i = 0; i < sessions.length; ++i)
+            {
+                if (!linux_isConsoleSession(sessions[i]) || sessions[i].Active != 'yes') { continue; }
+                consoleActive = true;
+                if (linux_isLoginSession(sessions[i])) { loginActive = true; }
+            }
+            if (sig == state.lastSig)
+            {
+                console.info1("sessions unchanged, not emitting 'changed'");
+                state.lastConsoleActive = consoleActive;
+                state.counter = 0;
+                return;
+            }
+            if (!loginActive && (consoleActive || state.lastConsoleActive) && state.counter <= 10)
+            {
+                // The console is between users (logout, user switch, login still starting). Wait for
+                // the next user to activate so one event carries the final state, then give up and
+                // report the greeter.
+                console.info1('No active console login, try again');
+                state.counter++;
+                state.timer = setTimeout(linux_Onchange_checkLoginCtl, 500);
+                return;
+            }
+            console.info1("emitting 'changed'" + (loginActive ? '' : ' (no active console login)'));
+            state.lastSig = sig;
+            state.lastConsoleActive = consoleActive;
+            state.counter = 0;
+            require('user-sessions').emit('changed');
+        }
+        linux_Onchange_checkLoginCtl.timer = null;
+        linux_Onchange_checkLoginCtl.counter = 0;
+        linux_Onchange_checkLoginCtl.lastSig = null;
+        linux_Onchange_checkLoginCtl.lastConsoleActive = false;
+        function linux_baseline()
+        {
+            var state = linux_Onchange_checkLoginCtl;
+            if (state.timer != null || state.lastSig != null) { return; }
+            var base;
+            try
+            {
+                base = linux_logindSessions();
+            }
+            catch (e)
+            {
+                // The first consumer usually enumerates synchronously right after loading this
+                // module, so the next tick lands inside its waitExit(). Try again after it.
+                if (e.toString().indexOf('already in progress') >= 0) { setTimeout(linux_baseline, 500); }
+                return;
+            }
+            state.lastSig = linux_sessionSignature(base);
+            for (var b = 0; b < base.length; ++b)
+            {
+                if (linux_isConsoleSession(base[b]) && base[b].Active == 'yes') { state.lastConsoleActive = true; }
             }
         }
 
@@ -625,62 +720,35 @@ function UserSessions()
         this.Current = function Current(cb)
         {
             var ret = null;
-            var child = require('child_process').execFile('/bin/sh', ['sh']);
-            child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+            var child = null;
 
             if (process.platform == 'freebsd' || !this.hasLoginCtl)
             {
+                child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
                 child.stdin.write("who | tr '\\n' '`' | awk -F'`' '" + '{ printf "{"; for(a=1;a<NF;++a) { n=split($a, tok, " "); printf "%s\\"%s\\": \\"%s\\"", (a>1?",":""), tok[2], tok[1];  } printf "}";  }\'\nexit\n');
                 child.waitExit();
             }
             else
             {
                 var min = this.minUid();
-
-                child.stdin.write("loginctl list-sessions | tr '\\n' '`' | awk '{");
-                child.stdin.write('printf "[";');
-                child.stdin.write('del="";');
-                child.stdin.write('n=split($0, lines, "`");');
-                child.stdin.write('for(i=1;i<n;++i)');
-                child.stdin.write('{');
-                child.stdin.write('   split(lines[i], tok, " ");');
-                child.stdin.write('   if((tok[2]+0)>=' + min + ')');
-                child.stdin.write('   {');
-                child.stdin.write('      if(tok[4]=="") { continue; }');
-                child.stdin.write('      station="Console";');
-                child.stdin.write('      if(tok[4]~/^pts\\//) { station=tok[4]; }');
-                child.stdin.write('      printf "%s{\\"Username\\": \\"%s\\", \\"Domain\\":\\"\\", \\"SessionId\\": \\"%s\\", \\"State\\": \\"Online\\", \\"uid\\": \\"%s\\", \\"StationName\\": \\"%s\\"}", del, tok[3], tok[1], tok[2], station;');
-                child.stdin.write('      del=",";');
-                child.stdin.write('   }');
-                child.stdin.write('}');
-                child.stdin.write('printf "]";');
-                child.stdin.write("}'\nexit\n");
-                child.waitExit();
-
-                var info1 = JSON.parse(child.stdout.str);
-                var sids = [];
-                var i;
-                for (i = 0; i < info1.length; ++i) { sids.push(info1[i].SessionId); }
-
-                child = require('child_process').execFile('/bin/sh', ['sh']);
-                child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
-                child.stdin.write("loginctl show-session -p State " + sids.join(' ') + " | grep State= | tr '\\n' '`' | awk -F'`' '{");
-                child.stdin.write('   for(n=1;n<NF;++n)');
-                child.stdin.write('   {');
-                child.stdin.write('      if($n=="State=active") { print n; break; }');
-                child.stdin.write('   }');
-                child.stdin.write('   if(n==NF) { print 0; }');
-                child.stdin.write("}'\nexit\n");
-                child.waitExit();
-
-                i = parseInt(child.stdout.str.trim());
-                if (i > 0)
+                var sessions = linux_logindSessions();
+                var i, firstActive = -1, seatSeen = false;
+                ret = [];
+                for (i = 0; i < sessions.length; ++i)
                 {
-                    info1[i - 1].State = 'Active';
+                    var s = sessions[i];
+                    var isConsole = linux_isConsoleSession(s);
+                    if (isConsole) { seatSeen = true; }
+                    if (parseInt(s.User) < min || !linux_isLoginSession(s)) { continue; }
+                    if (firstActive < 0 && s.State == 'active') { firstActive = ret.length; }
+                    ret.push({ Username: s.Name, Domain: '', SessionId: s.Id, State: (isConsole && s.Active == 'yes') ? 'Active' : 'Online', uid: s.User, StationName: (!isConsole && s.TTY != '') ? s.TTY : 'Console' });
                 }
-                ret = info1;
+                // Headless: no seat at all, so keep showing the first session logind calls active (an
+                // SSH login) the way this always did, rather than nobody. A greeter holding the seat
+                // is not headless, so SSH logins stay Online there.
+                if (!seatSeen && firstActive >= 0) { ret[firstActive].State = 'Active'; }
             }
             
             if (ret == null)
@@ -718,20 +786,41 @@ function UserSessions()
         {
             if (require('fs').watch)
             {
-                this._linuxWatcher = require('fs').watch('/var/run/utmp');
-                this._linuxWatcher.on('change', function (a, b)
+                // systemd 258+ no longer writes utmp (Ubuntu 26.04 has no /var/run/utmp at all), so
+                // watch logind's per-session state files; utmp still covers systems without logind.
+                var sessionsDir = '/run/systemd/sessions';
+                var watchPaths = [sessionsDir, '/var/run/utmp'];
+                this._linuxWatchers = [];
+                for (var wp = 0; wp < watchPaths.length; ++wp)
                 {
-                    if (require('user-sessions').hasLoginCtl)
+                    if (!require('fs').existsSync(watchPaths[wp])) { continue; }
+                    var watcher = require('fs').watch(watchPaths[wp]);
+                    watcher.on('change', linux_Onchange);
+                    this._linuxWatchers.push(watcher);
+                }
+                if (require('fs').existsSync(sessionsDir))
+                {
+                    // Baseline on the next tick so loading the module stays cheap. Skipped when an
+                    // event already arrived, so that check emits rather than comparing against a
+                    // snapshot taken after the change.
+                    setImmediate(linux_baseline);
+                }
+                else if (require('fs').existsSync('/run/systemd'))
+                {
+                    // At boot the agent can be up before logind has created its state directory
+                    var self = this;
+                    var parent = require('fs').watch('/run/systemd');
+                    parent.on('change', function ()
                     {
-                        linux_Onchange_checkLoginCtl.counter = 0;
-                        linux_Onchange_checkLoginCtl.timer = null;
-                        linux_Onchange_checkLoginCtl();
-                    }
-                    else
-                    {
-                        require('user-sessions').emit('changed');
-                    }
-                });
+                        if (!require('fs').existsSync(sessionsDir)) { return; }
+                        parent.close();
+                        var watcher = require('fs').watch(sessionsDir);
+                        watcher.on('change', linux_Onchange);
+                        self._linuxWatchers.push(watcher);
+                        linux_Onchange();
+                    });
+                    this._linuxWatchers.push(parent);
+                }
             }
             
             this.getUidConfig = function getUidConfig() {
@@ -842,12 +931,14 @@ function UserSessions()
         };
         this.consoleUid = function consoleUid(options)
         {
-            var child = require('child_process').execFile('/bin/sh', ['sh']);
-            child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+            var greeter = null;
+            var child = null;
 
             if (process.platform == 'freebsd' || !this.hasLoginCtl)
             {
+                child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
                 child.stdin.write("who | tr '\\n' '`' | awk -F'`' '{");
                 child.stdin.write("  for(i=1;i<NF;++i) ");
                 child.stdin.write("  { ");
@@ -879,101 +970,30 @@ function UserSessions()
             else
             {
                 var min = this.minUid();
-
-                child.stdin.write("loginctl list-sessions | tr '\\n' '`' | awk '{");
-                child.stdin.write('printf "[";');
-                child.stdin.write('del="";');
-                child.stdin.write('n=split($0, lines, "`");');
-                child.stdin.write('for(i=1;i<n;++i)');
-                child.stdin.write('{');
-                child.stdin.write('   split(lines[i], tok, " ");');
-                child.stdin.write('   if((tok[2]+0)>=' + min + ')');
-                child.stdin.write('   {');
+                var sessions = linux_logindSessions();
+                var i, uid;
                 if (options && options.active == true)
                 {
-                    child.stdin.write('      if(tok[4]=="") { continue; }');
-                }
-                else
-                {
-                    child.stdin.write('      if(tok[4]=="" || tok[4]~/^pts\\//) { continue; }');
-                }
-                child.stdin.write('      printf "%s{\\"uid\\": \\"%s\\", \\"sid\\": \\"%s\\"}", del, tok[2], tok[1];');
-                child.stdin.write('      del=",";');
-                child.stdin.write('   }');
-                child.stdin.write('}');
-                child.stdin.write('printf "]";');
-                child.stdin.write("}'\nexit\n");
-                child.waitExit();
-
-                console.info1(child.stdout.str);
-                var info1 = JSON.parse(child.stdout.str);
-                var sids = [];
-                var i;
-                for (i = 0; i < info1.length; ++i) { sids.push(info1[i].sid); }
-                console.info1('SIDS => ' + JSON.stringify(sids));
-
-                child = require('child_process').execFile('/bin/sh', ['sh']);
-                child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
-                child.stdin.write("loginctl show-session -p State " + sids.join(' ') + " | grep State= | tr '\\n' '`' | awk -F'`' '{");
-                if (options && options.active == true)
-                {
-                    child.stdin.write('   printf("[");');
-                    child.stdin.write('   _first="";');
-                }
-                child.stdin.write('   for(n=1;n<NF;++n)');
-                child.stdin.write('   {');
-                if (options && options.active == true)
-                {
-                    child.stdin.write('      if($n=="State=active")');
-                    child.stdin.write('      {');
-                    child.stdin.write('         printf("%s%s",_first,n);');
-                    child.stdin.write('         _first=",";');
-                    child.stdin.write('      }');
-                }
-                else
-                {
-                    child.stdin.write('      if($n=="State=active") { print n; break; }');
-                }
-                child.stdin.write('   }');
-                if (options && options.active == true)
-                {
-                    child.stdin.write('   printf("]");');
-                }
-                else
-                {
-                    child.stdin.write('   if(n==NF) { print 0; }');
-                }
-                child.stdin.write("}'\nexit\n");
-                child.waitExit();
-                if (options && options.active == true)
-                {
-                    try
+                    var active = [];
+                    for (i = 0; i < sessions.length; ++i)
                     {
-                        var ret = JSON.parse(child.stdout.str);
-                        for (var j=0;j<ret.length;++j)
-                        {
-                            ret[j] = parseInt(info1[ret[j] - 1].uid);
-                        }
-                        return (ret);
+                        uid = parseInt(sessions[i].User);
+                        if (uid >= min && linux_isLoginSession(sessions[i]) && sessions[i].State == 'active') { active.push(uid); }
                     }
-                    catch(xx)
-                    {
-                        return ([]);
-                    }
+                    return (active);
                 }
-                else
+                for (i = 0; i < sessions.length; ++i)
                 {
-                    i = parseInt(child.stdout.str.trim());
-                    if (i > 0)
-                    {
-                        return (parseInt(info1[i - 1].uid));
-                    }
+                    if (!linux_isConsoleSession(sessions[i]) || sessions[i].Active != 'yes') { continue; }
+                    uid = parseInt(sessions[i].User);
+                    if (uid >= min && linux_isLoginSession(sessions[i])) { return (uid); }
+                    if (sessions[i].Class == 'greeter') { greeter = uid; }
                 }
             }
 
-            // Before we say nobody is logged on, let's check to see if there is a GDM session
-            var gdm = this.gdmUid;
+            // Before we say nobody is logged on, let's check to see if there is a GDM session.
+            // A greeter holding the seat names the display manager account directly.
+            var gdm = (greeter != null) ? greeter : this.gdmUid;
             var info = require('monitor-info').getXInfo(gdm);
             if (info == null || !info.xauthority || !info.display)
             {
@@ -1003,7 +1023,7 @@ function UserSessions()
                     var uids = [];
                     var i;
                     for (i = 0; i < info1.length; ++i) { uids.push(info1[i].uid); }
-                    console.info1('UIDS => ' + JSON.stringify(sids));
+                    console.info1('UIDS => ' + JSON.stringify(uids));
 
                     while(uids.length>0)
                     {
