@@ -1898,6 +1898,7 @@ void ILibDuktape_fs_notifyDispatcher_PostSelect(void* object, int slct, fd_set *
 	// We were signaled that data is available, so let's get it
 	while ((len = read(data->fd, buffer, sizeof(buffer))) > 0)
 	{
+		i = 0;	// each read() refills the buffer from offset 0; a stale offset dropped or misparsed the rest of a burst
 		while (i < len)
 		{
 			int changed = 0;
