@@ -27,6 +27,13 @@ kvm_screenreader_mode_t kvm_screenreader_mode();
 kvm_screenreader_mode_t kvm_screenreader_mode_for_uid(int uid);
 int kvm_is_wayland_session_for_uid(int uid);
 
+// Backend chosen by the master for a session the viewer picked; the detection above only knows
+// the seat's active session, so it cannot tell which of several logins was meant.
+#define KVM_BACKEND_AUTO 0
+#define KVM_BACKEND_X11  1
+#define KVM_BACKEND_DRM  2
+void kvm_wayland_force_backend(int backend);
+
 // Uid of seat0's active logind session (greeters included); -1 when unknown. Lets the DRM capture
 // child recover the session owner when the master could only pass uid 0 (display-manager greeter).
 int kvm_wayland_active_console_uid(void);

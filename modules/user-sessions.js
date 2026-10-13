@@ -583,12 +583,12 @@ function UserSessions()
             var cmd = '';
             for (i = 0; i < ids.length; ++i)
             {
-                cmd += 'loginctl show-session -p Id -p User -p Name -p Seat -p TTY -p Class -p State -p Active "' + ids[i] + '" 2>/dev/null; echo; ';
+                cmd += 'loginctl show-session -p Id -p User -p Name -p Seat -p TTY -p Class -p State -p Active -p Type -p Display -p Remote "' + ids[i] + '" 2>/dev/null; echo; ';
             }
             var blocks = linux_sh(cmd).split('\n\n');
             for (i = 0; i < blocks.length; ++i)
             {
-                var s = { Id: '', User: '', Name: '', Seat: '', TTY: '', Class: '', State: '', Active: '' };
+                var s = { Id: '', User: '', Name: '', Seat: '', TTY: '', Class: '', State: '', Active: '', Type: '', Display: '', Remote: '' };
                 var kv = blocks[i].split('\n');
                 for (var k = 0; k < kv.length; ++k)
                 {
@@ -741,9 +741,10 @@ function UserSessions()
                     var s = sessions[i];
                     var isConsole = linux_isConsoleSession(s);
                     if (isConsole) { seatSeen = true; }
-                    if (parseInt(s.User) < min || !linux_isLoginSession(s)) { continue; }
+                    // closing: the user logged out and only leftover processes keep the session alive
+                    if (parseInt(s.User) < min || !linux_isLoginSession(s) || s.State == 'closing') { continue; }
                     if (firstActive < 0 && s.State == 'active') { firstActive = ret.length; }
-                    ret.push({ Username: s.Name, Domain: '', SessionId: s.Id, State: (isConsole && s.Active == 'yes') ? 'Active' : 'Online', uid: s.User, StationName: (!isConsole && s.TTY != '') ? s.TTY : 'Console' });
+                    ret.push({ Username: s.Name, Domain: '', SessionId: s.Id, State: (isConsole && s.Active == 'yes') ? 'Active' : 'Online', uid: s.User, StationName: isConsole ? 'Console' : (s.TTY != '' ? s.TTY : (s.Remote == 'yes' ? 'Remote' : '')), Type: s.Type, Display: s.Display, Seat: s.Seat, Remote: (s.Remote == 'yes') });
                 }
                 // Headless: no seat at all, so keep showing the first session logind calls active (an
                 // SSH login) the way this always did, rather than nobody. A greeter holding the seat
@@ -771,7 +772,7 @@ function UserSessions()
             for (i in vids)
             {
                 var u = this.getUsername(vids[i].uid);
-                ret.push({ Username: u, SessionId: vids[i].pid, State: 'Connected', uid: vids[i].uid, StationName: 'Xvfb-' + vids[i].uid });
+                ret.push({ Username: u, SessionId: vids[i].pid, State: 'Connected', uid: vids[i].uid, StationName: 'Xvfb-' + vids[i].uid, Type: 'x11', Display: vids[i].display, Seat: '', Remote: false });
             }
 
             Object.defineProperty(ret, 'Active', { value: showActiveOnly(ret) });
@@ -781,6 +782,28 @@ function UserSessions()
                 cb.call(this, ret);
             }
         }
+
+        // The sessions a desktop capture can attach to, keyed by uid: any X11 session (the X server
+        // answers even while its VT is switched away) and the seat's active Wayland session. The
+        // DRM backend scans out the active VT, so a switched-away or headless Wayland session has
+        // nothing to show. A uid with several candidates keeps its active one. Without logind
+        // the only candidate is the console user.
+        this.desktopSessions = function desktopSessions()
+        {
+            var ret = {}, sessions = null, i, uid;
+            this.Current(function (r) { sessions = r; });
+            for (i = 0; i < sessions.length; ++i)
+            {
+                var s = sessions[i];
+                if (s.Type == null) { if (s.State != 'Active' && s.State != 'Connected') { continue; } }
+                else if (s.Type != 'x11' && !(s.Type == 'wayland' && s.Seat != '' && s.State == 'Active')) { continue; }
+                // A seatless X server (Xvnc, XDMCP) is a virtual display like Xvfb, and that is the state the viewer offers those under
+                if (s.Type == 'x11' && s.Seat == '' && s.State == 'Online') { s.State = 'Connected'; }
+                uid = parseInt(s.uid);
+                if (ret[uid] == null || (ret[uid].State != 'Active' && (s.State == 'Active' || (ret[uid].Display == '' && s.Display != '')))) { ret[uid] = s; }
+            }
+            return (ret);
+        };
 
         if (process.platform == 'linux')
         {
