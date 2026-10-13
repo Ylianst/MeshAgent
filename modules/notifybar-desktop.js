@@ -646,13 +646,21 @@ function x_notifybar(title)
         if (m.length > 0)
         {
             var ws = 0;
+            // mutter on Wayland only writes _NET_CURRENT_DESKTOP to the Xwayland root after the first
+            // workspace switch, so not knowing the workspace must not cost the bar
             try
             {
                 ws = m[0].display.getCurrentWorkspace();
-                this.notifybar.workspaces[ws] = true;
-                this.createBars(m);
-            } 
+            }
             catch(wex)
+            {
+            }
+            this.notifybar.workspaces[ws] = true;
+            try
+            {
+                this.createBars(m);
+            }
+            catch (cex)
             {
             }
 
