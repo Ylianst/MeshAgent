@@ -105,6 +105,7 @@ char exeMeshPolicyGuid[] = { 0xB9, 0x96, 0x01, 0x58, 0x80, 0x54, 0x4A, 0x19, 0xB
 #define DEFAULT_IDLE_TIMEOUT	120
 #define MESH_USER_CHANGED_CB	"\xFF_MeshAgent_UserChangedCallback"
 #define REMOTE_DESKTOP_UID		"\xFF_RemoteDesktopUID"
+#define REMOTE_DESKTOP_PICKED_UID	"\xFF_RemoteDesktopPickedUID"
 #define REMOTE_DESKTOP_VIRTUAL_SESSION_USERNAME "\xFF_RemoteDesktopUSERNAME"
 #define MESHAGENT_DATAPING_ARRAY "\xFF_MeshAgent_DataPingArray"
 #define MESHAGENT_DATAPAING_PROMISE_TIMEOUT	"\xFF_MeshAgent_DataPing_Timeout"
@@ -1210,6 +1211,26 @@ void ILibDuktape_MeshAgent_RemoteDesktop_SendError(RemoteDesktop_Ptrs* ptrs, cha
 
 #if defined(_POSIX) && defined(_LINKVM) && !defined(__APPLE__)
 extern void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid, char* authToken, char *dispid);
+
+// Backend for the next capture child, nonzero for DRM. A session the viewer picked follows that
+// session's logind type; the console path keeps the seat-based detection, which cannot tell a
+// switched-away X11 login from the Wayland session now holding the seat.
+int ILibDuktape_MeshAgent_RemoteDesktop_SelectBackend(duk_context *ctx, int uid, int picked)
+{
+	kvm_wayland_force_backend(KVM_BACKEND_AUTO);
+	if (picked)
+	{
+		duk_push_sprintf(ctx, "(function (s) { return (s == null ? '' : s.Type); })(require('user-sessions').desktopSessions()[%d])", uid);
+		if (duk_peval(ctx) == 0)
+		{
+			if (strcmp(duk_safe_to_string(ctx, -1), "x11") == 0) { kvm_wayland_force_backend(KVM_BACKEND_X11); duk_pop(ctx); return(0); }
+			if (strcmp(duk_safe_to_string(ctx, -1), "wayland") == 0) { kvm_wayland_force_backend(KVM_BACKEND_DRM); duk_pop(ctx); return(1); }
+		}
+		duk_pop(ctx);
+	}
+	return(kvm_is_wayland_session_for_uid(uid));
+}
+
 duk_ret_t ILibDuktape_MeshAgent_userChanged(duk_context *ctx)
 {
 	char *d, *x;
@@ -1239,7 +1260,18 @@ duk_ret_t ILibDuktape_MeshAgent_userChanged(duk_context *ctx)
 		ptrs->kvmPipe = NULL;
 		kvm_cleanup();
 
-		duk_peval_string(ctx, "require('user-sessions').consoleUid()");
+		// A session the viewer picked stays pinned while it lasts; otherwise follow the console
+		int picked = -1;
+		duk_push_heapptr(ctx, s);										// [stream]
+		if (duk_get_prop_string(ctx, -1, REMOTE_DESKTOP_PICKED_UID))	// [stream][uid]
+		{
+			duk_push_sprintf(ctx, "require('user-sessions').desktopSessions()[%d] != null", duk_get_int(ctx, -1));
+			if (duk_peval(ctx) == 0 && duk_get_boolean(ctx, -1)) { picked = duk_get_int(ctx, -2); }
+			duk_pop(ctx);												// [stream][uid]
+		}
+		duk_pop_2(ctx);													// ...
+
+		if (picked != -1) { duk_push_int(ctx, picked); } else { duk_peval_string(ctx, "require('user-sessions').consoleUid()"); }
 		int id = duk_to_int(ctx, -1);
 
 		// Same greeter case as getRemoteDesktop, on the logout/user-switch re-fork: the login screen's
@@ -1257,6 +1289,8 @@ duk_ret_t ILibDuktape_MeshAgent_userChanged(duk_context *ctx)
 				duk_push_int(ctx, id);
 			}
 		}
+
+		ILibDuktape_MeshAgent_RemoteDesktop_SelectBackend(ctx, id, picked != -1);
 
 		duk_eval_string(ctx, "require('monitor-info')");				//[uid][monitor-info]
 		duk_get_prop_string(ctx, -1, "getXInfo");						//[uid][monitor-info][getXInfo]
@@ -1417,6 +1451,7 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 					duk_pop(ctx);
 				}
 			}
+			duk_push_int(ctx, console_uid); duk_put_prop_string(ctx, -2, REMOTE_DESKTOP_PICKED_UID);
 		}
 
 		// At a DM greeter the X server and its Xauthority are root-owned (e.g. LightDM's
@@ -1457,7 +1492,7 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		// For Linux, we need to determine where the XAUTHORITY is:
 		char *updateXAuth = NULL;
 		char *updateDisplay = NULL;
-		int waylandSession = kvm_is_wayland_session_for_uid(console_uid);
+		int waylandSession = ILibDuktape_MeshAgent_RemoteDesktop_SelectBackend(ctx, console_uid, TSID != -1);
 		int needPop = 0;
 		duk_eval_string(ctx, "require('user-sessions').Self()");
 		int self = duk_get_int(ctx, -1); duk_pop(ctx);

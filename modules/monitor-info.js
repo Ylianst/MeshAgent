@@ -620,6 +620,8 @@ function monitorinfo()
             child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
             child.stdin.write("ps " + (process.platform == 'freebsd' ? "-ax " : "") + "-e -o uid -o tty -o command | grep X | ");
             child.stdin.write("awk '{ ");
+            // xinit and shell wrappers repeat the server's -auth on their own command line; only the server itself counts
+            child.stdin.write('        xl=split($3,xp,"/"); if(xp[xl]!~/^X/) { next; }');
             child.stdin.write('        display="";');
             child.stdin.write('        if($4~/^:/)');
             child.stdin.write('        {');
@@ -686,6 +688,7 @@ function monitorinfo()
                     child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
                     child.stdin.write("loginctl show-session -p State -p Display " + sids.join(' ') + " | tr '\\n' '`' | awk '{");
                     child.stdin.write('   len=split($0,tok,"``");');
+                    child.stdin.write('   first="";');
                     child.stdin.write('   for(n=1;n<=len;++n)');
                     child.stdin.write('   {');
                     child.stdin.write('      len2=split(tok[n],val,"`");');
@@ -704,8 +707,10 @@ function monitorinfo()
                     child.stdin.write('            active=val[i];');
                     child.stdin.write('         }');
                     child.stdin.write('      }');
-                    child.stdin.write('      if(active=="active") { print display; break; }');
+                    child.stdin.write('      if(active=="active" && display!="") { print display; exit; }');
+                    child.stdin.write('      if(first=="" && display!="") { first=display; }');
                     child.stdin.write('   }');
+                    child.stdin.write('   print first;');
                     child.stdin.write("}'\nexit\n");
                     child.waitExit();
 

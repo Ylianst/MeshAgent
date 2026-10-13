@@ -3,15 +3,23 @@
 function getUsers()
 {
     var res, i, uu = {};
-    require('user-sessions').Current(function (u) { res = u; });
-
-    for (i in res)
+    if (require('user-sessions').desktopSessions)
     {
-        if (process.platform != 'win32') { res[i].SessionId = res[i].uid; }
-        if (res[i].State == 'Active' || res[i].State == 'Connected') { uu[process.platform == 'win32' ? res[i].SessionId : res[i].uid] = res[i]; }
+        // Only the sessions a capture child can attach to, keyed by uid like the entries below
+        uu = require('user-sessions').desktopSessions();
+        for (i in uu) { uu[i].SessionId = uu[i].uid; }
+    }
+    else
+    {
+        require('user-sessions').Current(function (u) { res = u; });
+        for (i in res)
+        {
+            if (process.platform != 'win32') { res[i].SessionId = res[i].uid; }
+            if (res[i].State == 'Active' || res[i].State == 'Connected') { uu[process.platform == 'win32' ? res[i].SessionId : res[i].uid] = res[i]; }
+        }
     }
 
-    if (process.platform == 'linux')
+    if (process.platform == 'linux' && module.exports.hasVirtualSessionSupport)
     {
         var spawnable = this.loginUids();
         for (i in spawnable)
