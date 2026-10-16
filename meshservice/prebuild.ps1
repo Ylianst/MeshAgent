@@ -16,7 +16,7 @@
 #
 
 
-#Write-Host "Input: $($args[0]) Output: $($args[1])"
+#Write-Host "Header: $($args[0]) Template: $($args[1]) Output: $($args[2])"
 
 #
 # Read ILibDuktape_Commit.h into file_data
@@ -25,8 +25,6 @@ $file_data = Get-Content $($args[0]);
 
 $hash = $null;
 $hashdate = $null;
-$current = $null;
-$updated = $null;
 
 #
 # Parse out the GIT Commit Hash and GIT Commit Date, so we can update the resource
@@ -60,9 +58,7 @@ for($x=0;$x -lt $i.length;++$x)
       #
 	  # Update the ProductVersion
 	  #
-      $current = $z[3];
       $z[3] = "Commit: " +  $hashdate;
-	  $updated = $z[3];
    }
    if($z[1] -eq "FileVersion")
    {
@@ -76,13 +72,18 @@ for($x=0;$x -lt $i.length;++$x)
 
 
 #
-# Only update MeshService.rc if the values were actually updated
+# Only rewrite MeshService.rc if it is missing or differs, so an unchanged build does not recompile the resource
 #
-if($current -ne $updated)
+$result = $i -Join [Environment]::NewLine
+$existing = $null;
+if(Test-Path $($args[2]))
+{
+   $existing = (Get-Content $($args[2])) -Join [Environment]::NewLine;
+}
+if($existing -ne $result)
 {
    Write-Host "Updated MeshService.rc";
-   $result = $i -Join [Environment]::NewLine
-   $result > $($args[1]);
+   $result > $($args[2]);
 }
 else
 {
