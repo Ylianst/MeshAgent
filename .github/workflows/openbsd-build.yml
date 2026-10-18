@@ -47,30 +47,55 @@ jobs:
       OPENBSD_REL: ${{ matrix.rel }}
       # Empty for the current release. A plain '' in the true branch would fall through to the false branch
       SUFFIX: ${{ matrix.label == 'previous' && format('-{0}', matrix.rel) || '' }}
+      BIN: meshagent_openbsd_x86-64${{ matrix.label == 'previous' && format('-{0}', matrix.rel) || '' }}
+      # Part of cache key. Bump it when fetch-openbsd-sysroot.sh changes which files end up in the sysroot
+      SYSROOT_LAYOUT: "3"
     steps:
       - name: Check out repository code
         uses: actions/checkout@v7
       - name: Install clang, lld and signify
-        run: sudo apt-get -qq update && sudo apt-get -qq -y install clang lld signify-openbsd
+        run: |
+          echo "Installing clang, lld and signify"
+          sudo NEEDRESTART_MODE=a apt-get -qq update > /dev/null
+          sudo NEEDRESTART_MODE=a apt-get -qq -y install clang lld signify-openbsd > /dev/null
       # The sysroot is extracted from about 400 MB of OpenBSD sets, so it is cached per release and fetched only once.
       - name: Restore the OpenBSD sysroot
-        uses: actions/cache@v6
+        id: sysroot
+        uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/openbsd-sysroot
-          key: openbsd-sysroot-${{ env.OPENBSD_REL }}-${{ hashFiles('.github/scripts/fetch-openbsd-sysroot.sh', '.github/scripts/openbsd-*-base.pub') }}
+          key: openbsd-sysroot-${{ env.OPENBSD_REL }}-v${{ env.SYSROOT_LAYOUT }}
       - name: Fetch the OpenBSD sysroot
-        run: bash .github/scripts/fetch-openbsd-sysroot.sh "$OPENBSD_REL" "$RUNNER_TEMP/openbsd-sysroot"
-      # silence echo output with make -s and most noise from CC with '-Wno-date-time -Wno-unused-command-line-argument -Wno-deprecated-non-prototype'
+        run: |
+          echo "Fetching OpenBSD sysroot"
+          bash .github/scripts/fetch-openbsd-sysroot.sh "$OPENBSD_REL" "$RUNNER_TEMP/openbsd-sysroot"
+      - name: Save the OpenBSD sysroot
+        if: steps.sysroot.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/openbsd-sysroot
+          key: ${{ steps.sysroot.outputs.cache-primary-key }}
+      # silence echo output with make -s and noise from CC with '-w'
       - name: Build meshagent (x86_64)
         run: |
+          echo "Building meshagent"
           OSSL="$GITHUB_WORKSPACE/openssl/1.1.1w"
-          make -s -j4 openbsd ARCHID=37 EXENAME2="$SUFFIX" CC="clang -target x86_64-unknown-openbsd$OPENBSD_REL -Wno-date-time -Wno-unused-command-line-argument -Wno-deprecated-non-prototype --sysroot=$RUNNER_TEMP/openbsd-sysroot -fuse-ld=lld -I$OSSL/openbsd-x86_64/include -I$OSSL/include -L$OSSL/openbsd-x86_64/lib"
-      - name: Verify the binary targets OpenBSD
+          make -s -j4 openbsd ARCHID=37 EXENAME2="$SUFFIX" CC="clang -target x86_64-unknown-openbsd$OPENBSD_REL -w --sysroot=$RUNNER_TEMP/openbsd-sysroot -fuse-ld=lld -I$OSSL/openbsd-x86_64/include -I$OSSL/include -L$OSSL/openbsd-x86_64/lib"
+      # OpenBSD's ident note carries no version, but ld.so refuses any other libc major, so the needed libc must be the sysroot's
+      - name: Verify the binary is an OpenBSD x86-64 executable
         run: |
-          file "meshagent_openbsd_x86-64$SUFFIX"
-          file "meshagent_openbsd_x86-64$SUFFIX" | grep -q OpenBSD
+          echo "Verifying binary"
+          readelf -h "$BIN" | grep -q 'OS/ABI: *UNIX - OpenBSD' && echo "OS/ABI is OpenBSD: ok" || { echo "::error::$BIN is not an OpenBSD ELF"; exit 1; }
+          readelf -h "$BIN" | grep -q 'Machine: *Advanced Micro Devices X86-64' && echo "Machine is x86-64: ok" || { echo "::error::$BIN is not x86-64"; exit 1; }
+          readelf -lW "$BIN" | grep -q 'interpreter: /usr/libexec/ld.so\]' && echo "Interpreter is /usr/libexec/ld.so: ok" || { echo "::error::$BIN does not use the OpenBSD dynamic loader"; exit 1; }
+          readelf -nW "$BIN" | grep -q '^ *OpenBSD ' && echo "OpenBSD ident note: ok" || { echo "::error::$BIN has no OpenBSD ident note"; exit 1; }
+          need=$(readelf -dW "$BIN" | sed -n 's/.*(NEEDED).*\[\(libc\.so\.[0-9.]*\)\].*/\1/p')
+          have=$(cd "$RUNNER_TEMP/openbsd-sysroot/usr/lib" && ls libc.so.*.* | head -1)
+          [ -n "$need" ] && [ "$need" = "$have" ] && echo "Needs $need from the sysroot: ok" || { echo "::error::$BIN needs '${need:-no libc}', the sysroot has $have"; exit 1; }
+          echo "::notice title=Binary verification,file=$BIN::Verification ok"
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: meshagent-openbsd-x86_64${{ env.SUFFIX }}
-          path: ${{ github.workspace }}/meshagent_openbsd_x86-64${{ env.SUFFIX }}
+          path: ${{ github.workspace }}/${{ env.BIN }}
+

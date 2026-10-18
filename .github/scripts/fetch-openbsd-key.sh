@@ -1,8 +1,9 @@
 #!/bin/bash
 # Gets the signify base public key of an OpenBSD release through a chain of signed base sets.
-# Usage: fetch-openbsd-key.sh <release> [<out-file>], for example fetch-openbsd-key.sh 7.9 .github/scripts/openbsd-79-base.pub
+# Usage: fetch-openbsd-key.sh <release> [<keys-file>], for example fetch-openbsd-key.sh 8.0 .github/scripts/openbsd-base.pub
+# With a keys file, the release's '<NN>  <pubkey>' line is added to it or replaces the old one. Without, the line is printed.
 # The chain starts at the newest key at or below the release, taken from the distro's signify-openbsd-keys package
-# (which apt already trusts) or from the keys committed next to this script. Every base<NN>.tgz ships the next
+# (which apt already trusts) or from openbsd-base.pub next to this script. Every base<NN>.tgz ships the next
 # release's key in etc/signify/, and each set is checked against its signed SHA256.sig before the key is taken from
 # it, so nothing from the CDN is trusted unverified. Each hop downloads about 300 MB. Ubuntu 24.04 ships keys up to 7.6.
 # Needs signify-openbsd. SIGNIFY_KEYS overrides the package's key directory.
@@ -24,10 +25,22 @@ next_rel() {
 }
 rel_of() { echo "${1:0:1}.${1:1}"; }
 
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
+# Each line of openbsd-base.pub becomes a key file in $work, because signify only reads a file whose first line is the untrusted comment
+mkdir -p "$work/committed"
+if [ -f "$here/openbsd-base.pub" ]; then
+    while read -r n pk; do
+        [[ "$n" =~ ^[0-9]+$ ]] || continue
+        printf 'untrusted comment: openbsd %s base public key\n%s\n' "$(rel_of "$n")" "$pk" > "$work/committed/openbsd-$n-base.pub"
+    done < "$here/openbsd-base.pub"
+fi
+
 # The newest key at or below the target is the shortest chain
 start=""
 startkey=""
-for k in "$keydir"/openbsd-*-base.pub "$here"/openbsd-*-base.pub; do
+for k in "$keydir"/openbsd-*-base.pub "$work"/committed/openbsd-*-base.pub; do
     [ -e "$k" ] || continue
     n="$(basename "$k")"
     n="${n#openbsd-}"
@@ -39,11 +52,9 @@ for k in "$keydir"/openbsd-*-base.pub "$here"/openbsd-*-base.pub; do
         startkey="$k"
     fi
 done
-[ -n "$startkey" ] || { echo "openbsd-$rel: no base key at or below $rel in $keydir or $here, install signify-openbsd-keys" >&2; exit 1; }
-echo "openbsd-$rel: chain starts at $startkey" >&2
+[ -n "$startkey" ] || { echo "openbsd-$rel: no base key at or below $rel in $keydir or $here/openbsd-base.pub, install signify-openbsd-keys" >&2; exit 1; }
+echo "openbsd-$rel: chain starts at the $(rel_of "$start") key from $(dirname "$startkey" | sed "s|$work/committed|$here/openbsd-base.pub|")" >&2
 
-work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
 key="$startkey"
 cur="$start"
 while [ "$cur" -lt "$target" ]; do
@@ -62,9 +73,12 @@ while [ "$cur" -lt "$target" ]; do
     cur="$nxtn"
 done
 
+line="$target  $(sed -n 2p "$key")"
 if [ -n "$out" ]; then
-    cp "$key" "$out"
-    echo "openbsd-$rel: key written to $out" >&2
+    # Replaces an existing line for the release, and keeps the file sorted by release
+    { [ -f "$out" ] && awk -v r="$target" '$1 != r' "$out"; echo "$line"; } | sort -n > "$work/keys"
+    cp "$work/keys" "$out"
+    echo "openbsd-$rel: key line written to $out" >&2
 else
-    cat "$key"
+    echo "$line"
 fi
