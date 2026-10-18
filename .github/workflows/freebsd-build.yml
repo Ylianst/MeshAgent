@@ -4,36 +4,100 @@ on:
   push:
     branches: ['**']
   pull_request:
+  workflow_dispatch:
+    inputs:
+      freebsd_release:
+        description: FreeBSD release to build against, empty means FREEBSD_DEFAULT_REL
+        type: string
   workflow_call:
+    inputs:
+      freebsd_release:
+        description: FreeBSD release to build against, empty means FREEBSD_DEFAULT_REL
+        type: string
 permissions:
   contents: read
+env:
+  # FreeBSD release to build against when no freebsd_release input is given. Keep as low as possible for maximum compatibility
+  FREEBSD_DEFAULT_REL: "13.0"
 
 jobs:
-  freebsd-build-x86-64:
-    name: FreeBSD x86_64 (ARCHID=30)
-    # GitHub has no FreeBSD runners, so the build runs inside a FreeBSD VM on a Linux runner.
-    # Binaries built on an older FreeBSD release run on all newer ones, but not vice versa,
-    # so build on the oldest release CI can still support: 13.5 covers 13.x (TrueNAS CORE,
-    # older OPNsense/pfSense) through 15.x. FreeBSD 13 is EOL — if its pkg repo or VM image
-    # disappears and the "prepare" step starts failing, bump the release to 14.4.
-    runs-on: ubuntu-latest
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      freebsd: ${{ steps.chk.outputs.freebsd }}
     steps:
       - name: Check out repository code
-        uses: actions/checkout@v7.0.0
-      - name: Build meshagent (x86_64) in FreeBSD VM
-        uses: vmactions/freebsd-vm@v1
+        uses: actions/checkout@v7
         with:
-          release: "13.5"
-          # The makefile generates ILibDuktape_Commit.h only when git works — without git the
-          # build fails on a missing header. safe.directory is needed because the rsynced
-          # repo is owned by the runner uid, not the VM user, so git refuses it otherwise.
-          prepare: |
-            pkg install -y gmake git
-            git config --global --add safe.directory '*'
-          run: gmake -j4 freebsd ARCHID=30
+          fetch-depth: 0
+      # A pull request compares against its base branch, a push against the commit before it.
+      # A tag gets no base, so a release always builds, also when a moved tag is pushed again.
+      - id: chk
+        name: Find the builds this change needs
+        env:
+          BASE_SHA: ${{ github.ref_type != 'tag' && (github.event.pull_request.base.sha || github.event.before) || '' }}
+        run: bash .github/scripts/changed-targets.sh "$BASE_SHA"
+
+  freebsd-build-x86-64:
+    name: FreeBSD x86_64 (ARCHID=30)
+    needs: changes
+    if: needs.changes.outputs.freebsd == 'true'
+    runs-on: ubuntu-24.04
+    env:
+      BIN: meshagent_freebsd_x86-64
+      # Part of cache key. Bump it when fetch-freebsd-sysroot.sh changes which files end up in the sysroot
+      SYSROOT_LAYOUT: "2"
+    steps:
+      # Push and pull request runs have no inputs, they fall back to FREEBSD_DEFAULT_REL
+      - name: Pick the FreeBSD release
+        env:
+          REL: ${{ inputs.freebsd_release }}
+        run: echo "FREEBSD_REL=${REL:-$FREEBSD_DEFAULT_REL}" >> "$GITHUB_ENV"
+      - name: Check out repository code
+        uses: actions/checkout@v7
+      - name: Install clang and lld
+        # only print errors
+        run: |
+          echo "Installing clang and lld"
+          sudo NEEDRESTART_MODE=a apt-get -qq update > /dev/null
+          sudo NEEDRESTART_MODE=a apt-get -qq -y install clang lld > /dev/null
+      # The sysroot is extracted from a base.txz and doesn't change, so it is cached per release and fetched only once.
+      - name: Restore the FreeBSD sysroot
+        id: sysroot
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/freebsd-sysroot
+          key: freebsd-sysroot-${{ env.FREEBSD_REL }}-v${{ env.SYSROOT_LAYOUT }}
+      - name: Fetch the FreeBSD sysroot
+        run: |
+          echo "Fetching sysroot"
+          bash .github/scripts/fetch-freebsd-sysroot.sh "$FREEBSD_REL" "$RUNNER_TEMP/freebsd-sysroot"
+      - name: Save the FreeBSD sysroot
+        if: steps.sysroot.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/freebsd-sysroot
+          key: ${{ steps.sysroot.outputs.cache-primary-key }}
+      # silence echo output from make with '-s' and noise from CC with '-w', errors always show
+      - name: Build meshagent (x86_64)
+        run: |
+          echo "Building meshagent"
+          make -s -j4 freebsd ARCHID=30 CC="clang -target x86_64-unknown-freebsd$FREEBSD_REL -w --sysroot=$RUNNER_TEMP/freebsd-sysroot -fuse-ld=lld"
+      # The ABI tag comes from the sysroot's crt objects, so it must equal the sysroot's __FreeBSD_version
+      - name: Verify the binary is a FreeBSD x86-64 executable
+        run: |
+          echo "Verifying binary"
+          readelf -h "$BIN" | grep -q 'OS/ABI: *UNIX - FreeBSD' && echo "OS/ABI is FreeBSD: ok" || { echo "::error::$BIN is not a FreeBSD ELF"; exit 1; }
+          readelf -h "$BIN" | grep -q 'Machine: *Advanced Micro Devices X86-64' && echo "Machine is x86-64: ok" || { echo "::error::$BIN is not x86-64"; exit 1; }
+          readelf -lW "$BIN" | grep -q 'interpreter: /libexec/ld-elf.so.1\]' && echo "Interpreter is /libexec/ld-elf.so.1: ok" || { echo "::error::$BIN does not use the FreeBSD dynamic loader"; exit 1; }
+          set -- $(readelf -nW "$BIN" | awk '/FreeBSD/ && /NT_VERSION/ {print $(NF-3), $(NF-2), $(NF-1), $NF; exit}')
+          [ $# = 4 ] || { echo "::error::$BIN has no FreeBSD ABI tag note"; exit 1; }
+          tag=$((16#$4$3$2$1))
+          want=$(awk '$1 == "#define" && $2 == "__FreeBSD_version" {print $3}' "$RUNNER_TEMP/freebsd-sysroot/usr/include/sys/param.h")
+          [ "$tag" = "$want" ] && echo "FreeBSD ABI tag $tag matches the sysroot: ok" || { echo "::error::$BIN has ABI tag $tag, expected $want from the sysroot"; exit 1; }
       - name: Upload artifacts
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7
         with:
           if-no-files-found: error
           name: meshagent-freebsd-x86_64
-          path: ${{ github.workspace }}/meshagent_freebsd_x86-64
+          path: ${{ github.workspace }}/${{ env.BIN }}
