@@ -11,6 +11,7 @@
   "meshagent_aarch64",
   "meshagent_armhf",
   "meshagent_freebsd_x86-64",
+  "meshagent_openbsd_x86-64",
   "meshagent_osx-arm-64",
   "meshagent_osx-x86-64",
   "meshagent_osx-universal-64"
