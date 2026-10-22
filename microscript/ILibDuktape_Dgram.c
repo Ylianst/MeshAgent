@@ -163,7 +163,7 @@ duk_ret_t ILibDuktape_DGram_Socket_bind(duk_context *ctx)
 	duk_push_current_function(ctx);													// [socket][func]
 	config = Duktape_GetIntPropertyValue(ctx, -1, "config", 0);
 
-	char *address = ((config & ILibDuktape_DGRAM_Config_IPv6) == ILibDuktape_DGRAM_Config_IPv6) ? "::1" : "127.0.0.1";
+	char *address = ((config & ILibDuktape_DGRAM_Config_IPv6) == ILibDuktape_DGRAM_Config_IPv6) ? "::" : "0.0.0.0";
 																// [socket]
 
 	if (duk_is_object(ctx, 0))
