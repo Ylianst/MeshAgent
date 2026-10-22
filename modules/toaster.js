@@ -149,6 +149,23 @@ function Toaster()
                         return (retVal);
                     }
 
+                    // The running notification service may have no matching D-Bus activation file.
+                    if (retVal.xinfo && retVal.xinfo.env && retVal.xinfo.env.DBUS_SESSION_BUS_ADDRESS && require('message-box').notifysend)
+                    {
+                        retVal.child = require('child_process').execFile(require('message-box').notifysend.path, ['notify-send', '--', retVal.title, retVal.caption], { uid: retVal.consoleUid, env: retVal.xinfo.exportEnv() });
+                        retVal.child.descriptorMetadata = 'toaster (notify-send)';
+                        retVal.child.parent = retVal;
+                        retVal.child.stderr.str = '';
+                        retVal.child.stderr.on('data', function (c) { this.str += c.toString(); });
+                        retVal.child.stdout.on('data', function () { });
+                        retVal.child.on('exit', function (code)
+                        {
+                            if (code == 0) { this.parent._res('DISMISSED'); }
+                            else { this.parent._rej(this.stderr.str.trim()); }
+                        });
+                        return (retVal);
+                    }
+
                     if (require('message-box').zenity)  // Check to see if ZENITY is installed on the system
                     {
                         if (process.platform == 'linux' && !require('linux-dbus').hasService('org.freedesktop.Notifications'))
@@ -157,12 +174,12 @@ function Toaster()
                             if (require('message-box').zenity.timeout)
                             {
                                 // Timeout Supported
-                                retVal.child = require('child_process').execFile(require('message-box').zenity.path, ['zenity', '--info', '--title=' + retVal.title, '--text=' + retVal.caption, '--timeout=5'], { uid: retVal.consoleUid, env: { XAUTHORITY: retVal.xinfo.xauthority, DISPLAY: retVal.xinfo.display } });
+                                retVal.child = require('child_process').execFile(require('message-box').zenity.path, ['zenity', '--info', '--title=' + retVal.title, '--text=' + retVal.caption, '--timeout=5'], { uid: retVal.consoleUid, env: retVal.xinfo.exportEnv() });
                             }
                             else
                             {
                                 // No Timeout Support, so we must fake it
-                                retVal.child = require('child_process').execFile(require('message-box').zenity.path, ['zenity', '--info', '--title=' + retVal.title, '--text=' + retVal.caption], { uid: retVal.consoleUid, env: { XAUTHORITY: retVal.xinfo.xauthority, DISPLAY: retVal.xinfo.display } });
+                                retVal.child = require('child_process').execFile(require('message-box').zenity.path, ['zenity', '--info', '--title=' + retVal.title, '--text=' + retVal.caption], { uid: retVal.consoleUid, env: retVal.xinfo.exportEnv() });
                                 retVal.child.timeout = setTimeout(function (c) { c.timeout = null; c.kill(); }, 5000, retVal.child);
                             }
                             retVal.child.descriptorMetadata = 'toaster (zenity/messagebox)'
@@ -201,7 +218,7 @@ function Toaster()
                                 else
                                 {
                                     // No Timeout Support, so we must fake it
-                                    retVal.child = require('child_process').execFile(require('message-box').zenity.path, ['zenity', '--info', '--title=' + retVal.title, '--text=' + retVal.caption], { uid: retVal.consoleUid, env: { XAUTHORITY: retVal.xinfo.xauthority, DISPLAY: retVal.xinfo.display } });
+                                    retVal.child = require('child_process').execFile(require('message-box').zenity.path, ['zenity', '--info', '--title=' + retVal.title, '--text=' + retVal.caption], { uid: retVal.consoleUid, env: retVal.xinfo.exportEnv() });
                                     retVal.child.timeout = setTimeout(function (c) { c.timeout = null; c.kill(); }, 5000, retVal.child);
                                 }
                                 retVal.child.descriptorMetadata = 'toaster (zenity/messagebox)'
@@ -210,7 +227,7 @@ function Toaster()
                         else
                         {
                             // Use ZENITY Notification
-                            retVal.child = require('child_process').execFile(require('message-box').zenity.path, ['zenity', '--notification', '--title=' + title, '--text=' + caption, '--timeout=5'], { uid: retVal.consoleUid, env: { XAUTHORITY: retVal.xinfo.xauthority, DISPLAY: retVal.xinfo.display } });                   
+                            retVal.child = require('child_process').execFile(require('message-box').zenity.path, ['zenity', '--notification', '--title=' + title, '--text=' + caption, '--timeout=5'], { uid: retVal.consoleUid, env: retVal.xinfo.exportEnv() });
                             retVal.child.descriptorMetadata = 'toaster (zenity/notification)'
                         }
                         retVal.child.parent = retVal;
@@ -238,7 +255,9 @@ function Toaster()
                                 return (retVal);
                             }
 		
-                            retVal._notify = require('child_process').execFile(util, ['kdialog', '--title', retVal.title, '--passivepopup', retVal.caption, '5'], { uid: retVal.consoleUid, env: { DISPLAY: retVal.xinfo.display, XAUTHORITY: retVal.xinfo.xauthority, XDG_RUNTIME_DIR: xdg } });
+                            var dialogEnv = retVal.xinfo.exportEnv();
+                            if (!dialogEnv.XDG_RUNTIME_DIR) { dialogEnv.XDG_RUNTIME_DIR = xdg; }
+                            retVal._notify = require('child_process').execFile(util, ['kdialog', '--title', retVal.title, '--passivepopup', retVal.caption, '5'], { uid: retVal.consoleUid, env: dialogEnv });
                             retVal._notify.descriptorMetadata = 'toaster (kdialog)'
                             retVal._notify.parent = retVal;
                             retVal._notify.stdout.on('data', function (chunk) { });
