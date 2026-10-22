@@ -482,7 +482,7 @@ function windows_notifybar_local(title, bar_options)
 
 function x_notifybar_check(title)
 {
-    var script = Buffer.from("require('notifybar-desktop')('" + title + "').on('close', function(){process.exit();});").toString('base64');
+    var script = Buffer.from("try { require('notifybar-desktop')(" + JSON.stringify(title) + ").on('close', function(){process.exit();}); } catch (e) { console.error(e); process.exit(1); }").toString('base64');
 
     var min = require('user-sessions').minUid();
     var uid = -1;
@@ -526,7 +526,7 @@ function x_notifybar_check(title)
                     that.child.descriptorMetadata = 'notifybar-desktop';
                     that.child.parent = that;
                     that.child.stdout.on('data', function (c) { });
-                    that.child.stderr.on('data', function (c) { });
+                    that.child.stderr.on('data', function (c) { console.error('Privacy bar: ' + c.toString()); });
                     that.child.on('exit', function (code) { this.parent.emit('close', code); });
                     that._close2 = function _close2()
                     {
@@ -559,7 +559,7 @@ function x_notifybar_check(title)
         ret.child.descriptorMetadata = 'notifybar-desktop';
         ret.child.parent = ret;
         ret.child.stdout.on('data', function (c) { });
-        ret.child.stderr.on('data', function (c) { });
+        ret.child.stderr.on('data', function (c) { console.error('Privacy bar: ' + c.toString()); });
         ret.child.on('exit', function (code) { this.parent.emit('close', code); });
 
         return (ret);
@@ -568,7 +568,7 @@ function x_notifybar_check(title)
 
 function x_notifybar(title)
 {
-    ret = { _ObjectID: 'notifybar-desktop.X', title: title, _windows: [], _promise: require('monitor-info').getInfo(), monitors: [], workspaces: {} };
+    var ret = { _ObjectID: 'notifybar-desktop.X', title: title, _windows: [], _promise: require('monitor-info').getInfo({ monitorBounds: true }), monitors: [], workspaces: {} };
 
     ret._promise.notifybar = ret;
     require('events').EventEmitter.call(ret, true)
@@ -594,11 +594,11 @@ function x_notifybar(title)
                 display: m[i].display, id: m[i].screedId
             });
 
-            this.notifybar._windows.peek().notifybar = require('monitor-info')._X11.XCreateSimpleWindow(m[i].display, this.notifybar._windows.peek().root, start, 0, barWidth, 1, 0, white, white);
+            this.notifybar._windows.peek().notifybar = require('monitor-info')._X11.XCreateSimpleWindow(m[i].display, this.notifybar._windows.peek().root, start, m[i].top, barWidth, 1, 0, white, white);
             require('monitor-info')._X11.XStoreName(m[i].display, this.notifybar._windows.peek().notifybar, require('_GenericMarshal').CreateVariable(this.notifybar.title));
             require('monitor-info')._X11.Xutf8SetWMProperties(m[i].display, this.notifybar._windows.peek().notifybar, require('_GenericMarshal').CreateVariable(this.notifybar.title), 0, 0, 0, 0, 0, 0);
 
-            require('monitor-info').setWindowSizeHints(m[i].display, this.notifybar._windows.peek().notifybar, start, 0, barWidth, 1, barWidth, 1, barWidth, 1);
+            require('monitor-info').setWindowSizeHints(m[i].display, this.notifybar._windows.peek().notifybar, start, m[i].top, barWidth, 1, barWidth, 1, barWidth, 1);
             require('monitor-info').setInitialWindowState(m[i].display, this.notifybar._windows.peek().notifybar, ['_NET_WM_STATE_ABOVE', '_NET_WM_STATE_SKIP_TASKBAR']);
 
             require('monitor-info').setAllowedActions(m[i].display, this.notifybar._windows.peek().notifybar, require('monitor-info').MOTIF_FLAGS.MWM_FUNC_CLOSE);
@@ -662,6 +662,7 @@ function x_notifybar(title)
             }
             catch (cex)
             {
+                console.error('Privacy bar: ' + cex);
             }
 
             m[0].display._notifyBar = this.notifybar;
@@ -675,7 +676,7 @@ function x_notifybar(title)
             });
         }
        
-    });
+    }, function (e) { console.error('Privacy bar: ' + e); });
     return (ret);
 }
 

@@ -34,6 +34,25 @@ var PropertyChangeMask = (1 << 22);
 var PropertyNotify = 28;
 var AnyPropertyType = 0;
 
+function getNativeLibraries(libraries)
+{
+    var fs = require('fs');
+    var elfClass = require('_GenericMarshal').PointerSize == 8 ? 2 : 1;
+    return libraries.filter(function (library)
+    {
+        var fd;
+        try
+        {
+            // Multiarch ldconfig lists 64-bit libraries before their 32-bit counterparts.
+            fd = fs.openSync(library.path, 'r');
+            var header = Buffer.alloc(5);
+            return fs.readSync(fd, header, 0, 5, 0) == 5 && header.readUInt32LE(0) == 0x464c457f && header[4] == elfClass;
+        }
+        catch (e) { return false; }
+        finally { if (fd != null) { fs.closeSync(fd); } }
+    });
+}
+
 function getLibInfo(libname)
 {
     var child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -54,7 +73,7 @@ function getLibInfo(libname)
         try
         {
             var v = JSON.parse(child.stdout.str.trim());
-            if (v.length != 0) { return (v); }
+            if (v.length != 0) { return (getNativeLibraries(v)); }
         }
         catch (e)
         {
@@ -69,7 +88,7 @@ function getLibInfo(libname)
     child.waitExit();
     try
     {
-        return (JSON.parse(child.stdout.str.trim()));
+        return (getNativeLibraries(JSON.parse(child.stdout.str.trim())));
     }
     catch (e)
     {
@@ -364,14 +383,13 @@ function monitorinfo()
             }
             return false;
         };
-        this._kvmcheck = function _kvmcheck()
+        this._loadX11 = function _loadX11()
         {
-            var retry = false;
             if (!(this.Location_X11LIB && this.Location_X11TST && this.Location_X11EXT))
             {
                 this._check();
             }
-            if (this.Location_X11LIB && this.Location_X11TST && this.Location_X11EXT)
+            if (this.Location_X11LIB)
             {
                 if (!this._X11)
                 {
@@ -427,9 +445,25 @@ function monitorinfo()
                     this._X11.CreateMethod('XStringToKeysym');
                     this._X11.CreateMethod('XChangeKeyboardMapping');
                 }
+                if (this._Xrandr === undefined)
+                {
+                    this._Xrandr = null;
+                    try
+                    {
+                        var randr = this._gm.CreateNativeProxy('libXrandr.so.2');
+                        randr.CreateMethod('XRRQueryVersion');
+                        randr.CreateMethod('XRRGetMonitors');
+                        randr.CreateMethod('XRRFreeMonitors');
+                        this._Xrandr = randr;
+                    }
+                    catch (e) { }
+                }
             }
 
-            // Wayland capture doesn't need X, but the privacy bar still draws through Xwayland
+        };
+        this._kvmcheck = function _kvmcheck()
+        {
+            var retry = false;
             if (this._kvmcheck_wayland())
             {
                 this.kvm_x11_serverFound = true;
@@ -437,7 +471,8 @@ function monitorinfo()
                 return;
             }
 
-            if (this._X11)
+            this._loadX11();
+            if (this._X11 && this.Location_X11TST && this.Location_X11EXT)
             {
                 var ch = require('child_process').execFile('/bin/sh', ['sh']);
                 ch.stderr.on('data', function () { });
@@ -576,11 +611,16 @@ function monitorinfo()
             this._X11.XSendEvent(display, rootWindow, 0, SubstructureRedirectMask | SubstructureNotifyMask, xclient);
         }
 
-        this.getInfo = function getInfo()
+        this.getInfo = function getInfo(options)
         {
             var info = this;
             var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
             ret.parent = this;
+
+            // Wayland capture and native dialogs work without the X11 libraries used by this window.
+            try { this._loadX11(); }
+            catch (e) { ret._rej(e); return (ret); }
+            if (!this._X11) { ret._rej('X11 library unavailable for the desktop window'); return (ret); }
 
             if (!process.env.XAUTHORITY || !process.env.DISPLAY)
             {
@@ -599,10 +639,43 @@ function monitorinfo()
 
             var screenCount = info._X11.XScreenCount(display).Val;
             var ifo = [];
+            var randrAvailable = false;
+            if (info._Xrandr && options && options.monitorBounds)
+            {
+                var major = info._gm.CreateVariable(4), minor = info._gm.CreateVariable(4);
+                if (info._Xrandr.XRRQueryVersion(display, major, minor).Val != 0)
+                {
+                    randrAvailable = major.toBuffer().readInt32LE(0) > 1 || (major.toBuffer().readInt32LE(0) == 1 && minor.toBuffer().readInt32LE(0) >= 5);
+                }
+            }
             for(var i=0;i<screenCount;++i)
             {
                 var screen = info._X11.XScreenOfDisplay(display, i);
-                ifo.push({ left: 0, top: 0, right: info._X11.XDisplayWidth(display, i).Val, bottom: info._X11.XDisplayHeight(display, i).Val, screen: screen, screenId: i, display: display });
+                var monitors = null;
+                var count = info._gm.CreateVariable(4);
+                var first = ifo.length;
+                try
+                {
+                    if (randrAvailable)
+                    {
+                        monitors = info._Xrandr.XRRGetMonitors(display, info._X11.XRootWindow(display, i), 1, count);
+                        if (monitors.Val != 0)
+                        {
+                            var size = info._gm.PointerSize == 8 ? 56 : 44;
+                            for (var n = 0; n < count.toBuffer().readInt32LE(0); ++n)
+                            {
+                                var bounds = monitors.Deref(n * size + info._gm.PointerSize + 12, 16).toBuffer();
+                                var x = bounds.readInt32LE(0), y = bounds.readInt32LE(4);
+                                var width = bounds.readInt32LE(8), height = bounds.readInt32LE(12);
+                                if (width > 0 && height > 0) { ifo.push({ left: x, top: y, right: x + width, bottom: y + height, screen: screen, screenId: i, display: display }); }
+                            }
+                        }
+                    }
+                }
+                catch (e) { }
+                finally { if (monitors && monitors.Val != 0) { info._Xrandr.XRRFreeMonitors(monitors); } }
+                // Older X servers may expose screens without the RandR monitor extension.
+                if (ifo.length == first) { ifo.push({ left: 0, top: 0, right: info._X11.XDisplayWidth(display, i).Val, bottom: info._X11.XDisplayHeight(display, i).Val, screen: screen, screenId: i, display: display }); }
             }
             if (i > 0)
             {
@@ -615,6 +688,15 @@ function monitorinfo()
         function xinfo_xdm(info, uid)
         {
             if (process.platform != 'linux') { return(info); }
+            if (info != null && !info.env)
+            {
+                info.env = getDesktopEnvironment(uid, info.display);
+                if (!info.display && info.env.DISPLAY)
+                {
+                    info.display = info.env.DISPLAY;
+                    info.xauthority = info.env.XAUTHORITY;
+                }
+            }
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
             child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
@@ -630,6 +712,15 @@ function monitorinfo()
         this.getXInfo = function getXInfo(consoleuid)
         {
             var ret = null;
+            if (process.platform == 'linux')
+            {
+                var desktopEnv = getDesktopEnvironment(consoleuid);
+                // GNOME reserves the Xwayland display before it starts an X server process.
+                if (desktopEnv.WAYLAND_DISPLAY && desktopEnv.DISPLAY && desktopEnv.XAUTHORITY)
+                {
+                    return ({ tty: '?', xauthority: desktopEnv.XAUTHORITY, display: desktopEnv.DISPLAY, env: desktopEnv, exportEnv: exportEnv });
+                }
+            }
             var uname = require('user-sessions').getUsername(consoleuid);
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
@@ -931,9 +1022,57 @@ function monitorinfo()
     }
 }
 
+function getDesktopEnvironment(uid, display)
+{
+    var fs = require('fs');
+    var best = {}, bestScore = 0;
+    var names = ['DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS', 'HOME', 'USER', 'LOGNAME', 'LANG'];
+    var pids;
+    try { pids = fs.readdirSync('/proc'); } catch (e) { return (best); }
+    for (var i = 0; i < pids.length; ++i)
+    {
+        if (!/^\d+$/.test(pids[i])) { continue; }
+        try
+        {
+            if (fs.statSync('/proc/' + pids[i]).uid != uid) { continue; }
+            var data = fs.readFileSync('/proc/' + pids[i] + '/environ');
+            var env = {};
+            var start = 0;
+            for (var j = 0; j <= data.length; ++j)
+            {
+                if (j < data.length && data[j] != 0) { continue; }
+                if (j == start) { start = j + 1; continue; }
+                var entry = data.slice(start, j).toString();
+                var eq = entry.indexOf('=');
+                if (eq > 0) { env[entry.substring(0, eq)] = entry.substring(eq + 1); }
+                start = j + 1;
+            }
+            if (env.SSH_CONNECTION || !env.DISPLAY || (display && env.DISPLAY != display)) { continue; }
+            if (env.XAUTHORITY && !fs.existsSync(env.XAUTHORITY)) { continue; }
+            if (env.WAYLAND_DISPLAY && (!env.XDG_RUNTIME_DIR || !fs.existsSync(env.WAYLAND_DISPLAY[0] == '/' ? env.WAYLAND_DISPLAY : env.XDG_RUNTIME_DIR + '/' + env.WAYLAND_DISPLAY))) { continue; }
+            var score = (env.XAUTHORITY ? 1 : 0) + (env.XDG_RUNTIME_DIR ? 1 : 0) + (env.DBUS_SESSION_BUS_ADDRESS ? 1 : 0) + (env.WAYLAND_DISPLAY ? 1 : 0);
+            if (score <= bestScore) { continue; }
+            best = {};
+            for (var n = 0; n < names.length; ++n)
+            {
+                if (env[names[n]]) { best[names[n]] = env[names[n]]; }
+            }
+            bestScore = score;
+            if (score == 4) { break; }
+        }
+        catch (e) { }
+    }
+    return (best);
+}
+
 function exportEnv()
 {
-    var r =
+    var r = {};
+    if (this.env)
+    {
+        for (var key in this.env) { r[key] = this.env[key]; }
+    }
+    var xenv =
         {
             XAUTHORITY: this.xauthority?this.xauthority:"", DISPLAY: this.display,
             Location_X11LIB: require('monitor-info').Location_X11LIB,
@@ -941,6 +1080,7 @@ function exportEnv()
             Location_X11EXT: require('monitor-info').Location_X11EXT,
             Location_X11FIXES: require('monitor-info').Location_X11FIXES
         };
+    for (var key in xenv) { if (xenv[key] != null) { r[key] = xenv[key]; } }
     return (r);
 }
 
