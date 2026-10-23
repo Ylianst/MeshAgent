@@ -3539,33 +3539,6 @@ void ILibDuktape_HttpStream_OnReceive(ILibWebClient_StateObject WebStateObject, 
 			duk_push_string(ctx, "end");									// [emit]][this][end]
 			if (duk_pcall_method(ctx, 1) != 0) ILibDuktape_Process_UncaughtExceptionEx(ctx, "httpStream.onReceive(): Error dispatching 'end': %s", duk_safe_to_string(ctx, -1));
 			duk_pop(ctx);													// ...
-
-			if (header->Directive == NULL && data->connectionCloseSpecified == 0)
-			{
-				duk_push_heapptr(ctx, data->DS->ParentObject);						// [httpStream]
-				if (duk_has_prop_string(ctx, -1, ILibDuktape_HTTPStream2Socket))
-				{
-					duk_get_prop_string(ctx, -1, ILibDuktape_HTTPStream2Socket);	// [httpStream][socket]
-					if (duk_has_prop_string(ctx, -1, ILibDuktape_Socket2Agent))
-					{
-						duk_get_prop_string(ctx, -1, ILibDuktape_Socket2Agent);		// [httpStream][socket][agent]
-						duk_get_prop_string(ctx, -1, "keepSocketAlive");			// [httpStream][socket][agent][keepSocketAlive]
-						duk_swap_top(ctx, -2);										// [httpStream][socket][keepSocketAlive][this]
-						duk_dup(ctx, -3);											// [httpStream][socket][keepSocketAlive][this][socket]
-						if (duk_pcall_method(ctx, 1) != 0) {}
-						duk_pop(ctx);												// [httpStream][socket]
-						duk_pop_2(ctx);												// ...
-					}
-					else
-					{
-						duk_pop_2(ctx);
-					}
-				}
-				else
-				{
-					duk_pop(ctx);
-				}
-			}
 		}
 		else
 		{
