@@ -2574,18 +2574,15 @@ duk_ret_t ILibDuktape_fs_readFileSync(duk_context *ctx)
 // fs.existsSync() to determine if a path exists
 duk_ret_t ILibDuktape_fs_existsSync(duk_context *ctx)
 {
-	duk_push_this(ctx);							// [fs]
-	duk_get_prop_string(ctx, -1, "statSync");	// [fs][statSync]
-	duk_swap_top(ctx, -2);						// [statSync][this]
-	duk_dup(ctx, 0);							// [statSync][this][path]
-	if (duk_pcall_method(ctx, 1) != 0) 
-	{ 
-		duk_push_false(ctx); 
-	}
-	else
-	{
-		duk_push_true(ctx);
-	}
+	if (!duk_is_string(ctx, 0)) { duk_push_false(ctx); return(1); }
+#ifdef WIN32
+	// use GetFileAttributesExW as it supports network paths, GetFileAttributesW doesn't
+	WIN32_FILE_ATTRIBUTE_DATA attr;
+	duk_push_boolean(ctx, GetFileAttributesExW((LPCWSTR)ILibDuktape_String_AsWide(ctx, 0, NULL), GetFileExInfoStandard, &attr) != 0);
+#else
+	// AT_EACCESS makes the check use the effective IDs
+	duk_push_boolean(ctx, faccessat(AT_FDCWD, duk_get_string(ctx, 0), F_OK, AT_EACCESS) == 0);
+#endif
 	return(1);
 }
 #ifdef _POSIX
