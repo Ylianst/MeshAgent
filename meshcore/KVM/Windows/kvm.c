@@ -572,6 +572,15 @@ int kvm_server_inputdata(char *block, int blocklen, ILibKVM_WriteHandler writeHa
 		}
 		break;
 	}
+	case MNG_KVM_ENCODING_FEEDBACK:
+	{
+		if (size == 8 && memcmp(block + 4, "CAPS", 4) == 0)
+		{
+			char reply[12] = { 0, 5, 0, 12, 'C', 'A', 'P', 'S', 1, 7, 0, 0 };
+			writeHandler(reply, sizeof(reply), reserved);
+		}
+		break;
+	}
 	case MNG_KVM_COMPRESSION: // Compression
 	{
 		if (size >= 10)
