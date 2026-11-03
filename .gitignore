@@ -340,6 +340,7 @@ ToolChains/
 # Build files
 # Regenerated every build
 microscript/ILibDuktape_Commit.h
+meshservice/MeshService.rc
 
 # compiled builds: meshagent_<arch>, DEBUG_meshagent_<arch>
 /meshagent_*
