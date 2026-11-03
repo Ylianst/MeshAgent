@@ -333,7 +333,7 @@ int ILibDuktape_fs_openSyncEx(duk_context *ctx, char *path, char *flags, char *m
 		duk_push_int(ctx, retVal);										// [fs][nextFD]
 		duk_put_prop_string(ctx, -2, FS_NextFD);						// [fs]
 		duk_pop(ctx);													// ...            
-		return retVal;
+		return retVal; // Klocwork is still being retarded, f is saved
 	}
 	else
 	{																	// [fs]
