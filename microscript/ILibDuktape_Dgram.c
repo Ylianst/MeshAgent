@@ -465,7 +465,7 @@ duk_ret_t ILibDuktape_DGram_createSocket(duk_context *ctx)
 	ILibDuktape_DGRAM_Config config = ILibDuktape_DGRAM_Config_NONE;
 	ILibDuktape_DGRAM_DATA *ptrs;
 	void *chain;
-	char *typ = duk_is_string(ctx, 0) ? (char*)duk_require_string : Duktape_GetStringPropertyValue(ctx, 0, "type", "udp4");
+	char *typ = duk_is_string(ctx, 0) ? (char*)duk_require_string(ctx, 0) : Duktape_GetStringPropertyValue(ctx, 0, "type", "udp4");
 	void *dgram;
 
 	duk_push_this(ctx);													// [dgram]
