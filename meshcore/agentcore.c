@@ -5917,6 +5917,9 @@ void MeshAgent_ScriptMode_ZipSink_Run(duk_context *ctx, void ** args, int argsLe
 		{
 			// Error
 			ILibRemoteLogging_printf(ILibChainGetLogger(duk_ctx_chain(ctx)), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "Script Error: %s", duk_safe_to_string(ctx, -1));
+			// Nothing else ends the chain in script mode, so end the process the way Node does after an uncaught error
+			// process.exit() refuses in agent mode, so this is a no-op when the script runs with --script-connect
+			duk_peval_string_noresult(ctx, "process.exit(1);");
 		}
 	}
 
@@ -6231,6 +6234,11 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 			{
 				// Error
 				ILibRemoteLogging_printf(ILibChainGetLogger(agentHost->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "Script Error: %s", duk_safe_to_string(agentHost->meshCoreCtx, -1));
+				if (connectAgent == 0)
+				{
+					// Nothing else ends the chain in script mode, so end the process the way Node does after an uncaught error
+					duk_peval_string_noresult(agentHost->meshCoreCtx, "process.exit(1);");
+				}
 			}
 			duk_pop(agentHost->meshCoreCtx);
 		}
