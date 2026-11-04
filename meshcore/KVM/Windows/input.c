@@ -145,7 +145,7 @@ int KVM_GetCursorHash(HCURSOR hc, char *buffer, size_t bufferLen)
 {
 	int crc = 0;
 	BITMAP bm;
-	ICONINFO ii;
+	ICONINFO ii = { 0 };
 	
 	GetIconInfo(hc, &ii);
 	
@@ -179,10 +179,12 @@ int KVM_GetCursorHash(HCURSOR hc, char *buffer, size_t bufferLen)
 				SelectObject(hdcMem, hbmold);
 			}
 			if (hbmCanvas != NULL) { DeleteObject(hbmCanvas); }
-			if (hdcMem != NULL) { ReleaseDC(NULL, hdcMem); }
+			if (hdcMem != NULL) { DeleteDC(hdcMem); }
 			if (hdcScreen != NULL) { ReleaseDC(NULL, hdcScreen); }
 		}
 	}
+	if (ii.hbmMask != NULL) { DeleteObject(ii.hbmMask); }
+	if (ii.hbmColor != NULL) { DeleteObject(ii.hbmColor); }
 
 	return(crc);
 }
