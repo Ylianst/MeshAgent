@@ -212,24 +212,6 @@ function processManager() {
                     var J = JSON.parse(p.stdout.str);
                     p.args = [];
                     for (var i = 1; i < arguments.length; ++i) { p.args.push(arguments[i]); }
-                    if (process.platform == 'freebsd')
-                    {
-                        for (pid in J)
-                        {
-                            try
-                            {
-                                var c = require('fs').readFileSync('/proc/' + pid + '/cmdline');
-                                for (i in c)
-                                {
-                                    if (c[i] == 0) { c[i] = 32; }
-                                }
-                                if (c.toString().trim() != '' && J[pid].cmd != c.toString()) { J[pid].cmd = c.toString(); }
-                            }
-                            catch (ee)
-                            {
-                            }
-                        }
-                    }
                     p.args.unshift(J);
                     callback.apply(this, p.args);
                 }

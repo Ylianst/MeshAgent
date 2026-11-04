@@ -46,6 +46,9 @@ limitations under the License.
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#ifdef _FREEBSD
+#include <sys/sysctl.h>
+#endif
 #endif
 
 #if defined(__linux__) && defined(__GLIBC__)
@@ -6429,7 +6432,10 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 		#ifdef _OPENBSD
 			x = sprintf_s(exePath, 1024, "%s", __agentExecPath);
 		#else
-			x = readlink("/proc/curproc/file", exePath, 1024);
+			// FreeBSD does not mount procfs by default, so ask the kernel instead of reading /proc/curproc/file
+			int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1 };
+			size_t exeLen = 1024;
+			x = (sysctl(mib, 4, exePath, &exeLen, NULL, 0) == 0 && exeLen > 0) ? (int)exeLen - 1 : -1;
 		#endif
 	#else
 		x = readlink("/proc/self/exe", exePath, 1024);

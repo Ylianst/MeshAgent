@@ -31,7 +31,9 @@ limitations under the License.
 #endif
 #ifdef __APPLE__
 	#include <mach-o/dyld.h>
-#elif !defined(_FREEBSD)
+#elif defined(_FREEBSD)
+	#include <sys/sysctl.h>
+#else
 	#include <netpacket/packet.h>
 #endif
 #include <sys/utsname.h>
@@ -463,21 +465,15 @@ void ILibDuktape_ScriptContainer_CheckEmbedded(char **script, int *scriptLen)
 	
 #elif defined(NACL)
 #elif defined(_FREEBSD)
-	int x = readlink("/proc/curproc/file", exePath, sizeof(exePath));
-	if (x < 0 || x >= sizeof(exePath))
-	{
-#ifdef _OPENBSD
-		strcpy_s(exePath, sizeof(exePath), __agentExecPath);		
-#else
-		printf("\nYou'll need to mount procfs, which isn't mounted by default on FreeBSD.\n");
-		printf("Add the following line to /etc/fstab\n");
-		printf("   proc	/proc	procfs	rw	0	0\n\n");
-		printf("If you don't reboot after, then you can manually mount with the command:\n");
-		printf("   mount -t procfs proc /proc\n\n");
-		ILIBCRITICALEXIT(246);
-#endif
-	}
-	exePath[x] = 0;
+	#ifdef _OPENBSD
+	// OpenBSD has no procfs and no kernel call for the executable path, so main() resolved argv[0] into __agentExecPath
+	strcpy_s(exePath, sizeof(exePath), __agentExecPath);
+	#else
+	// FreeBSD does not mount procfs by default, so ask the kernel instead of reading /proc/curproc/file
+	int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1 };
+	size_t x = sizeof(exePath);
+	if (sysctl(mib, 4, exePath, &x, NULL, 0) != 0 || x == 0) ILIBCRITICALEXIT(246);
+	#endif
 #else
 	int x = readlink("/proc/self/exe", exePath, sizeof(exePath));
 	if (x < 0 || x >= sizeof(exePath)) ILIBCRITICALEXIT(246);
@@ -2067,7 +2063,7 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "hostname", ILibDuktape_ScriptContainer_OS_hostname, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "tmpdir", ILibDuktape_tmpdir, 0);
 
-	char jsExtras[] = "exports.getPrimaryDnsSuffix = function getPrimaryDnsSuffix()\
+	#define JSEXTRAS_1 "exports.getPrimaryDnsSuffix = function getPrimaryDnsSuffix()\
 	{\
 		if (process.platform == 'win32')\
 		{\
@@ -2131,8 +2127,8 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 			catch(ee)\
 			{return(0);}\
 		})() });\
-	}\
-	exports.getArpCache = function getArpCache()\
+	}"
+	#define JSEXTRAS_2 "\texports.getArpCache = function getArpCache()\
 	{\
 		if(process.platform == 'darwin')\
 		{\
@@ -2230,6 +2226,38 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 				break;\
 			}\
 		}\
+		else if (process.platform == 'freebsd')\
+		{\
+			var child = require('child_process').execFile('/bin/sh', ['sh']);\
+			child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });\
+			child.stderr.on('data', function (c) { });\
+			child.stdin.write('arp -an\\nexit\\n');\
+			child.waitExit();\
+			var lines = child.stdout.str.split('\\n');\
+			for (var i in lines)\
+			{\
+				var ip = null, hw = null, dev = null;\
+				var m = lines[i].match(/\\((\\S+)\\) at (\\S+) on (\\S+)/);\
+				if (m)\
+				{\
+					ip = m[1]; hw = m[2]; dev = m[3];\
+				}\
+				else\
+				{\
+					var t = lines[i].trim().split(/\\s+/);\
+					if (t.length >= 3 && t[1].indexOf(':') > 0) { ip = t[0]; hw = t[1]; dev = t[2]; }\
+				}\
+				if (ip == null || hw == null || hw.indexOf(':') < 0) { continue; }\
+				var hwtokens = hw.split(':');\
+				for (var hwi in hwtokens)\
+				{\
+					if (hwtokens[hwi].length == 1) { hwtokens[hwi] = '0' + hwtokens[hwi]; }\
+					hwtokens[hwi] = hwtokens[hwi].toUpperCase();\
+				}\
+				if (!retVal[dev]) { retVal[dev] = {}; }\
+				retVal[dev][ip] = hwtokens.join(':');\
+			}\
+		}\
 		else\
 		{\
 			var arpCache = require('fs').readFileSync('/proc/net/arp');\
@@ -2261,8 +2289,8 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 			}\
 		}\
 		return (retVal);\
-	};\
-	if(process.platform == 'linux')\
+	};"
+	#define JSEXTRAS_3 "\tif(process.platform == 'linux')\
 	{\
 		exports.getDefaultGateways = function getDefaultGateways()\
 		{\
@@ -2588,7 +2616,13 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 				break;\
 		}\
 	};\
-	exports.dns = require('util-dns');";
+	exports.dns = require('util-dns');"
+
+	// Split in three because MSVC refuses a string literal longer than 16380 bytes with C2026 (string too big)
+	char jsExtras[] = JSEXTRAS_1 JSEXTRAS_2 JSEXTRAS_3;
+	#undef JSEXTRAS_1
+	#undef JSEXTRAS_2
+	#undef JSEXTRAS_3
 
 	ILibDuktape_ModSearch_AddHandler_AlsoIncludeJS(ctx, jsExtras, sizeof(jsExtras) - 1);
 }

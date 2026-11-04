@@ -871,41 +871,25 @@ function monitorinfo()
             }
             else if(ret.display == null || ret.display === '')
             {
-                // We need to find $DISPLAY by looking at all the processes running on the same tty as the XServer instance for this user session
-                child = require('child_process').execFile('/bin/sh', ['sh']);
+                // We need to find $DISPLAY by looking at all the processes running on the same tty as the XServer instance for this user session.
+                // ps is called directly and filtered here, so no shell, grep or awk is needed and the tty and uid are matched exactly.
+                child = require('child_process').execFile('/bin/ps', ['ps', process.platform == 'freebsd' ? '-ax' : '-e', '-o', 'tty', '-o', 'pid', '-o', 'uid']);
                 child.stdout.str = '';
                 child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                child.stdin.write("ps -e -o tty -o pid -o user:9999 | grep " + ret.tty + " | grep " + uname + " | awk '{ print $2 }' \nexit\n");
                 child.waitExit();
 
+                // getEnvFromPid() reads /proc on Linux and uses procstat on FreeBSD, which has no procfs by default
                 var lines = child.stdout.str.split('\n');
-                var ps, psx, v, vs = 0;
                 for(var x in lines)
                 {
-                    if(lines[x].trim().length>0)
+                    var t = lines[x].trim().split(/\s+/);
+                    if (t.length == 3 && t[0] == ret.tty && t[2] == consoleuid)
                     {
-                        try
+                        var e = require('user-sessions').getEnvFromPid(t[1]);
+                        if (e.DISPLAY)
                         {
-                            ps = require('fs').readFileSync('/proc/' + lines[x].trim() + '/environ');
-                        }
-                        catch(pse)
-                        {
-                            continue;
-                        }
-                        vs = 0;
-                        for(psx=0;psx<ps.length;++psx)
-                        {
-                            if (ps[psx] == 0)
-                            {
-                                if (psx == 0) { continue; }
-                                v = ps.slice(vs, psx).toString().split('=');
-                                if (v[0] == 'DISPLAY')
-                                {
-                                    ret.display = v[1];
-                                    return (xinfo_xdm(ret, consoleuid));
-                                }
-                                vs = psx + 1;
-                            }
+                            ret.display = e.DISPLAY;
+                            return (xinfo_xdm(ret, consoleuid));
                         }
                     }
                 }

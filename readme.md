@@ -73,15 +73,9 @@ Here is a list of the possible keys that are currently supported by the agent. N
 Many of these values are used by developers and are not typically used in normal use.
 
 ## Special notes for BSD systems
-You'll need to mount procfs, which isn't mounted by default on FreeBSD. Add the following line to /etc/fstab
-```
-proc	/proc	procfs	rw	0	0
-```
-If you don't reboot, then you can manually mount with the command:
-```
-mount -t procfs proc /proc
-```
-In addition, it is recommended to install bash, which you can do with the following command:
+The agent does not need procfs anymore. It is not mounted by default on FreeBSD, and OpenBSD has none.
+
+It is recommended to install bash, which you can do with the following command:
 ```
 pkg install bash
 ```
