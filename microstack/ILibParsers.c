@@ -9969,11 +9969,11 @@ int ILibGetMillisecondTimeSpan(struct timeval *tv1, struct timeval *tv2)
 }
 
 
-long ILibGetTimeStamp()
+long long ILibGetTimeStamp()
 {
 	struct timeval tv;
 	gettimeofday(&tv, NULL);
-	return((tv.tv_sec * 1000) + (tv.tv_usec / 1000));
+	return((((long long)tv.tv_sec) * 1000) + (tv.tv_usec / 1000));
 }
 int ILibIsLittleEndian() { int v = 1; return (((char*)&v)[0] == 1 ? 1 : 0); }
 int ILibGetCurrentTimezoneOffset_Minutes()
