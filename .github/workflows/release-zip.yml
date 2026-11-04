@@ -1,0 +1,35 @@
+name: Zip release files
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-zip-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  zip:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Attach a zip of the agent files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        shell: bash
+        run: |
+          # The tag becomes the folder name inside the zip and in MeshCentral's agentbuilds folder.
+          [[ "$TAG" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]] || exit 1
+          gh release download "$TAG" --dir "$TAG" --pattern 'meshagent_*' --pattern 'Mesh*.exe'
+          zip -X -9 -r "agents-$TAG.zip" "$TAG"
+          gh release upload "$TAG" "agents-$TAG.zip" --clobber

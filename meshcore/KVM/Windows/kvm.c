@@ -922,6 +922,7 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	char *tmoBuffer;
 	long mouseMove[3] = {0, 0, 0};
 	int sentHideCursor = 0;
+	long long captureFailedSince = 0;
 
 	gPendingPackets = ILibQueue_Create();
 	KVM_InitMouseCursors(gPendingPackets);
@@ -1110,11 +1111,18 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 				ILibRemoteLogging_printf(gKVMRemoteLogging, ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "KVM [SLAVE]: get_desktop_buffer() failed");
 			}
 #endif
-			KVMDEBUG("get_desktop_buffer() failed, shutting down", (int)GetCurrentThreadId());
-			g_shutdown = 1;
+			// Capture fails while a remote session is disconnected or switching desktops, so retry for a while
+			// instead of exiting right away, the master would only start us again in the same session.
+			if (captureFailedSince == 0) { captureFailedSince = ILibGetUptime(); }
+			if (ILibGetUptime() - captureFailedSince > 5000)
+			{
+				KVMDEBUG("get_desktop_buffer() failed, shutting down", (int)GetCurrentThreadId());
+				g_shutdown = 1;
+			}
 		}
 		else
 		{
+			captureFailedSince = 0;
 			bmpInfo = get_bmp_info(TILE_WIDTH, TILE_HEIGHT);
 			for (row = 0; row < TILE_HEIGHT_COUNT; row++)
 			{

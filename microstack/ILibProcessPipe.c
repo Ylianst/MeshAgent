@@ -707,7 +707,8 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 		procHandle = GetCurrentProcess();
 		if (OpenProcessToken(procHandle, TOKEN_DUPLICATE, &token) == 0) { ILIBMARKPOSITION(2); return(NULL); }
 		if (DuplicateTokenEx(token, MAXIMUM_ALLOWED, 0, SecurityImpersonation, TokenPrimary, &userToken) == 0) { CloseHandle(token); ILIBMARKPOSITION(2); return(NULL); }
-		if (spawnType == ILibProcessPipe_SpawnTypes_SPECIFIED_USER) { sessionId = (DWORD)(uint64_t)sid; }
+		// The KVM alternates with WINLOGON when it restarts its child, which has to stay in the session the viewer picked. 0 and -1 still mean the console session.
+		if ((spawnType == ILibProcessPipe_SpawnTypes_SPECIFIED_USER) || ((spawnType == ILibProcessPipe_SpawnTypes_WINLOGON) && ((intptr_t)sid > 0))) { sessionId = (DWORD)(uint64_t)sid; }
 		if (SetTokenInformation(userToken, (TOKEN_INFORMATION_CLASS)TokenSessionId, &sessionId, sizeof(sessionId)) == 0) { CloseHandle(token); CloseHandle(userToken); ILIBMARKPOSITION(2); return(NULL); }
 		if (spawnType == ILibProcessPipe_SpawnTypes_WINLOGON) { info.lpDesktop = L"Winsta0\\Winlogon"; }
 	}

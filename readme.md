@@ -4,6 +4,7 @@
 
 [About](#about)  
 [Social Media](#social-media)  
+[Releases](#releases)\
 [MSH format](#msh-format)  
 [Self Test](#self-test)  
 [Feedback](#feedback)  
@@ -20,6 +21,11 @@ For more information, [visit MeshCentral.com](https://www.meshcentral.com).
 [X](https://x.com/MeshCentral)  
 [BlogSpot](https://meshcentral2.blogspot.com/)  
 [LinkedIn](https://www.linkedin.com/groups/13067101/)  
+
+## Releases
+
+See [Agent releases](docs/releases.md) for version tags, beta releases, release
+assets and migration of the binaries previously bundled with MeshCentral.
 
 ## MSH format
 The MeshAgent gets it's security and connection instructions from a .msh text file formatted with each line being a "key=value". The .msh file is generally created by the MeshCentral server and, for example, would look like this:
