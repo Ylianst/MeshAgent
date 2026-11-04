@@ -1,0 +1,17 @@
+[
+  "MeshService.exe",
+  "MeshService64.exe",
+  "MeshServiceARM64.exe",
+  "meshagent_x86",
+  "meshagent_x86-64",
+  "meshagent_x86_nokvm",
+  "meshagent_x86-64_nokvm",
+  "meshagent_alpine-x86-64",
+  "meshagent_arm64",
+  "meshagent_aarch64",
+  "meshagent_armhf",
+  "meshagent_freebsd_x86-64",
+  "meshagent_osx-arm-64",
+  "meshagent_osx-x86-64",
+  "meshagent_osx-universal-64"
+]

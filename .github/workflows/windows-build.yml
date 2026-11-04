@@ -4,7 +4,12 @@ run-name: Build Windows versions of MeshAgent
 
 on:
   push:
+    branches: ['**']
   pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   windows-build:
@@ -22,6 +27,6 @@ jobs:
     - name: Upload ${{ matrix.platform }} artifacts
       uses: actions/upload-artifact@v7
       with:
+        if-no-files-found: error
         name: meshagent-windows-${{ matrix.platform }}
-        path: Release/*.exe
-
+        path: ${{ github.ref_type == 'tag' && 'Release/MeshService*.exe' || 'Release/*.exe' }}
