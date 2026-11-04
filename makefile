@@ -32,7 +32,7 @@
 #
 # Special builds:
 #
-#   make linux ARCHID=6 WEBLOG=1 KVM=0      # Linux x86 64 bit, with Web Logging, and KVM disabled
+#   make linux ARCHID=6 DEBUG=1 WEBLOG=1 KVM=0  # Linux x86 64 bit, debug build with Web Logging, and KVM disabled
 #   make linux ARCHID=6 DEBUG=1             # Linux x86 64 bit, with debug symbols and automated crash handling
 #
 # Compiling lib-turbojpeg from source, using libjpeg-turbo 1.4.2 on linux
@@ -169,7 +169,7 @@
 #	SSL_EXPORTABLE_KEYS						1 = Export SSL Keys for debugging	=> Default is DO NOT export SSL keys
 #	TLS_WRITE_TRACE							1 = Enable TLS Send Tracing			=> Default is tracing disabled
 #	WatchDog								timeout for no activity check		=> Default is 120000 (2 minutes), 0 to leave it out
-#	WEBLOG									1 = Enable WebLogging Interface		=> Default is disabled
+#	WEBLOG									1 = Enable WebLogging Interface		=> Default is disabled, needs DEBUG=1
 #	WEBRTCDEBUG								1 = Enable WebRTC Instrumentation	=> Default is disabled
 #
 
@@ -237,7 +237,7 @@ MUSL_CC ?= $(shell gcc -dumpmachine 2>/dev/null | grep -q musl && echo gcc || ec
 INCDIRS = -I. -Iopenssl/include -Imicrostack -Imicroscript -Imeshcore -Imeshconsole
 
 # Compiler and linker flags
-CFLAGS ?= -std=gnu99 -g -Wall -D_POSIX -D_FILE_OFFSET_BITS=64 -DMICROSTACK_PROXY $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DDUK_USE_DEBUGGER_SUPPORT -DDUK_USE_INTERRUPT_COUNTER -DDUK_USE_DEBUGGER_INSPECT -DDUK_USE_DEBUGGER_PAUSE_UNCAUGHT
+CFLAGS ?= -std=gnu99 -g -Wall -D_POSIX -D_FILE_OFFSET_BITS=64 -DMICROSTACK_PROXY $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DDUK_USE_INTERRUPT_COUNTER
 LDFLAGS ?= -L. -lpthread -lutil -lm
 CEXTRA = -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -fstack-protector -fno-strict-aliasing
 LDEXTRA = 
@@ -564,6 +564,9 @@ endif
 
 
 ifeq ($(WEBLOG),1)
+ifneq ($(DEBUG),1)
+$(error WEBLOG=1 needs DEBUG=1)
+endif
 CFLAGS += -D_REMOTELOGGINGSERVER -D_REMOTELOGGING
 endif
 
@@ -662,6 +665,7 @@ endif
 ifeq ($(DEBUG),1)
 # Debug Build, include Symbols
 CFLAGS += -g -D_DEBUG 
+CFLAGS += -DDUK_USE_DEBUGGER_SUPPORT -DDUK_USE_DEBUGGER_INSPECT -DDUK_USE_DEBUGGER_PAUSE_UNCAUGHT
 STRIP = $(NOECHO) $(NOOP)
 SYMBOLCP = $(NOECHO) $(NOOP)
 else
