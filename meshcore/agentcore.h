@@ -187,6 +187,10 @@ typedef struct MeshAgentHostContainer
 	struct sockaddr_in6* proxyServer;
 	int proxyFailed;
 	void *controlChannelRequest;
+	char *controlChannelPartialBuffer;			// Reassembly buffer for control channel messages delivered in pieces (Partial/LastPartial)
+	size_t controlChannelPartialBufferLen;		// Number of bytes currently stored in controlChannelPartialBuffer
+	size_t controlChannelPartialBufferSize;		// Allocated size of controlChannelPartialBuffer
+	int controlChannelPartialOverflow;			// Set if the message being reassembled exceeded the maximum size, and is being discarded
 
 #ifdef WIN32
 	void *shCore;

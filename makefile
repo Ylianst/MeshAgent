@@ -168,7 +168,7 @@
 #	NOTURBOJPEG								1 = Don't use Turbo JPEG			=> Default is USE TurboJPEG
 #	SSL_EXPORTABLE_KEYS						1 = Export SSL Keys for debugging	=> Default is DO NOT export SSL keys
 #	TLS_WRITE_TRACE							1 = Enable TLS Send Tracing			=> Default is tracing disabled
-#	WatchDog								WatchDog timer interval.			=> Default is 6000000
+#	WatchDog								timeout for no activity check		=> Default is 120000 (2 minutes), 0 to leave it out
 #	WEBLOG									1 = Enable WebLogging Interface		=> Default is disabled
 #	WEBRTCDEBUG								1 = Enable WebRTC Instrumentation	=> Default is disabled
 #
@@ -242,7 +242,7 @@ LDFLAGS ?= -L. -lpthread -lutil -lm
 CEXTRA = -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -fstack-protector -fno-strict-aliasing
 LDEXTRA = 
 
-WatchDog = 6000000
+WatchDog = 120000
 KVMMaxTile = 0
 SKIPFLAGS = 0
 ifeq ($(AID), 7)

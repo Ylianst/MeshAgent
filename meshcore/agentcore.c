@@ -3686,6 +3686,46 @@ void MeshServer_ControlChannel_PongSink(ILibWebClient_StateObject WebStateObject
 	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost , ILibRemoteLogging_Flags_VerbosityLevel_1, "AgentCore/MeshServer_ControlChannel_IdleTimeout(): Received Pong");
 #endif
 }
+// Upper bound for a single control channel message that is reassembled from Partial/LastPartial pieces
+#define MESH_SERVER_MAX_REASSEMBLED_MESSAGE_SIZE (64 * 1024 * 1024)
+
+void MeshServer_ControlChannel_ResetPartial(MeshAgentHostContainer *agent)
+{
+	if (agent->controlChannelPartialBuffer != NULL) { free(agent->controlChannelPartialBuffer); }
+	agent->controlChannelPartialBuffer = NULL;
+	agent->controlChannelPartialBufferLen = 0;
+	agent->controlChannelPartialBufferSize = 0;
+}
+
+//
+// ILibWebClient reassembles fragmented WebSocket messages only up to the FragmentReassemblyMaxBufferSize specified
+// in MeshServer_ConnectEx(). Larger messages that arrive fragmented (for example when a reverse proxy such as IIS/ARR
+// re-frames the server's data) are handed up in pieces: zero or more ReceiveStatus_Partial pieces followed by a
+// ReceiveStatus_LastPartial piece. Collect these pieces, so the complete message can be processed once it is received.
+// Returns 0 on success, non-zero if the message exceeds the maximum supported size.
+//
+int MeshServer_ControlChannel_AppendPartial(MeshAgentHostContainer *agent, char *data, int dataLen)
+{
+	if (dataLen <= 0) { return(0); }
+	if ((size_t)dataLen > MESH_SERVER_MAX_REASSEMBLED_MESSAGE_SIZE - agent->controlChannelPartialBufferLen) { return(1); }
+
+	size_t needed = agent->controlChannelPartialBufferLen + (size_t)dataLen;
+	if (needed > agent->controlChannelPartialBufferSize)
+	{
+		size_t newSize = agent->controlChannelPartialBufferSize == 0 ? 131072 : agent->controlChannelPartialBufferSize;
+		while (newSize < needed) { newSize *= 2; }
+		if (newSize > MESH_SERVER_MAX_REASSEMBLED_MESSAGE_SIZE) { newSize = MESH_SERVER_MAX_REASSEMBLED_MESSAGE_SIZE; }
+
+		char *tmp = (char*)realloc(agent->controlChannelPartialBuffer, newSize);
+		if (tmp == NULL) { ILIBCRITICALEXIT(254); }
+		agent->controlChannelPartialBuffer = tmp;
+		agent->controlChannelPartialBufferSize = newSize;
+	}
+	memcpy_s(agent->controlChannelPartialBuffer + agent->controlChannelPartialBufferLen, agent->controlChannelPartialBufferSize - agent->controlChannelPartialBufferLen, data, (size_t)dataLen);
+	agent->controlChannelPartialBufferLen = needed;
+	return(0);
+}
+
 void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int InterruptFlag, struct packetheader *header, char *bodyBuffer, int *beginPointer, int endPointer, ILibWebClient_ReceiveStatus recvStatus, void *user1, void *user2, int *PAUSE)
 {
 	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)user1;
@@ -3702,10 +3742,48 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 	{
 		case ILibWebClient_ReceiveStatus_Partial:
 		case ILibWebClient_ReceiveStatus_LastPartial:
-			*beginPointer = endPointer; // ToDo: Buffer this data and send it up
+			// This is a piece of a message that was too large to be reassembled by ILibWebClient, so we need to buffer
+			// the pieces, and process the message once the last piece is received.
+			// Note: Just like ReceiveStatus_MoreDataToBeReceived, the data starts at bodyBuffer and is endPointer bytes long.
+			if (header == NULL || header->StatusCode != 101)
+			{
+				MeshServer_ControlChannel_ResetPartial(agent);
+				agent->controlChannelPartialOverflow = 0;
+				break;
+			}
+			if (agent->controlChannelPartialOverflow == 0 && MeshServer_ControlChannel_AppendPartial(agent, bodyBuffer, endPointer) != 0)
+			{
+				// Message is too large, discard everything until the last piece of this message is received
+				printf("Control Channel message exceeds maximum size of %d bytes, discarding...\n", MESH_SERVER_MAX_REASSEMBLED_MESSAGE_SIZE);
+				ILIBLOGMESSAGEX("Control Channel message exceeds maximum size of %d bytes, discarding...", MESH_SERVER_MAX_REASSEMBLED_MESSAGE_SIZE);
+				MeshServer_ControlChannel_ResetPartial(agent);
+				agent->controlChannelPartialOverflow = 1;
+			}
+			if (agent->controlChannelDebug != 0)
+			{
+				printf("Control Channel received %s piece of %d bytes (%llu bytes buffered)\n", recvStatus == ILibWebClient_ReceiveStatus_Partial ? "partial" : "last", endPointer, (unsigned long long)agent->controlChannelPartialBufferLen);
+				ILIBLOGMESSAGEX("Control Channel received %s piece of %d bytes (%llu bytes buffered)", recvStatus == ILibWebClient_ReceiveStatus_Partial ? "partial" : "last", endPointer, (unsigned long long)agent->controlChannelPartialBufferLen);
+			}
+			if (recvStatus == ILibWebClient_ReceiveStatus_LastPartial)
+			{
+				// Detach the reassembled message before processing it, in case processing the command causes re-entrancy (ie: disconnect)
+				char *message = agent->controlChannelPartialBuffer;
+				size_t messageLen = agent->controlChannelPartialBufferLen;
+				agent->controlChannelPartialBuffer = NULL;
+				agent->controlChannelPartialBufferLen = 0;
+				agent->controlChannelPartialBufferSize = 0;
+				agent->controlChannelPartialOverflow = 0;
+
+				// Process Mesh Agent commands
+				if (message != NULL && messageLen >= sizeof(uint16_t)) { MeshServer_ProcessCommand(WebStateObject, agent, message, (int)messageLen); }
+				if (message != NULL) { free(message); }
+			}
+			*beginPointer = endPointer;
 			break;
 		case ILibWebClient_ReceiveStatus_Connection_Established: // New connection established.
 		{
+			MeshServer_ControlChannel_ResetPartial(agent);
+			agent->controlChannelPartialOverflow = 0;
 			if (agent->controlChannelDebug != 0)
 			{
 				printf("Control Channel Connection Established [%d]...\n", ILibWebClient_GetDescriptorValue_FromStateObject(WebStateObject));
@@ -3861,6 +3939,8 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 			agent->serverAuthState = 0;
 			agent->controlChannel = NULL; // Set the agent MeshCentral server control channel
 			agent->serverConnectionState = 0;
+			MeshServer_ControlChannel_ResetPartial(agent); // Discard any partially received message
+			agent->controlChannelPartialOverflow = 0;
 			break;
 		case ILibWebClient_ReceiveStatus_MoreDataToBeReceived:	// Data received			
 			if (header->StatusCode == 101)
@@ -3895,7 +3975,9 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 		return;
 	}
 
-	if (recvStatus != ILibWebClient_ReceiveStatus_Partial) { *beginPointer = endPointer; } // TODO: Confirm with Bryan that this is how partial data works
+	// All data handed to us has been consumed. Pieces of messages that are delivered as Partial/LastPartial
+	// are buffered in agent->controlChannelPartialBuffer above, so there is nothing to leave in the receive buffer.
+	*beginPointer = endPointer;
 }
 #ifdef MICROSTACK_PROXY
 void MeshServer_ConnectEx_Enumerate_Contexts(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
@@ -6570,6 +6652,7 @@ void MeshAgent_Destroy(MeshAgentHostContainer* agent)
 	if (agent->meshServiceName != NULL) { ILibMemory_Free(agent->meshServiceName); agent->meshServiceName = NULL; }
 	if (agent->displayName != NULL) { ILibMemory_Free(agent->displayName); agent->displayName = NULL; }
 	if (agent->execparams != NULL) { ILibMemory_Free(agent->execparams); agent->execparams = NULL; }
+	MeshServer_ControlChannel_ResetPartial(agent);
 #ifdef WIN32
 	if (agent->shCore != NULL)
 	{

@@ -13,100 +13,117 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Check out repository code
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7
       - name: Install Packages
         run: |
           sudo dpkg --add-architecture i386 &&
           sudo apt clean all && sudo apt update && 
-          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg62-dev build-essential musl-tools &&
+          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg62-dev build-essential gcc-multilib musl-tools &&
           sudo apt-get install -y linux-libc-dev:i386 libc6-dev-i386 libjpeg62-dev:i386 &&
-          sudo apt-get install -y libc6-armel-cross libc6-dev-armel-cross binutils-arm-linux-gnueabi libncurses5-dev gcc-arm-linux-gnueabihf &&
           sudo apt-get install -y libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev
+      - name: Restore the Bootlin x86 toolchains
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ runner.temp }}/x86-i686--glibc--stable
+            ${{ runner.temp }}/x86-64-core-i7--glibc--stable
+          key: bootlin-x86-2017.05-toolchains-1-1
+      # The runner's gcc and binutils compile, and the Bootlin sysroot supplies the glibc 2.24 headers and libraries, so the floor stays at 2.24.
+      # -B and -L are needed next to --sysroot, because --sysroot alone linked the runner's own glibc (floor 2.34). -march=x86-64 because the sysroot comes from the corei7 toolchain.
+      # -idirafter keeps the runner's headers (X11, DRM, libjpeg) behind the sysroot's own.
+      - name: Install Bootlin x86 glibc 2.24 toolchains
+        run: |
+          { [ -d "$RUNNER_TEMP/x86-i686--glibc--stable" ] || curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/x86-i686/tarballs/x86-i686--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP"; } &&
+          { [ -d "$RUNNER_TEMP/x86-64-core-i7--glibc--stable" ] || curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/x86-64-core-i7/tarballs/x86-64-core-i7--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP"; } &&
+          S32="$RUNNER_TEMP/x86-i686--glibc--stable/i686-buildroot-linux-gnu/sysroot" &&
+          S64="$RUNNER_TEMP/x86-64-core-i7--glibc--stable/x86_64-buildroot-linux-gnu/sysroot" &&
+          echo "SYSROOT_CC32=gcc -m32 -mtune=generic --sysroot=$S32 -B$S32/usr/lib -L$S32/lib -L$S32/usr/lib -idirafter /usr/include/i386-linux-gnu -idirafter /usr/include" >> "$GITHUB_ENV" &&
+          echo "SYSROOT_CC64=gcc -march=x86-64 -mtune=generic --sysroot=$S64 -B$S64/usr/lib -L$S64/lib -L$S64/usr/lib -idirafter /usr/include/x86_64-linux-gnu -idirafter /usr/include" >> "$GITHUB_ENV"
       - name: Build 32 Bit Linux
-        run: make -j4 linux ARCHID=5 && make clean
+        run: make -s -j4 linux ARCHID=5 CC="$SYSROOT_CC32" && make clean
       - name: Build 64 Bit Linux
-        run: make -j4 linux ARCHID=6 && make clean
+        run: make -s -j4 linux ARCHID=6 CC="$SYSROOT_CC64" && make clean
       - name: Build 32 Bit NOKVM Linux
-        run: make -j4 linux ARCHID=19 && make clean
+        run: make -s -j4 linux ARCHID=19 CC="$SYSROOT_CC32" && make clean
       - name: Build 64 Bit NOKVM Linux
-        run: make -j4 linux ARCHID=20 && make clean
+        run: make -s -j4 linux ARCHID=20 CC="$SYSROOT_CC64" && make clean
       - name: Build 64 Bit Alpine Linux
-        run: make -j4 linux ARCHID=33 && make clean
+        run: make -s -j4 linux ARCHID=33 && make clean
+      - name: Check the glibc floor
+        run: |
+          for f in meshagent_x86 meshagent_x86-64 meshagent_x86_nokvm meshagent_x86-64_nokvm; do
+            v=$(objdump -T "$f" | grep -o 'GLIBC_2\.[0-9]*' | sort -uV | tail -1)
+            echo "$f floor $v, gcc $(gcc -dumpfullversion)"
+            [ "$(printf '%s\nGLIBC_2.24\n' "$v" | sort -V | tail -1)" = GLIBC_2.24 ] || { echo "$f needs $v, above GLIBC_2.24"; exit 1; }
+          done
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7
         with:
           if-no-files-found: error
           name: meshagent-binaries-x86
           path: ${{ github.workspace }}/meshagent_*
 
   linux-build-arm:
-    runs-on: ubuntu-24.04-arm
+    name: arm glibc (ARCHID=26, 32 and 25)
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository code
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7
       - name: Install Packages
         run: |
           sudo apt clean all && sudo apt update &&
-          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev build-essential
-      - name: Build ARM64 Linux
-        run: make -j4 linux ARCHID=26 && make clean
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v7.0.1
+          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
+      - name: Restore the Bootlin ARM toolchains
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ runner.temp }}/aarch64--glibc--stable
+            ${{ runner.temp }}/armv6-eabihf--glibc--stable
+          key: bootlin-arm-2017.05-toolchains-1-1
+      # Same idea as the x86 job: the cross gcc from apt, with glibc 2.24 headers and libraries from the Bootlin sysroots.
+      # -isystem puts the sysroot headers first, because apt's cross gcc otherwise finds its own newer glibc headers and the link fails on __isoc23_sscanf, fcntl64 and __gmtime64_r.
+      # The strip directories exist because the makefile appends the file name to STRIP, so a STRIP= on the make command line breaks the strip step.
+      - name: Install Bootlin aarch64 and armv6 hard-float glibc 2.24 toolchains
+        run: |
+          { [ -d "$RUNNER_TEMP/aarch64--glibc--stable" ] || curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP"; } &&
+          { [ -d "$RUNNER_TEMP/armv6-eabihf--glibc--stable" ] || curl -fsSL https://toolchains.bootlin.com/downloads/releases/toolchains/armv6-eabihf/tarballs/armv6-eabihf--glibc--stable-2017.05-toolchains-1-1.tar.bz2 | tar -xj -C "$RUNNER_TEMP"; } &&
+          SA="$RUNNER_TEMP/aarch64--glibc--stable/aarch64-buildroot-linux-gnu/sysroot" &&
+          SH="$RUNNER_TEMP/armv6-eabihf--glibc--stable/arm-buildroot-linux-gnueabihf/sysroot" &&
+          mkdir -p "$RUNNER_TEMP/strip-a64" "$RUNNER_TEMP/strip-arm" &&
+          ln -sf "$(command -v aarch64-linux-gnu-strip)" "$RUNNER_TEMP/strip-a64/strip" &&
+          ln -sf "$(command -v arm-linux-gnueabihf-strip)" "$RUNNER_TEMP/strip-arm/strip" &&
+          echo "SYSROOT_CC_AARCH64=aarch64-linux-gnu-gcc --sysroot=$SA -B$SA/usr/lib -L$SA/lib -L$SA/usr/lib -isystem $SA/usr/include -idirafter $GITHUB_WORKSPACE/lib-jpeg-turbo/includes -idirafter /usr/include" >> "$GITHUB_ENV" &&
+          echo "SYSROOT_CC_ARMV6=arm-linux-gnueabihf-gcc -marm -mcpu=arm1176jzf-s -mfpu=vfp -mfloat-abi=hard --sysroot=$SH -B$SH/usr/lib -L$SH/lib -L$SH/usr/lib -isystem $SH/usr/include -idirafter $GITHUB_WORKSPACE/lib-jpeg-turbo/includes -idirafter /usr/include" >> "$GITHUB_ENV"
+      - name: Build ARM64 Linux (ARCHID=26)
+        run: PATH="$RUNNER_TEMP/strip-a64:$PATH" make -s -j4 linux ARCHID=26 CC="$SYSROOT_CC_AARCH64" && make clean
+      - name: Build aarch64 (ARCHID=32)
+        run: PATH="$RUNNER_TEMP/strip-a64:$PATH" make -s -j4 linux ARCHID=32 CC="$SYSROOT_CC_AARCH64" && make clean
+      # 32-bit Raspberry Pi. Bootlin's armv6-eabihf toolchain defaults to -mcpu=arm1176jzf-s with hard-float VFP,
+      # so this armhf binary runs on every 32-bit Pi, Zero/1 (armv6) through 2/3/4 (armv7).
+      - name: Build armhf (ARCHID=25)
+        run: PATH="$RUNNER_TEMP/strip-arm:$PATH" make -s -j4 linux ARCHID=25 CC="$SYSROOT_CC_ARMV6" && make clean
+      - name: Check the glibc floor
+        run: |
+          for f in meshagent_arm64 meshagent_aarch64 meshagent_armhf; do
+            case $f in meshagent_armhf) od=arm-linux-gnueabihf-objdump;; *) od=aarch64-linux-gnu-objdump;; esac
+            v=$($od -T "$f" | grep -o 'GLIBC_2\.[0-9]*' | sort -uV | tail -1)
+            echo "$f floor $v, gcc $(aarch64-linux-gnu-gcc -dumpfullversion)"
+            [ "$(printf '%s\nGLIBC_2.24\n' "$v" | sort -V | tail -1)" = GLIBC_2.24 ] || { echo "$f needs $v, above GLIBC_2.24"; exit 1; }
+          done
+      - name: Upload ARM64 Artifacts
+        uses: actions/upload-artifact@v7
         with:
           if-no-files-found: error
           name: meshagent-binaries-arm
-          path: ${{ github.workspace }}/meshagent_*
-
-  linux-build-aarch64-glibc:
-    name: aarch64 glibc (ARCHID=32, meshagent_aarch64)
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - name: Check out repository code
-        uses: actions/checkout@v7.0.0
-      # ARCHID=32 is MeshCentral's distributed 64-bit ARM slot (meshagent_aarch64); ARCHID=26
-      # above (meshagent_arm64) is the legacy twin the server marks "replaced by ARCHID 32".
-      # The makefile now gates the Bootlin cross-toolchain behind CROSS=1, so a plain build uses
-      # the container's native gcc and strip (an arm64 container, so the binary is aarch64).
-      # bookworm (glibc 2.36) runs on Pi OS Bookworm and Trixie; Debian 11 bullseye is EOL and 404s.
-      - name: Build aarch64 (ARCHID=32) in an older-glibc container
-        run: |
-          docker run --rm -v "${{ github.workspace }}":/src -w /src debian:bookworm bash -c '
-            apt-get update &&
-            apt-get install -y git build-essential pkg-config libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev &&
-            git config --global --add safe.directory /src &&
-            make -j4 linux ARCHID=32
-          '
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v7.0.1
+          path: ${{ github.workspace }}/meshagent_arm64
+      - name: Upload aarch64 Artifacts
+        uses: actions/upload-artifact@v7
         with:
           if-no-files-found: error
           name: meshagent-binaries-aarch64
           path: ${{ github.workspace }}/meshagent_aarch64
-
-  linux-build-armhf-glibc:
-    name: armhf glibc (ARCHID=25, meshagent_armhf, armv6)
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Check out repository code
-        uses: actions/checkout@v7.0.0
-      - name: Enable 32-bit ARM emulation
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm
-      # 32-bit Raspberry Pi (meshagent_armhf). Built armv6 hardfloat in a Raspbian container
-      # under QEMU so the one armhf binary runs on every 32-bit Pi, Zero/1 (armv6) through
-      # 2/3/4 (armv7); a Debian armhf image would be armv7 and skip Pi Zero/1. ARCHID=25
-      # defaults to native gcc when CROSS is unset. bullseye keeps the glibc floor at 2.31.
-      - name: Build armhf (ARCHID=25) in an armv6 container
-        run: |
-          docker run --rm --platform linux/arm/v6 --entrypoint /bin/bash -v "${{ github.workspace }}":/src -w /src balenalib/rpi-raspbian:bullseye -c '
-            apt-get update &&
-            apt-get install -y git build-essential pkg-config libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev &&
-            git config --global --add safe.directory /src &&
-            make -j4 linux ARCHID=25
-          '
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v7.0.1
+      - name: Upload armhf Artifacts
+        uses: actions/upload-artifact@v7
         with:
           if-no-files-found: error
           name: meshagent-binaries-armhf

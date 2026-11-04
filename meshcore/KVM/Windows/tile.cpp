@@ -506,7 +506,7 @@ int get_desktop_buffer(void **buffer, long long *bufferSize, long* mouseMove)
 		{
 			CURSORINFO info = { 0 };
 			BITMAP bm;
-			ICONINFO ii;
+			ICONINFO ii = { 0 };
 			info.cbSize = sizeof(info);
 			GetCursorInfo(&info);
 			GetIconInfo(info.hCursor, &ii);
@@ -527,10 +527,13 @@ int get_desktop_buffer(void **buffer, long long *bufferSize, long* mouseMove)
 						SelectObject(hdcMem, hbmold);
 					}
 					if (hbmCanvas != NULL) { DeleteObject(hbmCanvas); }
-					if (hdcMem != NULL) { ReleaseDC(NULL, hdcMem); }
+					if (hdcMem != NULL) { DeleteDC(hdcMem); }
 					if (hdcScreen != NULL) { ReleaseDC(NULL, hdcScreen); }
 				}
 			}
+			// GetIconInfo returns copies of the cursor bitmaps that we own
+			if (ii.hbmMask != NULL) { DeleteObject(ii.hbmMask); }
+			if (ii.hbmColor != NULL) { DeleteObject(ii.hbmColor); }
 		}
 	}
 	else

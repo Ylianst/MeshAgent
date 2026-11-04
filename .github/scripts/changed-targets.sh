@@ -13,7 +13,7 @@ COMMON=(microstack/ microscript/ meshconsole/ meshcore/agentcore meshcore/meshin
 # What each group needs on top of COMMON. LINUX_KVM is only what the KVM builds need in addition to LINUX.
 LINUX=(makefile openssl/libstatic/linux/ .github/workflows/linux-build.yml)
 LINUX_KVM=(meshcore/KVM/Linux/ lib-jpeg-turbo/linux/ lib-jpeg-turbo/includes/)
-FREEBSD=(makefile openssl/libstatic/bsd/freebsd_x86-64/ .github/workflows/freebsd-build.yml)
+FREEBSD=(makefile openssl/libstatic/bsd/freebsd_x86-64/ .github/workflows/freebsd-build.yml .github/scripts/fetch-freebsd-sysroot.sh .github/scripts/freebsd-)
 OPENBSD=(makefile openssl/1.1.1w/include/ openssl/1.1.1w/openbsd-x86_64/ .github/workflows/openbsd-build.yml .github/scripts/fetch-openbsd-sysroot.sh .github/scripts/openbsd-)
 MAC=(makefile openssl/libstatic/macos/ lib-jpeg-turbo/macos/ lib-jpeg-turbo/includes/ meshcore/KVM/MacOS/ meshcore/KVM/Linux/linux_compression .github/workflows/mac-build.yml)
 WINDOWS=(MeshAgent-2022.sln meshservice/ meshcore/KVM/Windows/ meshcore/wincrypto openssl/libstatic/lib .github/workflows/windows-build.yml)
