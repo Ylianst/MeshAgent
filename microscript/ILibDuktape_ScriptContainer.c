@@ -2063,7 +2063,7 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "hostname", ILibDuktape_ScriptContainer_OS_hostname, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "tmpdir", ILibDuktape_tmpdir, 0);
 
-	char jsExtras[] = "exports.getPrimaryDnsSuffix = function getPrimaryDnsSuffix()\
+	#define JSEXTRAS_1 "exports.getPrimaryDnsSuffix = function getPrimaryDnsSuffix()\
 	{\
 		if (process.platform == 'win32')\
 		{\
@@ -2127,8 +2127,8 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 			catch(ee)\
 			{return(0);}\
 		})() });\
-	}\
-	exports.getArpCache = function getArpCache()\
+	}"
+	#define JSEXTRAS_2 "\texports.getArpCache = function getArpCache()\
 	{\
 		if(process.platform == 'darwin')\
 		{\
@@ -2289,8 +2289,8 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 			}\
 		}\
 		return (retVal);\
-	};\
-	if(process.platform == 'linux')\
+	};"
+	#define JSEXTRAS_3 "\tif(process.platform == 'linux')\
 	{\
 		exports.getDefaultGateways = function getDefaultGateways()\
 		{\
@@ -2616,7 +2616,13 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 				break;\
 		}\
 	};\
-	exports.dns = require('util-dns');";
+	exports.dns = require('util-dns');"
+
+	// Split in three because MSVC refuses a string literal longer than 16380 bytes with C2026 (string too big)
+	char jsExtras[] = JSEXTRAS_1 JSEXTRAS_2 JSEXTRAS_3;
+	#undef JSEXTRAS_1
+	#undef JSEXTRAS_2
+	#undef JSEXTRAS_3
 
 	ILibDuktape_ModSearch_AddHandler_AlsoIncludeJS(ctx, jsExtras, sizeof(jsExtras) - 1);
 }
