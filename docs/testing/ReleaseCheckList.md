@@ -14,12 +14,12 @@ On Windows, simply load the MeshAgent solution file, and build the MeshService p
 For other platforms, refer to the [Makefile](https://github.com/Ylianst/MeshAgent/blob/master/makefile) which has detailed notes on how to compile for various different platforms.
 As an example, to compile for Linux x86_64, you can run the following command:
 ```bash
-make linux ARCHID=6 WEBLOG=1
+make linux ARCHID=6
 ```
 or for macOS Apple Silicon and Intel Silicon with the following commands:
 ```bash
-make macos ARCHID=29 WEBLOG=1
-make macos ARCHID=16 WEBLOG=1
+make macos ARCHID=29
+make macos ARCHID=16
 ```
 
 ### Compiling OpenSSL
