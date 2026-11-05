@@ -430,11 +430,10 @@ int ILibDispatchSemaphore_timedwait(sem_t* s, struct timespec *ts)
 	struct timeval tv;
 	gettimeofday(&tv, NULL);
 
-	uint64_t seconds = ts->tv_sec - tv.tv_sec;
-	uint64_t ns = ts->tv_nsec - (tv.tv_usec * 1000);
-	uint64_t delta = ns + (seconds * 1000000000);
+	int64_t delta = (((int64_t)ts->tv_sec - (int64_t)tv.tv_sec) * 1000000000) + ((int64_t)ts->tv_nsec - ((int64_t)tv.tv_usec * 1000));
+	if (delta < 0) { delta = 0; }
 
-	return((int)dispatch_semaphore_wait(((dispatch_semaphore_t*)s)[0], dispatch_time(DISPATCH_TIME_NOW, (int64_t)delta)));
+	return((int)dispatch_semaphore_wait(((dispatch_semaphore_t*)s)[0], dispatch_time(DISPATCH_TIME_NOW, delta)));
 }
 void ILibDispatchSemaphore_post(sem_t* s)
 {
