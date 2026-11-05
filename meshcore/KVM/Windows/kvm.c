@@ -40,6 +40,12 @@ extern void KVM_WriteLog(ILibKVM_WriteHandler writeHandler, void *user, char *fo
 
 // #define KVMDEBUGENABLED 1
 ILibProcessPipe_SpawnTypes gProcessSpawnType = ILibProcessPipe_SpawnTypes_USER;
+// Console mode ("connect"/"run", used by quick support): the agent is not
+// SYSTEM, so the KVM child process is spawned as the current user and never
+// switches to WINLOGON. Capturing in a child process, like the service does,
+// instead of a thread inside the agent.
+int gKvmSpawnAsSelf = 0;
+void kvm_set_spawn_as_self(int value) { gKvmSpawnAsSelf = value; }
 int gProcessTSID = -1;
 extern int gRemoteMouseRenderDefault;
 int gRemoteMouseMoved = 0;
@@ -1282,7 +1288,11 @@ void kvm_relay_ExitHandler(ILibProcessPipe_Process sender, int exitCode, void *u
 
 	if (g_restartcount < 4 && g_shutdown == 0)
 	{
-		kvm_relay_restart(1, pipeMgr, exePath, writeHandler, reserved);
+		if (kvm_relay_restart(1, pipeMgr, exePath, writeHandler, reserved) == 0)
+		{
+			// the child could not be started again: end the session instead of leaving it without a capture process
+			writeHandler(NULL, 0, reserved);
+		}
 	}
 	else
 	{
@@ -1383,9 +1393,19 @@ int kvm_relay_restart(int paused, void *pipeMgr, char *exePath, ILibKVM_WriteHan
 		gProcessSpawnType = ILibProcessPipe_SpawnTypes_USER;
 	}
 
-	ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "KVM [Master]: Spawning Slave as %s", gProcessSpawnType == ILibProcessPipe_SpawnTypes_USER ? "USER" : "WIN_LOGON");
+	if (gKvmSpawnAsSelf) { gProcessSpawnType = ILibProcessPipe_SpawnTypes_DEFAULT; }
+	ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "KVM [Master]: Spawning Slave as %s", gProcessSpawnType == ILibProcessPipe_SpawnTypes_DEFAULT ? "SELF" : (gProcessSpawnType == ILibProcessPipe_SpawnTypes_USER ? "USER" : "WIN_LOGON"));
 	gChildProcess = ILibProcessPipe_Manager_SpawnProcessEx3(pipeMgr, exePath, paused == 0 ? parms0 : parms1, gProcessSpawnType, (void *)(ULONG_PTR)gProcessTSID, 0);
-	gProcessSpawnType = (gProcessSpawnType == ILibProcessPipe_SpawnTypes_SPECIFIED_USER || gProcessSpawnType == ILibProcessPipe_SpawnTypes_USER) ? ILibProcessPipe_SpawnTypes_WINLOGON : (gProcessTSID < 0 ? ILibProcessPipe_SpawnTypes_USER : ILibProcessPipe_SpawnTypes_SPECIFIED_USER);
+	if (gChildProcess == NULL)
+	{
+		KVMDEBUG("kvm_relay_restart() could not launch child process", 0);
+		free(user);
+		return 0;
+	}
+	if (!gKvmSpawnAsSelf)
+	{
+		gProcessSpawnType = (gProcessSpawnType == ILibProcessPipe_SpawnTypes_SPECIFIED_USER || gProcessSpawnType == ILibProcessPipe_SpawnTypes_USER) ? ILibProcessPipe_SpawnTypes_WINLOGON : (gProcessTSID < 0 ? ILibProcessPipe_SpawnTypes_USER : ILibProcessPipe_SpawnTypes_SPECIFIED_USER);
+	}
 
 	g_slavekvm = ILibProcessPipe_Process_GetPID(gChildProcess);
 	char tmp[255];
@@ -1416,15 +1436,17 @@ int kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler wr
 			return 0;
 		}
 		g_restartcount = 0;
-		gProcessSpawnType = ILibProcessPipe_SpawnTypes_SPECIFIED_USER;
+		gProcessSpawnType = gKvmSpawnAsSelf ? ILibProcessPipe_SpawnTypes_DEFAULT : ILibProcessPipe_SpawnTypes_SPECIFIED_USER;
 		gProcessTSID = tsid;
 		KVMDEBUG("kvm_relay_setup() session starting", 0);
-		return kvm_relay_restart(1, processPipeMgr, exePath, writeHandler, reserved);
+		if (kvm_relay_restart(1, processPipeMgr, exePath, writeHandler, reserved) != 0) { return 1; }
+		if (!gKvmSpawnAsSelf) { return 0; }
+		// console mode and the child could not be started: capture in a thread
+		KVMDEBUG("kvm_relay_setup() falling back to in-process capture", 0);
 #else
 		return (0);
 #endif
 	}
-	else
 	{
 		// if (kvmthread != NULL && g_shutdown == 0) return 0;
 		void **parms = (void **)ILibMemory_Allocate((2 * sizeof(void *)) + sizeof(int), 0, NULL, NULL);

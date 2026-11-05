@@ -1362,7 +1362,9 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 	// Setup Remote Desktop
 #ifdef WIN32
 	#ifdef _WINSERVICE
-		kvm_relay_setup(agent->exePath, agent->runningAsConsole ? NULL : agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, TSID);
+		// console mode ("connect" / "run"): also capture in a child process, spawned as the current user
+		kvm_set_spawn_as_self(agent->runningAsConsole ? 1 : 0);
+		kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, TSID);
 	#else
 		kvm_relay_setup(agent->exePath, NULL, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, TSID);
 	#endif	
