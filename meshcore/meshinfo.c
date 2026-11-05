@@ -188,7 +188,7 @@ int __fastcall utilx_readfile2(char* filename, char** data)
 	*data = NULL;
 	if (filename == NULL) return 0;
 
-	pFile = fopen(filename, "rb");
+	pFile = ILibFile_Open(filename, "rb");
 	if (pFile != NULL)
 	{
 		*data = malloc(1024);
