@@ -43,6 +43,7 @@ char __agentExecPath[1024] = { 0 };
 #include <bsm/audit.h>
 #include <bsm/audit_session.h>
 #include <unistd.h>
+#include <CoreGraphics/CoreGraphics.h>
 #endif
 
 
@@ -280,7 +281,16 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		return(0);
 	}
 #if defined(_LINKVM) && defined(__APPLE__)
-	if (argc > 1 && strcasecmp(argv[1], "-kvm0") == 0)
+	if (argc > 1 && strcasecmp(argv[1], "-kvmscreencheck") == 0)
+	{
+		// Screen Recording check on behalf of the KVM helper, see
+		// kvm_screencapture_granted() in mac_kvm.c. Runs in a new process
+		// because CGPreflightScreenCaptureAccess() caches its result per
+		// process. Exit code 0 = granted, 1 = not granted.
+		if (__builtin_available(macOS 10.15, *)) { return(CGPreflightScreenCaptureAccess() ? 0 : 1); }
+		return(0);
+	}
+	else if (argc > 1 && strcasecmp(argv[1], "-kvm0") == 0)
 	{
 		// Tahoe audit-session join: pre-exec in SpawnProcessEx4 (as
 		// root) is what discovers and joins the user's gui session;

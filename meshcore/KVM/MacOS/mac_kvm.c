@@ -36,6 +36,12 @@ limitations under the License.
 #include <pwd.h>
 #include <unistd.h>
 #include <errno.h>
+#include <time.h>
+#include <limits.h>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <crt_externs.h>
+#include <mach-o/dyld.h>
 
 // Some macOS SDKs (notably older Xcode / SDK 10.x) did not export
 // LOCAL_PEERPID in <sys/un.h> even though the kernel supports it.
@@ -355,6 +361,87 @@ int kvm_init()
 
 // void CheckDesktopSwitch(int checkres) { return; }
 
+// Permission prompt ordering (Screen Recording before Accessibility)
+//
+// tccd hands both prompts to universalAccessAuthWarn, which displays only one
+// alert at a time; a request arriving while an alert is on screen is dropped.
+// Without ordering, the first remote input event makes CGEventPost() request
+// kTCCServicePostEvent and the first frame grab requests kTCCServiceScreenCapture
+// about 10 ms later. Only the Accessibility alert appears, and the viewer shows
+// the wallpaper and the menu bar until the session is restarted.
+//
+// The helper therefore requests Screen Recording when a session starts and
+// drops keyboard and mouse input until it has been granted, so the
+// Accessibility prompt is only triggered by the first input event after that.
+// The grant takes effect for capturing without restarting the helper.
+//
+// CGPreflightScreenCaptureAccess() caches its result for the lifetime of the
+// process, so this long-running helper would never see a grant made while it
+// runs. The check is done in a freshly spawned "meshagent -kvmscreencheck"
+// instead (see meshconsole/main.c).
+//
+// If Screen Recording is declined, input is released after
+// KVM_SCREENCAPTURE_GATE_SECONDS so the session can still be used without video.
+#define KVM_SCREENCAPTURE_GATE_SECONDS		180
+#define KVM_SCREENCAPTURE_RECHECK_SECONDS	2
+
+// Written by kvm_screencapture_request() before kvm_mainloopinput() is started
+// (pthread_create), afterwards only by the input thread.
+static int g_screenCaptureGranted = 0;
+static time_t g_screenCaptureCheckedAt = 0;
+static time_t g_screenCaptureRequestedAt = 0;
+
+// Returns 1 if Screen Recording is granted, as seen by a new process.
+static int kvm_screencapture_granted(void)
+{
+	char path[PATH_MAX];
+	uint32_t pathSize = sizeof(path);
+	char *args[] = { path, "-kvmscreencheck", NULL };
+	pid_t pid;
+	int status = 0;
+
+	if (_NSGetExecutablePath(path, &pathSize) != 0) { return 0; }
+	if (posix_spawn(&pid, path, NULL, NULL, args, *_NSGetEnviron()) != 0) { return 0; }
+	while (waitpid(pid, &status, 0) < 0)
+	{
+		if (errno != EINTR) { return 0; }
+	}
+	return (WIFEXITED(status) && WEXITSTATUS(status) == 0) ? 1 : 0;
+}
+
+// Called when a viewer connects. Requests Screen Recording if it is missing.
+static void kvm_screencapture_request(void)
+{
+	if (__builtin_available(macOS 10.15, *))
+	{
+		g_screenCaptureGranted = kvm_screencapture_granted();
+		g_screenCaptureCheckedAt = g_screenCaptureRequestedAt = time(NULL);
+		if (!g_screenCaptureGranted) { CGRequestScreenCaptureAccess(); }
+	}
+	else
+	{
+		g_screenCaptureGranted = 1;
+	}
+}
+
+// Returns 1 if keyboard and mouse input may be posted.
+static int kvm_input_permitted(void)
+{
+	time_t now;
+
+	if (g_screenCaptureGranted) { return 1; }
+
+	now = time(NULL);
+	if (now - g_screenCaptureCheckedAt < KVM_SCREENCAPTURE_RECHECK_SECONDS) { return 0; }
+	g_screenCaptureCheckedAt = now;
+
+	if (kvm_screencapture_granted() || now - g_screenCaptureRequestedAt >= KVM_SCREENCAPTURE_GATE_SECONDS)
+	{
+		g_screenCaptureGranted = 1;
+	}
+	return g_screenCaptureGranted;
+}
+
 int kvm_server_inputdata(char* block, int blocklen)
 {
 	unsigned short type, size;
@@ -373,6 +460,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 	{
 		case MNG_KVM_KEY_UNICODE: // Unicode Key
 			if (size != 7) break;
+			if (!kvm_input_permitted()) break;
 			KeyActionUnicode(((((unsigned char)block[5]) << 8) + ((unsigned char)block[6])), block[4]);
 			break;
 		case MNG_KVM_KEY: // Key
@@ -383,6 +471,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 			// the one in the user's GUI session with TCC permission to
 			// post CGEvents.
 			if (size != 6) { break; }
+			if (!kvm_input_permitted()) { break; }
 			KeyAction(block[5], block[4]);
 			break;
 		}
@@ -391,7 +480,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 			int x, y;
 			short w = 0;
 			// Same as above — process mouse locally in -kvmagent mode.
-			if (size == 10 || size == 12)
+			if ((size == 10 || size == 12) && kvm_input_permitted())
 			{
 				x = ((int)ntohs(((unsigned short*)(block))[3])) / SCREEN_SCALE;
 				y = ((int)ntohs(((unsigned short*)(block))[4])) / SCREEN_SCALE;
@@ -643,6 +732,7 @@ void* kvm_server_mainloop(void* param)
 	}
 	// Init the kvm
 	g_messageQ = ILibQueue_Create();
+	kvm_screencapture_request();
 	if (kvm_init() != 0) { return (void*)-1; }
 
 
@@ -679,6 +769,7 @@ void* kvm_server_mainloop(void* param)
 				int tmpLen = sprintf_s(tmp, sizeof(tmp), "ACCEPTed new connection %d on Domain Socket\n", KVM_AGENT_FD);
 				written = write(STDOUT_FILENO, tmp, tmpLen);
 				fsync(STDOUT_FILENO);
+				kvm_screencapture_request();
 				pthread_create(&kvmthread, NULL, kvm_mainloopinput, param);
 			}
 		}
