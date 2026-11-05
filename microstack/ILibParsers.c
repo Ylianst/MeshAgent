@@ -89,7 +89,8 @@ limitations under the License.
 #else
 	#if defined(_POSIX) 
 		// On Linux Platforms, we need to check glibc version of the compiler
-		#if (__GLIBC__ == 2 && __GLIBC_MINOR__ <= 3) || (__GLIBC__ < 2)
+		// For musl __GLIBC__ is undefined, but has pthread_timedjoin_np(), so do not #define ILIB_NO_TIMEDJOIN
+		#if defined(__GLIBC__) && ((__GLIBC__ == 2 && __GLIBC_MINOR__ <= 3) || (__GLIBC__ < 2))
 			#define ILIB_NO_TIMEDJOIN
 		#endif
 	#endif
