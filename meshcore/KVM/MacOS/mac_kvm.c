@@ -371,32 +371,35 @@ int kvm_init()
 // the wallpaper and the menu bar until the session is restarted.
 //
 // The helper therefore requests Screen Recording when a session starts and
-// drops keyboard and mouse input until it has been granted, so the
-// Accessibility prompt is only triggered by the first input event after that.
-// The grant takes effect for capturing without restarting the helper.
+// drops keyboard and mouse input until it has been granted. Accessibility is
+// requested once Screen Recording is granted. The grants take effect without
+// restarting the helper.
 //
-// CGPreflightScreenCaptureAccess() caches its result for the lifetime of the
-// process, so this long-running helper would never see a grant made while it
-// runs. The check is done in a freshly spawned "meshagent -kvmscreencheck"
-// instead (see meshconsole/main.c).
+// Checks and requests run in a freshly spawned "meshagent -kvmpermission <mode>"
+// (see meshconsole/main.c), for two reasons: CGPreflightScreenCaptureAccess()
+// caches its result for the lifetime of the process, and the request functions
+// contact tccd only once per process. This helper runs for the whole login
+// session, so a prompt that was ignored or a grant that was removed later would
+// otherwise not be asked for again until the user logs in again.
 //
 // If Screen Recording is declined, input is released after
 // KVM_SCREENCAPTURE_GATE_SECONDS so the session can still be used without video.
 #define KVM_SCREENCAPTURE_GATE_SECONDS		180
 #define KVM_SCREENCAPTURE_RECHECK_SECONDS	2
 
-// Written by kvm_screencapture_request() before kvm_mainloopinput() is started
+// Written by kvm_permissions_request() before kvm_mainloopinput() is started
 // (pthread_create), afterwards only by the input thread.
 static int g_screenCaptureGranted = 0;
 static time_t g_screenCaptureCheckedAt = 0;
 static time_t g_screenCaptureRequestedAt = 0;
 
-// Returns 1 if Screen Recording is granted, as seen by a new process.
-static int kvm_screencapture_granted(void)
+// Runs "meshagent -kvmpermission <mode>" and returns 1 if it reports the
+// permission as granted (exit code 0).
+static int kvm_permission_helper(const char *mode)
 {
 	char path[PATH_MAX];
 	uint32_t pathSize = sizeof(path);
-	char *args[] = { path, "-kvmscreencheck", NULL };
+	char *args[] = { path, "-kvmpermission", (char*)mode, NULL };
 	pid_t pid;
 	int status = 0;
 
@@ -409,14 +412,27 @@ static int kvm_screencapture_granted(void)
 	return (WIFEXITED(status) && WEXITSTATUS(status) == 0) ? 1 : 0;
 }
 
-// Called when a viewer connects. Requests Screen Recording if it is missing.
-static void kvm_screencapture_request(void)
+// Requests Accessibility (posting input events) if it is missing.
+static void kvm_input_request(void)
+{
+	if (!kvm_permission_helper("inputcheck")) { kvm_permission_helper("inputrequest"); }
+}
+
+// Called when a viewer connects. Requests the missing permission, one at a time.
+static void kvm_permissions_request(void)
 {
 	if (__builtin_available(macOS 10.15, *))
 	{
-		g_screenCaptureGranted = kvm_screencapture_granted();
+		g_screenCaptureGranted = kvm_permission_helper("screencheck");
 		g_screenCaptureCheckedAt = g_screenCaptureRequestedAt = time(NULL);
-		if (!g_screenCaptureGranted) { CGRequestScreenCaptureAccess(); }
+		if (g_screenCaptureGranted)
+		{
+			kvm_input_request();
+		}
+		else
+		{
+			kvm_permission_helper("screenrequest");
+		}
 	}
 	else
 	{
@@ -435,9 +451,10 @@ static int kvm_input_permitted(void)
 	if (now - g_screenCaptureCheckedAt < KVM_SCREENCAPTURE_RECHECK_SECONDS) { return 0; }
 	g_screenCaptureCheckedAt = now;
 
-	if (kvm_screencapture_granted() || now - g_screenCaptureRequestedAt >= KVM_SCREENCAPTURE_GATE_SECONDS)
+	if (kvm_permission_helper("screencheck") || now - g_screenCaptureRequestedAt >= KVM_SCREENCAPTURE_GATE_SECONDS)
 	{
 		g_screenCaptureGranted = 1;
+		kvm_input_request();
 	}
 	return g_screenCaptureGranted;
 }
@@ -732,7 +749,7 @@ void* kvm_server_mainloop(void* param)
 	}
 	// Init the kvm
 	g_messageQ = ILibQueue_Create();
-	kvm_screencapture_request();
+	kvm_permissions_request();
 	if (kvm_init() != 0) { return (void*)-1; }
 
 
@@ -769,7 +786,7 @@ void* kvm_server_mainloop(void* param)
 				int tmpLen = sprintf_s(tmp, sizeof(tmp), "ACCEPTed new connection %d on Domain Socket\n", KVM_AGENT_FD);
 				written = write(STDOUT_FILENO, tmp, tmpLen);
 				fsync(STDOUT_FILENO);
-				kvm_screencapture_request();
+				kvm_permissions_request();
 				pthread_create(&kvmthread, NULL, kvm_mainloopinput, param);
 			}
 		}

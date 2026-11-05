@@ -281,14 +281,22 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		return(0);
 	}
 #if defined(_LINKVM) && defined(__APPLE__)
-	if (argc > 1 && strcasecmp(argv[1], "-kvmscreencheck") == 0)
+	if (argc > 2 && strcasecmp(argv[1], "-kvmpermission") == 0)
 	{
-		// Screen Recording check on behalf of the KVM helper, see
-		// kvm_screencapture_granted() in mac_kvm.c. Runs in a new process
-		// because CGPreflightScreenCaptureAccess() caches its result per
-		// process. Exit code 0 = granted, 1 = not granted.
-		if (__builtin_available(macOS 10.15, *)) { return(CGPreflightScreenCaptureAccess() ? 0 : 1); }
-		return(0);
+		// Permission check or request on behalf of the KVM helper, see
+		// kvm_permission_helper() in mac_kvm.c. Runs in a new process because
+		// the CoreGraphics functions cache their result and contact tccd only
+		// once per process. Exit code 0 = granted, 1 = not granted.
+		int granted = 1;
+		if (__builtin_available(macOS 10.15, *))
+		{
+			if (strcasecmp(argv[2], "screencheck") == 0) { granted = CGPreflightScreenCaptureAccess(); }
+			else if (strcasecmp(argv[2], "screenrequest") == 0) { granted = CGRequestScreenCaptureAccess(); }
+			else if (strcasecmp(argv[2], "inputcheck") == 0) { granted = CGPreflightPostEventAccess(); }
+			else if (strcasecmp(argv[2], "inputrequest") == 0) { granted = CGRequestPostEventAccess(); }
+			else { granted = 0; }
+		}
+		return(granted ? 0 : 1);
 	}
 	else if (argc > 1 && strcasecmp(argv[1], "-kvm0") == 0)
 	{
