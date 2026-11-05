@@ -34,8 +34,11 @@ jobs:
   freebsd:
     needs: validate
     uses: ./.github/workflows/freebsd-build.yml
+  openbsd:
+    needs: validate
+    uses: ./.github/workflows/openbsd-build.yml
   release:
-    needs: [linux, windows, macos, freebsd]
+    needs: [linux, windows, macos, freebsd, openbsd]
     runs-on: ubuntu-latest
     permissions:
       contents: write
