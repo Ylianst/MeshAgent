@@ -117,6 +117,8 @@ char exeJavaScriptGuid[] = "B996015880544A19B7F7E9BE44914C18";
 #define ILibDuktape_ScriptContainer_ExitCode					"\xFF_ExitCode"
 #define ILibDuktape_ScriptContainer_Exitting					"\xFF_Exiting"
 
+#define ILibDuktape_Promise_WAIT_DEFAULT_MS	60000
+
 #ifdef MESH_AGENTID
 	char *ARCHNAME[] =
 	{
@@ -2654,10 +2656,9 @@ duk_ret_t ILibDuktape_Polyfills_promise_wait_impl_rej(duk_context *ctx)
 duk_ret_t ILibDuktape_Polyfills_promise_wait_impl(duk_context *ctx)
 {
 	ILibChain_Continue_Result continueResult;
-	int timeout = duk_is_number(ctx, 1) ? duk_require_int(ctx, 1) : -1;
-	int timerInfo = ILibChain_GetMinimumTimer(duk_ctx_chain(ctx));
+	int timeout = duk_is_number(ctx, 1) ? duk_require_int(ctx, 1) : ILibDuktape_Promise_WAIT_DEFAULT_MS;
 	int ret = 1;
-	if (timeout < 0 && timerInfo > 0) { timeout = 60000; }
+	if (timeout == 0) { timeout = -1; }	// wait(0) waits forever
 
 	duk_push_object(ctx);																	// [obj]
 	duk_prepare_method_call(ctx, 0, "then");												// [obj][then][this]
