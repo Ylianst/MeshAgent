@@ -139,7 +139,9 @@ function Toaster()
                         //
                         // Fetch some necessary configuration information about the currently logged in session, so that we can display the toast in the correct desktop session
                         //
-                        retVal.consoleUid = require('user-sessions').consoleUid();
+                        // A login picked in the viewer is the one being watched, so the toast goes there, not to the console
+                        var picked = require('user-sessions').pickedUid(tsid);
+                        retVal.consoleUid = picked != null ? picked : require('user-sessions').consoleUid();
                         retVal.xinfo = require('monitor-info').getXInfo(retVal.consoleUid);
 			            retVal.username = require('user-sessions').getUsername(retVal.consoleUid);
                     }
@@ -193,7 +195,7 @@ function Toaster()
                                 if (require('message-box').zenity.timeout)
                                 {
                                     // Timeout Supported
-                                    retVal._mb = require('message-box').create(retVal.title, retVal.caption, 5, 1);
+                                    retVal._mb = require('message-box').create(retVal.title, retVal.caption, 5, 1, tsid);
                                     retVal._mb.toast = retVal;
                                     retVal._mb.then(function () { this.toast._res('DISMISSED'); }, function (e) { this.toast._res('DISMISSED'); });
                                     return (retVal);
@@ -269,7 +271,7 @@ function Toaster()
                                 // 
                                 // XMESSAGE is very rudimentary, so this is a last resort if nothing else exists.
                                 //
-                                retVal._mb = require('message-box').create(title, caption, 5, 'OK');
+                                retVal._mb = require('message-box').create(title, caption, 5, 'OK', tsid);
                                 retVal._mb.ret = retVal;
                                 retVal._mb.then(function () { this.ret._res('DISMISSED'); }, function () { this.ret._res('DISMISSED'); });
                             }

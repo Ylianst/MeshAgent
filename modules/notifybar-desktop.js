@@ -480,17 +480,19 @@ function windows_notifybar_local(title, bar_options)
 }
 
 
-function x_notifybar_check(title)
+function x_notifybar_check(title, tsid)
 {
     var script = Buffer.from("require('notifybar-desktop')('" + title + "').on('close', function(){process.exit();});").toString('base64');
 
     var min = require('user-sessions').minUid();
     var uid = -1;
     var self = require('user-sessions').Self();
+    // A login picked in the viewer is the one being watched, so the bar goes there, not to the console
+    var picked = require('user-sessions').pickedUid(tsid);
 
     try
     {
-        uid = require('user-sessions').consoleUid();
+        uid = picked != null ? picked : require('user-sessions').consoleUid();
     }
     catch(xx)
     {
@@ -503,7 +505,7 @@ function x_notifybar_check(title)
     else
     {
         // We are root, so we should try to spawn a child into the user's desktop
-        if (uid < min && uid != 0)
+        if (picked == null && uid < min && uid != 0)
         {
             // Lets hook login event, so we can respawn the bars later
             var ret = { min: min };

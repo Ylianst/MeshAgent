@@ -826,6 +826,16 @@ function UserSessions()
             return (ret);
         };
 
+        // The uid of the login a remote desktop tsid picked in the viewer, null for the console. The picker
+        // lists desktopSessions() by uid. 0 is the login screen, whose capture moves to whoever logs in as a
+        // console connect does, and above UID_MAX is a virtual session kvm-helper has not spawned yet.
+        this.pickedUid = function pickedUid(tsid)
+        {
+            if (tsid == null || tsid == 0) { return (null); }
+            var max = this.getUidConfig ? this.getUidConfig().MAX : null;
+            return ((max != null && tsid > max) ? null : tsid);
+        };
+
         if (process.platform == 'linux')
         {
             if (require('fs').watch)
