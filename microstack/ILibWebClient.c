@@ -1419,35 +1419,56 @@ int ILibWebClient_ProcessWebSocketData(char* buffer, int offset, int length, ILi
 			}
 			else
 			{
-				if (state->WebSocketFragmentIndex + plen >= state->WebSocketFragmentBufferSize)
+				if ((int64_t)state->WebSocketFragmentIndex + (int64_t)plen > (int64_t)state->WebSocketFragmentBufferSize)
 				{
-					// Need to grow the buffer
-
-					if (state->WebSocketFragmentBufferSize == state->WebSocketFragmentMaxBufferSize)
+					// Need to grow the buffer, up to the max buffer size the user specified
+					int newSize = state->WebSocketFragmentBufferSize;
+					while ((int64_t)newSize < (int64_t)state->WebSocketFragmentIndex + (int64_t)plen && newSize < state->WebSocketFragmentMaxBufferSize)
 					{
-						// We are already maxed out, so just send what we have as an unfinished fragment	
-						state->WebSocketCouldNotAutoReassemble = 1; // Set this flag, becuase we can't reassemble, so our FIN flag will be different to reflect that					
-						tempBegin = 0;
-						wr->OnResponse(wcdo, 0, wcdo->header, state->WebSocketFragmentBuffer, &tempBegin, state->WebSocketFragmentIndex, ILibWebClient_ReceiveStatus_Partial, wr->user1, wr->user2, PAUSE);
-						state->WebSocketFragmentIndex = 0; // Reset the index, becuase new data is going to go to the front
+						newSize = (newSize > state->WebSocketFragmentMaxBufferSize / 2) ? state->WebSocketFragmentMaxBufferSize : (newSize * 2);
 					}
-					else
+					if (newSize != state->WebSocketFragmentBufferSize)
 					{
-						// We can grow the buffer
-						state->WebSocketFragmentBufferSize = state->WebSocketFragmentBufferSize * 2;
-						if (state->WebSocketFragmentBufferSize > state->WebSocketFragmentMaxBufferSize) { state->WebSocketFragmentBufferSize = state->WebSocketFragmentMaxBufferSize; }
-						if ((state->WebSocketFragmentBuffer = (char*)realloc(state->WebSocketFragmentBuffer, state->WebSocketFragmentBufferSize)) == NULL) { ILIBCRITICALEXIT(254); } // MS Static Analyser erroneously reports that this leaks the original memory block
+						if ((state->WebSocketFragmentBuffer = (char*)realloc(state->WebSocketFragmentBuffer, newSize)) == NULL) { ILIBCRITICALEXIT(254); } // MS Static Analyser erroneously reports that this leaks the original memory block
+						state->WebSocketFragmentBufferSize = newSize;
+					}
+
+					if ((int64_t)state->WebSocketFragmentIndex + (int64_t)plen > (int64_t)state->WebSocketFragmentBufferSize)
+					{
+						// We are maxed out, so just send what we have as an unfinished fragment
+						state->WebSocketCouldNotAutoReassemble = 1; // Set this flag, becuase we can't reassemble, so our FIN flag will be different to reflect that
+						if (state->WebSocketFragmentIndex > 0)
+						{
+							tempBegin = 0;
+							wr->OnResponse(wcdo, 0, wcdo->header, state->WebSocketFragmentBuffer, &tempBegin, state->WebSocketFragmentIndex, ILibWebClient_ReceiveStatus_Partial, wr->user1, wr->user2, PAUSE);
+							state->WebSocketFragmentIndex = 0; // Reset the index, becuase new data is going to go to the front
+						}
 					}
 				}
 
-				memcpy_s(state->WebSocketFragmentBuffer + state->WebSocketFragmentIndex, state->WebSocketFragmentBufferSize - state->WebSocketFragmentIndex, buffer + i, plen);
-				state->WebSocketFragmentIndex += plen;
+				if (plen > state->WebSocketFragmentBufferSize)
+				{
+					// This frame by itself is larger than the reassembly buffer, so pass it up directly, without buffering it
+					tempBegin = 0;
+					wr->OnResponse(wcdo, 0, wcdo->header, buffer + i, &tempBegin, plen, FIN == 0 ? ILibWebClient_ReceiveStatus_Partial : ILibWebClient_ReceiveStatus_LastPartial, wr->user1, wr->user2, PAUSE);
+					if (FIN != 0)
+					{
+						state->WebSocketCouldNotAutoReassemble = 0; // Reset (We can try to auto-assemble)
+						state->WebSocketFragmentIndex = 0; // Reset (We can write to the start of the buffer)
+					}
+				}
+				else
+				{
+					memcpy_s(state->WebSocketFragmentBuffer + state->WebSocketFragmentIndex, state->WebSocketFragmentBufferSize - state->WebSocketFragmentIndex, buffer + i, plen);
+					state->WebSocketFragmentIndex += plen;
 
-				if (FIN != 0)
-				{			
-					wr->OnResponse(wcdo, 0, wcdo->header, state->WebSocketFragmentBuffer, &tempBegin, state->WebSocketFragmentIndex, state->WebSocketCouldNotAutoReassemble == 0 ? ILibWebClient_ReceiveStatus_MoreDataToBeReceived : ILibWebClient_ReceiveStatus_LastPartial, wr->user1, wr->user2, PAUSE);	
-					state->WebSocketCouldNotAutoReassemble = 0; // Reset (We can try to auto-assemble)
-					state->WebSocketFragmentIndex = 0; // Reset (We can write to the start of the buffer)
+					if (FIN != 0)
+					{
+						tempBegin = 0;
+						wr->OnResponse(wcdo, 0, wcdo->header, state->WebSocketFragmentBuffer, &tempBegin, state->WebSocketFragmentIndex, state->WebSocketCouldNotAutoReassemble == 0 ? ILibWebClient_ReceiveStatus_MoreDataToBeReceived : ILibWebClient_ReceiveStatus_LastPartial, wr->user1, wr->user2, PAUSE);
+						state->WebSocketCouldNotAutoReassemble = 0; // Reset (We can try to auto-assemble)
+						state->WebSocketFragmentIndex = 0; // Reset (We can write to the start of the buffer)
+					}
 				}
 			}
 		}
