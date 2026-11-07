@@ -1633,6 +1633,8 @@ int ILibIsRunningOnChainThread(void* chain);
 		PCONTEXT pctx;
 		EXCEPTION_RECORD rec;
 		CONTEXT ctx;
+		DWORD64 framePCs[32];
+		int frameCount;
 	}ILib_DumpEnabledContext;
 	int ILib_WindowsExceptionFilterEx(DWORD exceptionCode, void *exceptionInfo, ILib_DumpEnabledContext *dumpEnabledExceptionContext);
 	void ILib_WindowsExceptionDebugEx(ILib_DumpEnabledContext *dumpEnabledExceptionContext);

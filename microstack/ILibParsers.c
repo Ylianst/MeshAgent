@@ -2715,6 +2715,26 @@ int ILib_WindowsExceptionFilterEx(DWORD exceptionCode, void *exceptionInfo, ILib
 		exceptionContext->pctx = &(exceptionContext->ctx); exceptionContext->prec = &(exceptionContext->rec);
 		memcpy_s(exceptionContext->pctx, sizeof(CONTEXT), ((EXCEPTION_POINTERS*)exceptionInfo)->ContextRecord, sizeof(CONTEXT));
 		memcpy_s(exceptionContext->prec, sizeof(EXCEPTION_RECORD), ((EXCEPTION_POINTERS*)exceptionInfo)->ExceptionRecord, sizeof(EXCEPTION_RECORD));
+		exceptionContext->frameCount = 0;
+
+		// The stack is walked here in the filter, because once the __except block runs the crashed frames have been unwound and the handler's own calls have overwritten them.
+		// Walked from the handler, frame 1 onward was dbghelp's own call chain on x86 Release (measured 2026-11-05).
+		// On a stack overflow the filter itself runs on the last guard page, so only the crashing frame is kept there.
+		if (exceptionCode != EXCEPTION_STACK_OVERFLOW)
+		{
+			STACKFRAME64 frame;
+			CONTEXT walkContext;
+			DWORD machineType = ILib_InitStackFrame(&frame, exceptionContext->pctx);
+
+			// StackWalk64() modifies the context it is given, so it gets a copy and the minidump keeps the original
+			memcpy_s(&walkContext, sizeof(CONTEXT), exceptionContext->pctx, sizeof(CONTEXT));
+			while (exceptionContext->frameCount < (int)(sizeof(exceptionContext->framePCs) / sizeof(exceptionContext->framePCs[0])) &&
+				StackWalk64(machineType, GetCurrentProcess(), GetCurrentThread(), &frame, &walkContext, NULL, SymFunctionTableAccess64, SymGetModuleBase64, NULL) &&
+				frame.AddrPC.Offset != 0)
+			{
+				exceptionContext->framePCs[exceptionContext->frameCount++] = frame.AddrPC.Offset;
+			}
+		}
 		return(EXCEPTION_EXECUTE_HANDLER);
 	}
 	return(EXCEPTION_CONTINUE_SEARCH);
@@ -2726,10 +2746,19 @@ void ILib_WindowsExceptionDebugEx(ILib_DumpEnabledContext *dumpEnabledExceptionC
 	STACKFRAME64 StackFrame;
 	char symBuffer[4096];
 	char imgBuffer[4096];
-	DWORD MachineType;
 	int len = 0;
-	CONTEXT *exceptionContext = dumpEnabledExceptionContext->pctx;
+	int frame;
+	PIMAGEHLP_LINE64 pimg = (PIMAGEHLP_LINE64)imgBuffer;
+	PSYMBOL_INFO psym = (PSYMBOL_INFO)symBuffer;
+	DWORD64 baseAddr = (DWORD64)(ILibPtrCAST)&ILibCreateChain;
 
+	// Frame 0 comes from the saved context, so it is there even when the filter could not walk
+	ILib_InitStackFrame(&StackFrame, dumpEnabledExceptionContext->pctx);
+	if (dumpEnabledExceptionContext->frameCount == 0)
+	{
+		dumpEnabledExceptionContext->framePCs[0] = StackFrame.AddrPC.Offset;
+		dumpEnabledExceptionContext->frameCount = 1;
+	}
 	buffer[0] = 0;
 
 	if (g_ILibCrashDump_path != NULL)
@@ -2750,59 +2779,45 @@ void ILib_WindowsExceptionDebugEx(ILib_DumpEnabledContext *dumpEnabledExceptionC
 		CloseHandle(hDumpFile);
 	}
 
-
-	MachineType = ILib_InitStackFrame(&StackFrame, exceptionContext);
-
-
-	if (StackWalk64(
-		MachineType,
-		GetCurrentProcess(),
-		GetCurrentThread(),
-		&StackFrame,
-		MachineType == IMAGE_FILE_MACHINE_I386
-		? NULL
-		: exceptionContext,
-		NULL,
-		SymFunctionTableAccess64,
-		SymGetModuleBase64,
-		NULL))
-	{
-
-		if (StackFrame.AddrPC.Offset != 0)
-		{
-			//
-			// Valid frame.
-			//
-			PIMAGEHLP_LINE64 pimg = (PIMAGEHLP_LINE64)imgBuffer;
-			DWORD64 tmp = 0;
-			DWORD tmp2;
-			PSYMBOL_INFO psym = (PSYMBOL_INFO)symBuffer;
-			psym->SizeOfStruct = sizeof(SYMBOL_INFO);
-			psym->MaxNameLen = MAX_SYM_NAME;
-			pimg->SizeOfStruct = sizeof(IMAGEHLP_LINE64);
-
-			len = sprintf_s(buffer, sizeof(buffer), "FATAL EXCEPTION @ ");
+	len = sprintf_s(buffer, sizeof(buffer), "FATAL EXCEPTION @ ");
 #ifdef _WIN64
-			len += sprintf_s(buffer + len, sizeof(buffer) - len, "[FuncAddr: 0x%016llx / BaseAddr: 0x%016llx / Delta: %lld]\n", (unsigned __int64)StackFrame.AddrPC.Offset, (unsigned __int64)&ILibCreateChain, (unsigned __int64)&ILibCreateChain - (unsigned __int64)StackFrame.AddrPC.Offset);
+	len += sprintf_s(buffer + len, sizeof(buffer) - len, "[FuncAddr: 0x%016llx / BaseAddr: 0x%016llx / Delta: %lld]\n", (unsigned __int64)StackFrame.AddrPC.Offset, (unsigned __int64)baseAddr, (unsigned __int64)baseAddr - (unsigned __int64)StackFrame.AddrPC.Offset);
 #else
-			len += sprintf_s(buffer + len, sizeof(buffer) - len, "[FuncAddr: 0x%08x / BaseAddr: 0x%08x / Delta: %d]\n", (unsigned __int32)StackFrame.AddrPC.Offset, (unsigned __int32)&ILibCreateChain, (unsigned __int32)&ILibCreateChain - (unsigned __int32)StackFrame.AddrPC.Offset);
+	len += sprintf_s(buffer + len, sizeof(buffer) - len, "[FuncAddr: 0x%08x / BaseAddr: 0x%08x / Delta: %d]\n", (unsigned __int32)StackFrame.AddrPC.Offset, (unsigned __int32)baseAddr, (unsigned __int32)baseAddr - (unsigned __int32)StackFrame.AddrPC.Offset);
 #endif
 
-			if (SymFromAddr(GetCurrentProcess(), StackFrame.AddrPC.Offset, &tmp, psym))
+	psym->SizeOfStruct = sizeof(SYMBOL_INFO);
+	psym->MaxNameLen = MAX_SYM_NAME;
+	pimg->SizeOfStruct = sizeof(IMAGEHLP_LINE64);
+
+	// The 3000 cap leaves room for the longest frame line and for the prefix ILibCriticalLog() adds in its own 4096 byte buffer.
+	// On Windows sprintf_s() terminates the process when its buffer is too small, which would lose the whole dump.
+	for (frame = 0; frame < dumpEnabledExceptionContext->frameCount && len < 3000; ++frame)
+	{
+		DWORD64 pc = dumpEnabledExceptionContext->framePCs[frame];
+		DWORD64 displacement = 0;
+		DWORD lineDisplacement = 0;
+
+		if (SymFromAddr(GetCurrentProcess(), pc, &displacement, psym))
+		{
+			// Without a PDB for the module the name is only the nearest export, so the displacement shows how far off it is
+			len += sprintf_s(buffer + len, sizeof(buffer) - len, "    [%.256s+0x%llx", (char*)(psym->Name), (unsigned __int64)displacement);
+			if (SymGetLineFromAddr64(GetCurrentProcess(), pc, &lineDisplacement, pimg))
 			{
-				len += sprintf_s(buffer + len, sizeof(buffer) - len, "    [%s", (char*)(psym->Name));
-				if (SymGetLineFromAddr64(GetCurrentProcess(), StackFrame.AddrPC.Offset, &tmp2, pimg))
-				{
-					len += sprintf_s(buffer + len, sizeof(buffer) - len, " => %s:%d]\n", (char*)(pimg->FileName), pimg->LineNumber);
-				}
-				else
-				{
-					len += sprintf_s(buffer + len, sizeof(buffer) - len, "]\n");
-				}
+				len += sprintf_s(buffer + len, sizeof(buffer) - len, " => %.256s:%d]\n", (char*)(pimg->FileName), pimg->LineNumber);
+			}
+			else
+			{
+				len += sprintf_s(buffer + len, sizeof(buffer) - len, "]\n");
 			}
 		}
+		else
+		{
+			// Same delta as the header line, which "-fdelta" decodes on a machine that has the PDB
+			len += sprintf_s(buffer + len, sizeof(buffer) - len, "    [Delta: %lld]\n", (long long)(baseAddr - pc));
+		}
 	}
-	
+
 	ILIBCRITICALEXITMSG(254, buffer);
 }
 #elif defined(_POSIX) && !defined(__APPLE__)
@@ -3072,9 +3087,7 @@ char* ILibChain_Debug(void *chain, char* buffer, int bufferLen)
 			bChain != NULL ? bChain->ChainProcessHandle : GetCurrentProcess(),
 			bChain != NULL ? bChain->MicrostackThreadHandle : GetCurrentThread(),
 			&StackFrame,
-			MachineType == IMAGE_FILE_MACHINE_I386
-			? NULL
-			: (bChain!=NULL ? &(bChain->MicrostackThreadContext) : &ctx),
+			bChain != NULL ? &(bChain->MicrostackThreadContext) : &ctx,
 			NULL,
 			SymFunctionTableAccess64,
 			SymGetModuleBase64,
