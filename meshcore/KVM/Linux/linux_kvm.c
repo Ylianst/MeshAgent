@@ -108,6 +108,7 @@ typedef struct _XkbStateNotifyEvent
 } XkbStateNotifyEvent;
 
 int curcursor = KVM_MouseCursor_HELP;
+static int sentCursor = -1;	// Last cursor type sent to the master, -1 so the next one always goes out
 int SLAVELOG = 0;
 
 int SCREEN_NUM = 0;
@@ -328,6 +329,7 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 	// Name was NULL, so as a last ditch effort, lets try to look at the XFixesCursorImage
 	char *cursor_image = (char*)xfixes_exports->XFixesGetCursorImage(cursordisplay);
 	KVM_MouseCursors ret = KVM_MouseCursor_HELP;
+	if (cursor_image == NULL) { return(ret); }	// XFixesGetCursorImage() returns NULL when the request fails, and every read below goes through it
 
 	unsigned short w = ((unsigned short*)(cursor_image + 4))[0];
 	unsigned short h = ((unsigned short*)(cursor_image + 6))[0];
@@ -952,6 +954,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 	case MNG_KVM_REFRESH: // Refresh
 		{
 			kvm_send_resolution();
+			sentCursor = -1;	// Sent on every viewer join, so the current cursor type goes out again on the next frame
 
 			int row, col;
 			if (size != 4) break;
@@ -1350,7 +1353,7 @@ void* kvm_server_mainloop_x11(void* parm)
 				{
 					xfixes_exports->XFixesSelectCursorInput(cursordisplay, rootwin, 1); // Register for Cursor Change Notifications
 					x11_exports->XSync(cursordisplay, 0);								// Sync with XServer
-					cursor_descriptor = x11_exports->XConnectionNumber(cursordisplay);	// Get the FD to use in select
+					cursor_descriptor = x11_exports->XConnectionNumber(cursordisplay);	// Set only when XFixes answered, which enables the cursor event block below
 				}
 				curcursor = kvm_fetch_currentCursor(cursordisplay);						// Cursor Type
 
@@ -1366,37 +1369,38 @@ void* kvm_server_mainloop_x11(void* parm)
 		}
 		else if (cursor_descriptor > 0)
 		{
-			FD_ZERO(&readset);
-			FD_ZERO(&errorset);
-			FD_ZERO(&writeset);
-			tv.tv_sec = 0;
-			tv.tv_usec = 0;
-			FD_SET(cursor_descriptor, &readset);
-			if (select(FD_SETSIZE, &readset, &writeset, &errorset, &tv) > 0 && FD_ISSET(cursor_descriptor, &readset))
+			// Only the events queued now, so notifies that arrive while the lookup below runs wait for the next frame
+			int pending = x11_exports->XPending(cursordisplay);
+			XEvent cursorXE;
+			int cursorNotified = 0;
+			if (pending > 0)
 			{
 				// We have a waiting event
-				while (x11_exports->XPending(cursordisplay))
+				while (pending-- > 0)
 				{					
 					x11_exports->XNextEvent(cursordisplay, &XE);
-					if (XE.type == (event_base + 1))
+					if (XE.type == (event_base + 1)) { cursorXE = XE; cursorNotified = 1; }
+
+					// Looked up once, from the last notify, because every lookup is an X round trip and an animated cursor queues one notify per frame.
+					// One lookup per notify took 30 to 250 ms each on a Plasma X11 VM, so a screen pass grew to 3.3 s while a busy cursor animated.
+					if (pending == 0 && cursorNotified != 0)
 					{
-						char buffer[8];
 						char *name = NULL;
 
 						if (sizeof(void*) == 8)
 						{
 							// 64bit
-							if (((uint64_t*)((char*)&XE + 64))[0] != 0)
+							if (((uint64_t*)((char*)&cursorXE + 64))[0] != 0)
 							{
-								name = x11_exports->XGetAtomName(cursordisplay, ((Atom*)((char*)&XE + 64))[0]);
+								name = x11_exports->XGetAtomName(cursordisplay, ((Atom*)((char*)&cursorXE + 64))[0]);
 							}
 						}
 						else
 						{
 							// 32bit
-							if (((uint32_t*)((char*)&XE + 32))[0] != 0)
+							if (((uint32_t*)((char*)&cursorXE + 32))[0] != 0)
 							{
-								name = x11_exports->XGetAtomName(cursordisplay, ((Atom*)((char*)&XE + 32))[0]);
+								name = x11_exports->XGetAtomName(cursordisplay, ((Atom*)((char*)&cursorXE + 32))[0]);
 							}
 						}
 					
@@ -1424,15 +1428,6 @@ void* kvm_server_mainloop_x11(void* parm)
 							// Name was NULL, so as a last ditch effort, lets try to look at the XFixesCursorImage
 							curcursor = kvm_fetch_currentCursor(cursordisplay);
 						}
-
-						if (sentHideCursor == 0)
-						{
-							((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
-							((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
-							buffer[4] = (char)curcursor;																// Cursor Type
-							written = write(slave2master[1], buffer, 5);
-							fsync(slave2master[1]);
-						}
 					}
 					if (kbevent_base != 0 && XE.type == kbevent_base)
 					{
@@ -1449,6 +1444,18 @@ void* kvm_server_mainloop_x11(void* parm)
 						}
 					}
 				}
+			}
+
+			// Sent after the loop and only when the type changed, so a refresh resends the current cursor to a joining viewer
+			if (sentHideCursor == 0 && curcursor != sentCursor)
+			{
+				char buffer[8];
+				((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
+				((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
+				buffer[4] = (char)curcursor;																// Cursor Type
+				written = write(slave2master[1], buffer, 5);
+				fsync(slave2master[1]);
+				sentCursor = curcursor;
 			}
 		}
 
@@ -1484,9 +1491,10 @@ void* kvm_server_mainloop_x11(void* parm)
 				&rr, &cr, &rx, &ry, &wx, &wy, &mr);
 			if (rs == 1 && cursordisplay != NULL)
 			{
-				if (gRemoteMouseRenderDefault != 0 || (remoteMouseX != rx && remoteMouseY != ry))
+				cimage = (gRemoteMouseRenderDefault != 0 || (remoteMouseX != rx && remoteMouseY != ry)) ? (char*)xfixes_exports->XFixesGetCursorImage(cursordisplay) : NULL;
+				// A failed fetch draws no pointer into the frame, so it takes the unhide branch and the viewer keeps its own pointer
+				if (cimage != NULL)
 				{
-					cimage = (char*)xfixes_exports->XFixesGetCursorImage(cursordisplay);
 					unsigned short w = ((unsigned short*)(cimage + 4))[0];
 					unsigned short h = ((unsigned short*)(cimage + 6))[0];
 					unsigned short xhot = ((unsigned short*)(cimage + 8))[0];
@@ -1507,30 +1515,23 @@ void* kvm_server_mainloop_x11(void* parm)
 						bitblt(pixels, (int)w, (int)h, 0, 0, (int)w, (int)h, image->data, SCREEN_WIDTH, SCREEN_HEIGHT, mx, my, 1);
 					}
 
-					if (sentHideCursor == 0)
+					// Gated on sentCursor, not sentHideCursor, so a refresh from a joining viewer resends the hide as well
+					sentHideCursor = 1;
+					if (sentCursor != KVM_MouseCursor_NONE)
 					{
 						char tmpbuffer[8];
-						sentHideCursor = 1;
 						((unsigned short*)tmpbuffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
 						((unsigned short*)tmpbuffer)[1] = (unsigned short)htons((unsigned short)5);						// Write the size
 						tmpbuffer[4] = (char)KVM_MouseCursor_NONE;														// Cursor Type
 						written = write(slave2master[1], tmpbuffer, 5);
 						fsync(slave2master[1]);
+						sentCursor = KVM_MouseCursor_NONE;
 					}
 					x11_exports->XFree(cimage);
 				}
 				else
 				{
-					if (sentHideCursor != 0)
-					{
-						char tmpbuffer[8];
-						sentHideCursor = 1;
-						((unsigned short*)tmpbuffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
-						((unsigned short*)tmpbuffer)[1] = (unsigned short)htons((unsigned short)5);						// Write the size
-						tmpbuffer[4] = (char)curcursor;																	// Cursor Type
-						written = write(slave2master[1], tmpbuffer, 5);
-						fsync(slave2master[1]);
-					}
+					// After a hide, the event block sends curcursor on the next frame, because the hide path left sentCursor at NONE
 					sentHideCursor = 0;
 				}
 			}
