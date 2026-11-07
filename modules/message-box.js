@@ -213,7 +213,7 @@ function linux_messageBox()
                                 xinfo = require('monitor-info').getXInfo(0);
                             }
                             if (xinfo == null) { return (false); }
-                            var child = require('child_process').execFile('/bin/sh', ['sh'], { uid: uid, env: xinfo.exportEnv() });
+                            var child = require('child_process').execFile('/bin/sh', ['sh'], { uid: uid, env: xinfo.exportEnv(['LANG']) });
                             child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
                             child.stdin.write(location + ' --help-all | grep timeout\nexit\n');
                             child.stderr.on('data', function (e) { });
@@ -244,7 +244,7 @@ function linux_messageBox()
                                 xinfo = require('monitor-info').getXInfo(0);
                             }
                             if (xinfo == null) { return (false); }
-                            var child = require('child_process').execFile('/bin/sh', ['sh'], { uid: uid, env: xinfo.exportEnv() });
+                            var child = require('child_process').execFile('/bin/sh', ['sh'], { uid: uid, env: xinfo.exportEnv(['LANG']) });
                             child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
                             child.stdin.write(location + ' --help-all | grep extra-button\nexit\n');
                             child.stderr.on('data', function (e) { });
@@ -276,7 +276,7 @@ function linux_messageBox()
                             }
                             if (xinfo == null) { return (false); }
 
-                            var child = require('child_process').execFile('/bin/sh', ['sh'], { uid: uid, env: xinfo.exportEnv() });
+                            var child = require('child_process').execFile('/bin/sh', ['sh'], { uid: uid, env: xinfo.exportEnv(['LANG']) });
                             child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
                             child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
                             child.stdin.write(location + ' --version | awk -F. \'{ printf "[%s, %s]\\n", $1, $2; } \'\nexit\n');
@@ -401,7 +401,7 @@ function linux_messageBox()
             parms.push('--text=' + caption);
             parms.push('--no-wrap');
             if (this.zenity.timeout) { parms.push('--timeout=' + timeout); }
-            ret.child = require('child_process').execFile(this.zenity.path, parms, { uid: uid, env: xinfo.exportEnv() });
+            ret.child = require('child_process').execFile(this.zenity.path, parms, { uid: uid, env: xinfo.exportEnv(['LANG']) });
             if (this.zenity.timeout)
             {
                 ret.child.timeout = setTimeout(function (c)
@@ -593,7 +593,7 @@ function linux_messageBox()
             {
                 var xdg = require('user-sessions').findEnv(uid, 'XDG_RUNTIME_DIR'); if (xdg == null) { xdg = ''; }
                 if (!xinfo || !xinfo.display || !xinfo.xauthority) { ret._rej('Interal Error, could not determine X11/XDG env'); return (ret); }
-                var dialogEnv = xinfo.exportEnv();
+                var dialogEnv = xinfo.exportEnv(['LANG', 'XDG_RUNTIME_DIR']);
                 if (!dialogEnv.XDG_RUNTIME_DIR) { dialogEnv.XDG_RUNTIME_DIR = xdg; }
                 ret.child = require('child_process').execFile(this.kdialog.path, msgparms, { uid: uid, env: dialogEnv });
                 ret.child.promise = ret;
@@ -641,7 +641,7 @@ function linux_messageBox()
         else if (this.xmessage)
         {
             // title, caption, timeout, layout
-            ret.child = require('child_process').execFile(this.xmessage.path, ['xmessage', '-center', '-buttons', layout == null ? 'No:1,Yes:2' : 'OK:2', '-timeout', timeout.toString(), '-default', layout==null?'No':'OK', '-title', title, caption], { uid: uid, env: xinfo.exportEnv() });
+            ret.child = require('child_process').execFile(this.xmessage.path, ['xmessage', '-center', '-buttons', layout == null ? 'No:1,Yes:2' : 'OK:2', '-timeout', timeout.toString(), '-default', layout==null?'No':'OK', '-title', title, caption], { uid: uid, env: xinfo.exportEnv(['LANG']) });
             ret.child.stdout.on('data', function (c) {  });
             ret.child.stderr.on('data', function (c) {  });
             ret.child.descriptorMetadata = 'xmessage, message-box'

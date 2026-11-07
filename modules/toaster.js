@@ -133,6 +133,7 @@ function Toaster()
                 break;
 	        case 'freebsd':
             case 'linux':
+                retVal._show = function _show(noNotifyService)
                 {
                     try
                     {
@@ -150,7 +151,7 @@ function Toaster()
                     }
 
                     // The running notification service may have no matching D-Bus activation file.
-                    if (retVal.xinfo && retVal.xinfo.env && retVal.xinfo.env.DBUS_SESSION_BUS_ADDRESS && require('message-box').notifysend)
+                    if (!noNotifyService && retVal.xinfo && retVal.xinfo.env && retVal.xinfo.env.DBUS_SESSION_BUS_ADDRESS && require('message-box').notifysend)
                     {
                         retVal.child = require('child_process').execFile(require('message-box').notifysend.path, ['notify-send', '--', retVal.title, retVal.caption], { uid: retVal.consoleUid, env: retVal.xinfo.exportEnv() });
                         retVal.child.descriptorMetadata = 'toaster (notify-send)';
@@ -161,25 +162,26 @@ function Toaster()
                         retVal.child.on('exit', function (code)
                         {
                             if (code == 0) { this.parent._res('DISMISSED'); }
-                            else { this.parent._rej(this.stderr.str.trim()); }
+                            // Nothing on this session bus shows notifications (an Xvfb or VNC login), so use zenity or kdialog
+                            else { this.parent._show(true); }
                         });
                         return (retVal);
                     }
 
                     if (require('message-box').zenity)  // Check to see if ZENITY is installed on the system
                     {
-                        if (process.platform == 'linux' && !require('linux-dbus').hasService('org.freedesktop.Notifications'))
+                        if (noNotifyService || (process.platform == 'linux' && !require('linux-dbus').hasService('org.freedesktop.Notifications')))
                         {
                             // No D-Bus service to handle notifications, so we must fake a notification with ZENITY --info
                             if (require('message-box').zenity.timeout)
                             {
                                 // Timeout Supported
-                                retVal.child = require('child_process').execFile(require('message-box').zenity.path, ['zenity', '--info', '--title=' + retVal.title, '--text=' + retVal.caption, '--timeout=5'], { uid: retVal.consoleUid, env: retVal.xinfo.exportEnv() });
+                                retVal.child = require('child_process').execFile(require('message-box').zenity.path, ['zenity', '--info', '--title=' + retVal.title, '--text=' + retVal.caption, '--timeout=5'], { uid: retVal.consoleUid, env: retVal.xinfo.exportEnv(['LANG']) });
                             }
                             else
                             {
                                 // No Timeout Support, so we must fake it
-                                retVal.child = require('child_process').execFile(require('message-box').zenity.path, ['zenity', '--info', '--title=' + retVal.title, '--text=' + retVal.caption], { uid: retVal.consoleUid, env: retVal.xinfo.exportEnv() });
+                                retVal.child = require('child_process').execFile(require('message-box').zenity.path, ['zenity', '--info', '--title=' + retVal.title, '--text=' + retVal.caption], { uid: retVal.consoleUid, env: retVal.xinfo.exportEnv(['LANG']) });
                                 retVal.child.timeout = setTimeout(function (c) { c.timeout = null; c.kill(); }, 5000, retVal.child);
                             }
                             retVal.child.descriptorMetadata = 'toaster (zenity/messagebox)'
@@ -218,7 +220,7 @@ function Toaster()
                                 else
                                 {
                                     // No Timeout Support, so we must fake it
-                                    retVal.child = require('child_process').execFile(require('message-box').zenity.path, ['zenity', '--info', '--title=' + retVal.title, '--text=' + retVal.caption], { uid: retVal.consoleUid, env: retVal.xinfo.exportEnv() });
+                                    retVal.child = require('child_process').execFile(require('message-box').zenity.path, ['zenity', '--info', '--title=' + retVal.title, '--text=' + retVal.caption], { uid: retVal.consoleUid, env: retVal.xinfo.exportEnv(['LANG']) });
                                     retVal.child.timeout = setTimeout(function (c) { c.timeout = null; c.kill(); }, 5000, retVal.child);
                                 }
                                 retVal.child.descriptorMetadata = 'toaster (zenity/messagebox)'
@@ -255,7 +257,7 @@ function Toaster()
                                 return (retVal);
                             }
 		
-                            var dialogEnv = retVal.xinfo.exportEnv();
+                            var dialogEnv = retVal.xinfo.exportEnv(['LANG', 'XDG_RUNTIME_DIR']);
                             if (!dialogEnv.XDG_RUNTIME_DIR) { dialogEnv.XDG_RUNTIME_DIR = xdg; }
                             retVal._notify = require('child_process').execFile(util, ['kdialog', '--title', retVal.title, '--passivepopup', retVal.caption, '5'], { uid: retVal.consoleUid, env: dialogEnv });
                             retVal._notify.descriptorMetadata = 'toaster (kdialog)'
@@ -266,7 +268,7 @@ function Toaster()
                         }
                         else
                         {
-                            if (require('message-box').notifysend)
+                            if (!noNotifyService && require('message-box').notifysend)
                             {
                                 // Using notify-send
                                 if (require('user-sessions').whoami() == 'root')
@@ -298,7 +300,8 @@ function Toaster()
                             }
                         }
                     }
-                }
+                };
+                retVal._show();
                 break;
             case 'darwin':
                 //

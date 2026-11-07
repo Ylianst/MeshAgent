@@ -1065,12 +1065,14 @@ function getDesktopEnvironment(uid, display)
     return (best);
 }
 
-function exportEnv()
+// Dialogs name the session variables they take. Given the session bus, GTK4 zenity waits on portal
+// activation and stays unmapped for over a minute in a session whose xdg-desktop-portal cannot start.
+function exportEnv(names)
 {
     var r = {};
     if (this.env)
     {
-        for (var key in this.env) { r[key] = this.env[key]; }
+        for (var key in this.env) { if (names == null || names.indexOf(key) >= 0) { r[key] = this.env[key]; } }
     }
     var xenv =
         {
