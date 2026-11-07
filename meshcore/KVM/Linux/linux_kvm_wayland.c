@@ -41,6 +41,15 @@ limitations under the License.
 // The above sequence was reproducible on Ubuntu 25.10
 static int g_kvmWaylandSticky = 0;
 
+// Inherited by the capture child across the fork. Reset to AUTO for every console connect, since
+// a picked session's X11 login may sit behind the Wayland session that holds the seat.
+static int g_kvmBackendForced = KVM_BACKEND_AUTO;
+
+void kvm_wayland_force_backend(int backend)
+{
+	g_kvmBackendForced = backend;
+}
+
 static int kvm_read_systemd_value(const char *path, const char *key, char *value, size_t valueLen)
 {
 	FILE *f = NULL;
@@ -131,6 +140,11 @@ int kvm_is_wayland_session_for_uid(int uid)
 	if (fallbackUid < 0)
 	{
 		fallbackUid = (int)getuid();
+	}
+
+	if (g_kvmBackendForced != KVM_BACKEND_AUTO)
+	{
+		return g_kvmBackendForced == KVM_BACKEND_DRM ? 1 : 0;
 	}
 
 	if (g_kvmWaylandSticky != 0)

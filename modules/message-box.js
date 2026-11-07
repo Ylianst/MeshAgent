@@ -342,7 +342,7 @@ function linux_messageBox()
         });
     
 
-    this.create = function create(title, caption, timeout, layout)
+    this.create = function create(title, caption, timeout, layout, sid)
     {
         if (timeout == null) { timeout = 10; }
         if (title == 'MeshCentral') { try { title = require('MeshAgent').displayName; } catch (x) { } }
@@ -350,16 +350,18 @@ function linux_messageBox()
         var uid;    
         var xinfo;
         var min = require('user-sessions').minUid();
+        // A login picked in the viewer is the one to ask; never fall back to the console's
+        var picked = require('user-sessions').pickedUid(sid);
 
         try
         {
-            uid = require('user-sessions').consoleUid();
+            uid = picked != null ? picked : require('user-sessions').consoleUid();
             xinfo = require('monitor-info').getXInfo(uid);
         }
         catch(e)
         {
             uid = 0;
-            xinfo = require('monitor-info').getXInfo(0);
+            xinfo = picked != null ? null : require('monitor-info').getXInfo(0);
         }
 
         if (xinfo == null || (uid != 0 && uid < min))

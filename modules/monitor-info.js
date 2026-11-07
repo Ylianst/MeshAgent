@@ -369,6 +369,9 @@ function monitorinfo()
             var retry = false;
             if (this._kvmcheck_wayland())
             {
+                // getRemoteDesktopStream() hands these paths to every X11 capture child, and a Wayland desktop
+                // now does not rule one out later: an X11 or Xvfb login picked in the viewer, an X11 greeter
+                if (!(this.Location_X11LIB && this.Location_X11TST && this.Location_X11EXT)) { this._check(); }
                 this.kvm_x11_serverFound = true;
                 this.emit('kvmSupportDetected', true);
                 return;
@@ -620,6 +623,8 @@ function monitorinfo()
             child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
             child.stdin.write("ps " + (process.platform == 'freebsd' ? "-ax " : "") + "-e -o uid -o tty -o command | grep X | ");
             child.stdin.write("awk '{ ");
+            // xinit and shell wrappers repeat the server's -auth on their own command line; only the server itself counts
+            child.stdin.write('        xl=split($3,xp,"/"); if(xp[xl]!~/^X/) { next; }');
             child.stdin.write('        display="";');
             child.stdin.write('        if($4~/^:/)');
             child.stdin.write('        {');
@@ -686,6 +691,7 @@ function monitorinfo()
                     child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
                     child.stdin.write("loginctl show-session -p State -p Display " + sids.join(' ') + " | tr '\\n' '`' | awk '{");
                     child.stdin.write('   len=split($0,tok,"``");');
+                    child.stdin.write('   first="";');
                     child.stdin.write('   for(n=1;n<=len;++n)');
                     child.stdin.write('   {');
                     child.stdin.write('      len2=split(tok[n],val,"`");');
@@ -704,8 +710,10 @@ function monitorinfo()
                     child.stdin.write('            active=val[i];');
                     child.stdin.write('         }');
                     child.stdin.write('      }');
-                    child.stdin.write('      if(active=="active") { print display; break; }');
+                    child.stdin.write('      if(active=="active" && display!="") { print display; exit; }');
+                    child.stdin.write('      if(first=="" && display!="") { first=display; }');
                     child.stdin.write('   }');
+                    child.stdin.write('   print first;');
                     child.stdin.write("}'\nexit\n");
                     child.waitExit();
 
@@ -911,6 +919,27 @@ function monitorinfo()
                 }
             }
             return (xinfo_xdm(ret, consoleuid));
+        };
+        // The X server a capture child running as uid should open. A greeter is captured as root:
+        // LightDM and SDDM run its X server as root, which getXInfo(0) finds, but GDM runs it as the
+        // greeter account, whose cookie root can still read.
+        this.getCaptureXInfo = function getCaptureXInfo(uid)
+        {
+            var mi = require('monitor-info');
+            var ret = mi.getXInfo(uid);
+            if (uid == 0 && (ret == null || !ret.display))
+            {
+                try
+                {
+                    var greeter = require('user-sessions').gdmUid;
+                    var g = (greeter > 0) ? mi.getXInfo(greeter) : null;
+                    if (g != null && g.xauthority && g.display) { ret = g; }
+                }
+                catch (e)
+                {
+                }
+            }
+            return (ret);
         };
     }
 }
