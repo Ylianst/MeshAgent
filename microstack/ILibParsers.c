@@ -2680,6 +2680,33 @@ char* g_ILibCrashID_HASH = NULL;
 char* g_ILibCrashDump_path = NULL;
 
 #if defined(WIN32)
+// Starts a StackWalk64() frame from a CONTEXT and returns the machine type for it
+static DWORD ILib_InitStackFrame(STACKFRAME64 *frame, const CONTEXT *ctx)
+{
+	ZeroMemory(frame, sizeof(STACKFRAME64));
+	frame->AddrPC.Mode = AddrModeFlat;
+	frame->AddrFrame.Mode = AddrModeFlat;
+	frame->AddrStack.Mode = AddrModeFlat;
+#if defined(_M_IX86)
+	frame->AddrPC.Offset = ctx->Eip;
+	frame->AddrFrame.Offset = ctx->Ebp;
+	frame->AddrStack.Offset = ctx->Esp;
+	return(IMAGE_FILE_MACHINE_I386);
+#elif defined(_M_ARM64)
+	frame->AddrPC.Offset = ctx->Pc;
+	frame->AddrFrame.Offset = ctx->Sp;
+	frame->AddrStack.Offset = ctx->Sp;
+	return(IMAGE_FILE_MACHINE_ARM64);
+#elif defined(_M_X64)
+	frame->AddrPC.Offset = ctx->Rip;
+	frame->AddrFrame.Offset = ctx->Rsp;
+	frame->AddrStack.Offset = ctx->Rsp;
+	return(IMAGE_FILE_MACHINE_AMD64);
+#else
+#error Unsupported Windows architecture
+#endif
+}
+
 int ILib_WindowsExceptionFilterEx(DWORD exceptionCode, void *exceptionInfo, ILib_DumpEnabledContext *exceptionContext)
 {
 	if (IsDebuggerPresent()) { return(EXCEPTION_CONTINUE_SEARCH); }
@@ -2703,7 +2730,6 @@ void ILib_WindowsExceptionDebugEx(ILib_DumpEnabledContext *dumpEnabledExceptionC
 	int len = 0;
 	CONTEXT *exceptionContext = dumpEnabledExceptionContext->pctx;
 
-	ZeroMemory(&StackFrame, sizeof(STACKFRAME64));
 	buffer[0] = 0;
 
 	if (g_ILibCrashDump_path != NULL)
@@ -2725,31 +2751,7 @@ void ILib_WindowsExceptionDebugEx(ILib_DumpEnabledContext *dumpEnabledExceptionC
 	}
 
 
-#ifndef WIN64
-	MachineType = IMAGE_FILE_MACHINE_I386;
-	StackFrame.AddrPC.Offset = exceptionContext->Eip;
-	StackFrame.AddrPC.Mode = AddrModeFlat;
-	StackFrame.AddrFrame.Offset = exceptionContext->Ebp;
-	StackFrame.AddrFrame.Mode = AddrModeFlat;
-	StackFrame.AddrStack.Offset = exceptionContext->Esp;
-	StackFrame.AddrStack.Mode = AddrModeFlat;
-#elif ARM64
-	MachineType = IMAGE_FILE_MACHINE_ARM64;
-	StackFrame.AddrPC.Offset = exceptionContext->Pc;
-	StackFrame.AddrPC.Mode = AddrModeFlat;
-	StackFrame.AddrFrame.Offset = exceptionContext->Sp;
-	StackFrame.AddrFrame.Mode = AddrModeFlat;
-	StackFrame.AddrStack.Offset = exceptionContext->Sp;
-	StackFrame.AddrStack.Mode = AddrModeFlat;
-#else
-	MachineType = IMAGE_FILE_MACHINE_AMD64;
-	StackFrame.AddrPC.Offset = exceptionContext->Rip;
-	StackFrame.AddrPC.Mode = AddrModeFlat;
-	StackFrame.AddrFrame.Offset = exceptionContext->Rsp;
-	StackFrame.AddrFrame.Mode = AddrModeFlat;
-	StackFrame.AddrStack.Offset = exceptionContext->Rsp;
-	StackFrame.AddrStack.Mode = AddrModeFlat;
-#endif
+	MachineType = ILib_InitStackFrame(&StackFrame, exceptionContext);
 
 
 	if (StackWalk64(
@@ -2780,7 +2782,7 @@ void ILib_WindowsExceptionDebugEx(ILib_DumpEnabledContext *dumpEnabledExceptionC
 			pimg->SizeOfStruct = sizeof(IMAGEHLP_LINE64);
 
 			len = sprintf_s(buffer, sizeof(buffer), "FATAL EXCEPTION @ ");
-#ifdef WIN64
+#ifdef _WIN64
 			len += sprintf_s(buffer + len, sizeof(buffer) - len, "[FuncAddr: 0x%016llx / BaseAddr: 0x%016llx / Delta: %lld]\n", (unsigned __int64)StackFrame.AddrPC.Offset, (unsigned __int64)&ILibCreateChain, (unsigned __int64)&ILibCreateChain - (unsigned __int64)StackFrame.AddrPC.Offset);
 #else
 			len += sprintf_s(buffer + len, sizeof(buffer) - len, "[FuncAddr: 0x%08x / BaseAddr: 0x%08x / Delta: %d]\n", (unsigned __int32)StackFrame.AddrPC.Offset, (unsigned __int32)&ILibCreateChain, (unsigned __int32)&ILibCreateChain - (unsigned __int32)StackFrame.AddrPC.Offset);
@@ -2948,7 +2950,7 @@ void ILibChain_DebugOffset(char *buffer, int bufferLen, uint64_t addrOffset)
 	pimg->SizeOfStruct = sizeof(IMAGEHLP_LINE64);
 	SymInitialize(GetCurrentProcess(), NULL, TRUE);
 
-#ifdef WIN64
+#ifdef _WIN64
 	sprintf_s(buffer, bufferLen, "[Unable to decode function address, BaseAddr: 0x%016llx]", (unsigned __int64)&ILibCreateChain);
 #else
 	sprintf_s(buffer, bufferLen, "[Unable to decode function address, BaseAddr: 0x%08x]", (unsigned __int32)&ILibCreateChain);
@@ -2956,7 +2958,7 @@ void ILibChain_DebugOffset(char *buffer, int bufferLen, uint64_t addrOffset)
 
 	if (SymFromAddr(GetCurrentProcess(), (DWORD64)addrOffset, &tmp, psym))
 	{
-#ifdef WIN64
+#ifdef _WIN64
 		len += sprintf_s(buffer + len, bufferLen - len, "[BaseAddr: 0x%016llx, %s", (unsigned __int64)&ILibCreateChain, (char*)(psym->Name));
 #else
 		len += sprintf_s(buffer + len, bufferLen - len, "[BaseAddr: 0x%08x, %s", (unsigned __int32)&ILibCreateChain, (char*)(psym->Name));
@@ -3037,7 +3039,6 @@ char* ILibChain_Debug(void *chain, char* buffer, int bufferLen)
 	int len = 0;
 	CONTEXT ctx;
 
-	ZeroMemory(&StackFrame, sizeof(STACKFRAME64));
 	if (chain != NULL)
 	{
 		if (bChain->MicrostackThreadHandle != NULL)
@@ -3059,31 +3060,7 @@ char* ILibChain_Debug(void *chain, char* buffer, int bufferLen)
 
 	if (len != 0) { return(NULL); }
 
-#ifndef WIN64
-	MachineType = IMAGE_FILE_MACHINE_I386;
-	StackFrame.AddrPC.Offset = bChain != NULL ? bChain->MicrostackThreadContext.Eip : ctx.Eip;
-	StackFrame.AddrPC.Mode = AddrModeFlat;
-	StackFrame.AddrFrame.Offset = bChain != NULL ? bChain->MicrostackThreadContext.Ebp : ctx.Ebp;
-	StackFrame.AddrFrame.Mode = AddrModeFlat;
-	StackFrame.AddrStack.Offset = bChain != NULL ? bChain->MicrostackThreadContext.Esp : ctx.Esp;
-	StackFrame.AddrStack.Mode = AddrModeFlat;
-#elif ARM64
-	MachineType = IMAGE_FILE_MACHINE_ARM64;
-	StackFrame.AddrPC.Offset = bChain != NULL ? bChain->MicrostackThreadContext.Pc : ctx.Pc;
-	StackFrame.AddrPC.Mode = AddrModeFlat;
-	StackFrame.AddrFrame.Offset = bChain != NULL ? bChain->MicrostackThreadContext.Sp : ctx.Sp;
-	StackFrame.AddrFrame.Mode = AddrModeFlat;
-	StackFrame.AddrStack.Offset = bChain != NULL ? bChain->MicrostackThreadContext.Sp : ctx.Sp;
-	StackFrame.AddrStack.Mode = AddrModeFlat;
-#else
-	MachineType = IMAGE_FILE_MACHINE_AMD64;
-	StackFrame.AddrPC.Offset = bChain != NULL ? bChain->MicrostackThreadContext.Rip : ctx.Rip;
-	StackFrame.AddrPC.Mode = AddrModeFlat;
-	StackFrame.AddrFrame.Offset = bChain != NULL ? bChain->MicrostackThreadContext.Rsp : ctx.Rsp;
-	StackFrame.AddrFrame.Mode = AddrModeFlat;
-	StackFrame.AddrStack.Offset = bChain != NULL ? bChain->MicrostackThreadContext.Rsp : ctx.Rsp;
-	StackFrame.AddrStack.Mode = AddrModeFlat;
-#endif
+	MachineType = ILib_InitStackFrame(&StackFrame, bChain != NULL ? &(bChain->MicrostackThreadContext) : &ctx);
 
 	buffer[0] = 0;
 	retVal = buffer;
