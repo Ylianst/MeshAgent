@@ -1293,9 +1293,9 @@ duk_ret_t ILibDuktape_MeshAgent_userChanged(duk_context *ctx)
 		ILibDuktape_MeshAgent_RemoteDesktop_SelectBackend(ctx, id, picked != -1);
 
 		duk_eval_string(ctx, "require('monitor-info')");				//[uid][monitor-info]
-		duk_get_prop_string(ctx, -1, "getXInfo");						//[uid][monitor-info][getXInfo]
-		duk_swap_top(ctx, -2);											//[uid][getXInfo][this]
-		duk_dup(ctx, -3);												//[uid][getXInfo][this][uid]
+		duk_get_prop_string(ctx, -1, "getCaptureXInfo");				//[uid][monitor-info][getCaptureXInfo]
+		duk_swap_top(ctx, -2);											//[uid][getCaptureXInfo][this]
+		duk_dup(ctx, -3);												//[uid][getCaptureXInfo][this][uid]
 		if (duk_pcall_method(ctx, 1) != 0)															//[uid][xinfo|error]
 		{
 			// getXInfo() has no X server to query on a Wayland/greeter session and throws. The DRM
@@ -1457,8 +1457,10 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		// At a DM greeter the X server and its Xauthority are root-owned (e.g. LightDM's
 		// /var/run/lightdm/root/:0, mode 0600). consoleUid() returns the DM's own service uid here, so
 		// the capture child setuid()s to it and can no longer read that cookie: XOpenDisplay fails and
-		// the child exits. Capture as root instead; getXInfo(0) already resolves the root server's
-		// cookie. gdmUid==console_uid only holds at the greeter (a real login is uid>=1000).
+		// the child exits. Capture as root instead; getCaptureXInfo(0) resolves the root server's
+		// cookie, or for GDM, whose greeter X server runs as the greeter account, that account's.
+		// gdmUid==console_uid only holds at the greeter: gdmUid is the uid of the greeter holding the
+		// seat, else a display manager account below UID_MIN, which no login has.
 		if (TSID == -1 && console_uid != 0)
 		{
 			int gdmuid = -1;
@@ -1499,7 +1501,7 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 
 		if (!waylandSession && (self == 0 || getenv("XAUTHORITY") == NULL || getenv("DISPLAY") == NULL))
 		{
-			if (duk_peval_string(ctx, "require('monitor-info').getXInfo") == 0)
+			if (duk_peval_string(ctx, "require('monitor-info').getCaptureXInfo") == 0)
 			{
 				duk_push_int(ctx, console_uid);
 				if (duk_pcall(ctx, 1) == 0)

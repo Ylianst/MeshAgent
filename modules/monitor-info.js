@@ -369,6 +369,9 @@ function monitorinfo()
             var retry = false;
             if (this._kvmcheck_wayland())
             {
+                // getRemoteDesktopStream() hands these paths to every X11 capture child, and a Wayland desktop
+                // now does not rule one out later: an X11 or Xvfb login picked in the viewer, an X11 greeter
+                if (!(this.Location_X11LIB && this.Location_X11TST && this.Location_X11EXT)) { this._check(); }
                 this.kvm_x11_serverFound = true;
                 this.emit('kvmSupportDetected', true);
                 return;
@@ -916,6 +919,27 @@ function monitorinfo()
                 }
             }
             return (xinfo_xdm(ret, consoleuid));
+        };
+        // The X server a capture child running as uid should open. A greeter is captured as root:
+        // LightDM and SDDM run its X server as root, which getXInfo(0) finds, but GDM runs it as the
+        // greeter account, whose cookie root can still read.
+        this.getCaptureXInfo = function getCaptureXInfo(uid)
+        {
+            var mi = require('monitor-info');
+            var ret = mi.getXInfo(uid);
+            if (uid == 0 && (ret == null || !ret.display))
+            {
+                try
+                {
+                    var greeter = require('user-sessions').gdmUid;
+                    var g = (greeter > 0) ? mi.getXInfo(greeter) : null;
+                    if (g != null && g.xauthority && g.display) { ret = g; }
+                }
+                catch (e)
+                {
+                }
+            }
+            return (ret);
         };
     }
 }

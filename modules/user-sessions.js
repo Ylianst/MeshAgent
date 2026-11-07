@@ -443,6 +443,13 @@ function UserSessions()
                 {
                     if(this.hasLoginCtl)
                     {
+                        // GDM 49+ runs its greeters as dynamic users (gdm-greeter, gdm-greeter-2, ...) above
+                        // UID_MIN, so the account lookups below would find the legacy gdm account instead
+                        if (process.platform == 'linux')
+                        {
+                            var greeter = linux_seatGreeter(linux_logindSessions());
+                            if (greeter != null) { return (parseInt(greeter.User)); }
+                        }
                         var pwd = null;
                         var uids = [];
                         child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -607,6 +614,15 @@ function UserSessions()
         {
             return (s.Class != 'greeter' && s.Class != 'lock-screen' && s.Class.indexOf('manager') != 0 && s.Class.indexOf('background') != 0);
         }
+        // The display manager's login screen, when it is what a seat shows
+        function linux_seatGreeter(sessions)
+        {
+            for (var i = 0; sessions != null && i < sessions.length; ++i)
+            {
+                if (sessions[i].Class == 'greeter' && linux_isConsoleSession(sessions[i]) && sessions[i].Active == 'yes') { return (sessions[i]); }
+            }
+            return (null);
+        }
         // What a 'changed' consumer can observe: the login sessions and which one holds the console.
         // Greeter, manager and background sessions, idle/lock hints and device lists also rewrite
         // logind state but are left out on purpose.
@@ -750,6 +766,7 @@ function UserSessions()
                 // SSH login) the way this always did, rather than nobody. A greeter holding the seat
                 // is not headless, so SSH logins stay Online there.
                 if (!seatSeen && firstActive >= 0) { ret[firstActive].State = 'Active'; }
+                Object.defineProperty(ret, 'logind', { value: sessions });
             }
             
             if (ret == null)
@@ -784,10 +801,10 @@ function UserSessions()
         }
 
         // The sessions a desktop capture can attach to, keyed by uid: any X11 session (the X server
-        // answers even while its VT is switched away) and the seat's active Wayland session. The
-        // DRM backend scans out the active VT, so a switched-away or headless Wayland session has
-        // nothing to show. A uid with several candidates keeps its active one. Without logind
-        // the only candidate is the console user.
+        // answers even while its VT is switched away), the seat's active Wayland session and the seat's
+        // login screen. The DRM backend scans out the active VT, so a switched-away or headless Wayland
+        // session has nothing to show. A uid with several candidates keeps its active one. Without
+        // logind the only candidate is the console user.
         this.desktopSessions = function desktopSessions()
         {
             var ret = {}, sessions = null, i, uid;
@@ -802,6 +819,10 @@ function UserSessions()
                 uid = parseInt(s.uid);
                 if (ret[uid] == null || (ret[uid].State != 'Active' && (s.State == 'Active' || (ret[uid].Display == '' && s.Display != '')))) { ret[uid] = s; }
             }
+            // A greeter is captured as root, so the login screen goes under uid 0. Its own uid would not
+            // do: GDM 49+ greeter uids sit above UID_MAX, which kvm-helper takes as a session to spawn.
+            var greeter = linux_seatGreeter(sessions.logind);
+            if (greeter != null) { ret[0] = { Username: greeter.Name, Domain: '', SessionId: greeter.Id, State: 'Active', uid: 0, StationName: 'Console', Type: greeter.Type, Display: greeter.Display, Seat: greeter.Seat, Remote: false }; }
             return (ret);
         };
 
