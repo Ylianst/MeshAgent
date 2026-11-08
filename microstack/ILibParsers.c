@@ -40,9 +40,9 @@ limitations under the License.
 			#include <sys/mount.h>
 		#endif
 		#include <pthread.h>
+		#include <inttypes.h>
 		#ifndef _NOILIBSTACKDEBUG
 			#include <execinfo.h>
-			#include <inttypes.h>
 		#endif
 	#endif
 #endif 
@@ -2832,7 +2832,7 @@ void ILib_WindowsExceptionDebugEx(ILib_DumpEnabledContext *dumpEnabledExceptionC
 }
 #elif defined(_POSIX) && !defined(__APPLE__)
 #ifndef _NOILIBSTACKDEBUG
-char ILib_POSIX_CrashParamBuffer[5 * sizeof(void*)];
+extern char ILib_POSIX_CrashParamBuffer[];
 #define ILIB_POSIX_CRASHFRAME_MAXLEN 256
 void ILib_POSIX_CrashHandler(int code)
 {
@@ -2941,6 +2941,12 @@ void ILib_POSIX_CrashHandler(int code)
 		ILIBCRITICALEXITMSG(254, msgBuffer);
 	}
 }
+#endif
+#endif
+
+#if defined(_POSIX)
+// Built in every POSIX build, also without the crash handler and on macOS, because -faddr and -fdelta decode through addr2line with the path set here
+char ILib_POSIX_CrashParamBuffer[5 * sizeof(void*)];
 char* ILib_POSIX_InstallCrashHandler(char *exename)
 {
 	char *retVal = NULL;
@@ -2950,11 +2956,12 @@ char* ILib_POSIX_InstallCrashHandler(char *exename)
 		((char**)ILib_POSIX_CrashParamBuffer)[2] = "-e";
 		((char**)ILib_POSIX_CrashParamBuffer)[3] = retVal;
 		((char**)ILib_POSIX_CrashParamBuffer)[4] = NULL;
+#if !defined(__APPLE__) && !defined(_NOILIBSTACKDEBUG)
 		signal(SIGSEGV, ILib_POSIX_CrashHandler);
+#endif
 	}
 	return retVal;
 }
-#endif
 #endif
 
 void ILibChain_DebugDelta(char *buffer, int bufferLen, uint64_t delta)
@@ -2964,7 +2971,6 @@ void ILibChain_DebugDelta(char *buffer, int bufferLen, uint64_t delta)
 
 void ILibChain_DebugOffset(char *buffer, int bufferLen, uint64_t addrOffset)
 {
-#ifndef _NOILIBSTACKDEBUG
 #ifdef WIN32
 	int len = 0;
 	char symBuffer[4096];
@@ -3050,10 +3056,6 @@ void ILibChain_DebugOffset(char *buffer, int bufferLen, uint64_t addrOffset)
 
 		buffer[len] = 0;
 	}
-#endif
-#else
-	(void)addrOffset;
-	sprintf_s(buffer, bufferLen, "[Built without the crash handler, no symbol lookup]");
 #endif
 }
 

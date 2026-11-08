@@ -1,20 +1,24 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <!-- Build switch for the crash handler, imported by every agent project right after Microsoft.Cpp.props.
      msbuild /p:CrashHandler=0 defines _NOILIBSTACKDEBUG, the same as CRASH_HANDLER=0 in the makefile: no stack walk, no symbol
-     lookup, no minidump, no -faddr and -fdelta decoding. The exception filter and the FATAL EXCEPTION line stay.
-     DbgHelp.lib is only linked with the handler, so an off build has no dbghelp.dll import. -->
+     lookup at crash or hang time, no minidump. The exception filter, the FATAL EXCEPTION line and -faddr/-fdelta stay.
+     DbgHelp.lib is always linked for the -fdelta decoder, delay-loaded in an off build so dbghelp.dll is only loaded by that command. -->
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <CrashHandler Condition="'$(CrashHandler)'==''">1</CrashHandler>
   </PropertyGroup>
+  <ItemDefinitionGroup>
+    <Link>
+      <AdditionalDependencies>DbgHelp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(CrashHandler)'=='0'">
     <ClCompile>
       <PreprocessorDefinitions>_NOILIBSTACKDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
-  </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(CrashHandler)'!='0'">
     <Link>
-      <AdditionalDependencies>DbgHelp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <DelayLoadDLLs>dbghelp.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
+      <AdditionalDependencies>delayimp.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <Target Name="MeshAgentCheckCrashHandler" BeforeTargets="ClCompile">

@@ -114,9 +114,7 @@ int main(int argc, char **argv)
 #endif
 
 #if defined (_POSIX)
-#ifndef _NOILIBSTACKDEBUG
 char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
-#endif
 #endif
 
 
@@ -428,9 +426,7 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	retCode = agentHost->exitCode;
 	MeshAgent_Destroy(agentHost);
 	agentHost = NULL;
-#ifndef _NOILIBSTACKDEBUG
 	if (crashMemory != NULL) { free(crashMemory); }
-#endif
 #endif
 	return retCode;
 }
