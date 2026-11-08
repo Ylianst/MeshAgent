@@ -169,6 +169,7 @@ static void kvm_slave_send(const void *buffer, size_t len)
 }
 
 int remoteMouseX = 0, remoteMouseY = 0;
+static int remoteMouseInjected = 0;	// Set when this pass injected a mouse event, so the local-move check skips a pointer the X server may not have moved yet
 
 extern void* tilebuffer;
 extern char **environ;
@@ -938,6 +939,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 				if (g_enableEvents)
 				{
 					remoteMouseX = x, remoteMouseY = y;
+					remoteMouseInjected = 1;
 					MouseAction(x, y, (int)(unsigned char)(block[5]), w, eventdisplay);
 				}
 			}
@@ -1491,7 +1493,11 @@ void* kvm_server_mainloop_x11(void* parm)
 				&rr, &cr, &rx, &ry, &wx, &wy, &mr);
 			if (rs == 1 && cursordisplay != NULL)
 			{
-				cimage = (gRemoteMouseRenderDefault != 0 || (remoteMouseX != rx && remoteMouseY != ry)) ? (char*)xfixes_exports->XFixesGetCursorImage(cursordisplay) : NULL;
+				// XTest moves the pointer on eventdisplay and XQueryPointer reads it on imagedisplay, so in a pass with injected input rx and ry can still be the old position.
+				// Without this check a browser drag counted as a local move every other pass, and the viewer pointer flipped between its own and the one drawn into the frame.
+				int localMove = (remoteMouseInjected == 0 && (remoteMouseX != rx || remoteMouseY != ry));
+				remoteMouseInjected = 0;
+				cimage = (gRemoteMouseRenderDefault != 0 || localMove) ? (char*)xfixes_exports->XFixesGetCursorImage(cursordisplay) : NULL;
 				// A failed fetch draws no pointer into the frame, so it takes the unhide branch and the viewer keeps its own pointer
 				if (cimage != NULL)
 				{
