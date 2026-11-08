@@ -1177,11 +1177,16 @@ void bitblt(char *sourcebitmap, int source_width, int source_height, int sx, int
 	{
 		for (x = 0; x < rw; ++x)
 		{
-			if (((bitmapdata2**)srect)[y][x].a > 128)
+			// XFixes cursor pixels are premultiplied ARGB, so the cursor colour is added as is and the frame only fades by the remaining alpha.
+			// This used to write 255 minus the cursor colour, which drew a black I-beam as a white outline that vanished over a text area.
+			int a = ((bitmapdata2**)srect)[y][x].a;
+			if (a != 0)
 			{
-				((bitmapdata2**)drect)[y][x].r = (255 - ((bitmapdata2**)srect)[y][x].r);
-				((bitmapdata2**)drect)[y][x].g = (255 - ((bitmapdata2**)srect)[y][x].g);
-				((bitmapdata2**)drect)[y][x].b = (255 - ((bitmapdata2**)srect)[y][x].b);
+				bitmapdata2 *s = &((bitmapdata2**)srect)[y][x];
+				bitmapdata2 *d = &((bitmapdata2**)drect)[y][x];
+				d->r = (unsigned char)(s->r + (d->r * (255 - a)) / 255);
+				d->g = (unsigned char)(s->g + (d->g * (255 - a)) / 255);
+				d->b = (unsigned char)(s->b + (d->b * (255 - a)) / 255);
 			}
 		}
 	}
@@ -1526,7 +1531,9 @@ void* kvm_server_mainloop_x11(void* parm)
 					int localRy = ry - CAPTURE_Y;
 					unsigned short mx = (localRx > (int)xhot) ? (unsigned short)(localRx - xhot) : 0;
 					unsigned short my = (localRy > (int)yhot) ? (unsigned short)(localRy - yhot) : 0;
-					char *pixels = cimage + (sizeof(void*) == 8 ? 24 : 16);
+					// Offset 24 (16 on 32-bit) holds the pixels pointer of XFixesCursorImage, the data itself follows the struct.
+					// Reading from the offset itself took the pixels, atom and name fields as the first three pixels and shifted the image.
+					char *pixels = (char*)((unsigned long**)(cimage + (sizeof(void*) == 8 ? 24 : 16)))[0];
 
 					if ((mx + w) > (unsigned short)SCREEN_WIDTH)  { mx = (unsigned short)(SCREEN_WIDTH  - w); }
 					if ((my + h) > (unsigned short)SCREEN_HEIGHT) { my = (unsigned short)(SCREEN_HEIGHT - h); }
