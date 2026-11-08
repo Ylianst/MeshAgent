@@ -264,23 +264,53 @@ static GLuint kvm_drm_egl_compile_shader(GLenum type, const char *src, char *log
 	return shader;
 }
 
+// Device number of a DRM node a vendor reported, 0 when it is not in /dev (container, udev rules)
+static dev_t kvm_drm_egl_node_dev(const char *path)
+{
+	struct stat st;
+	return (path != NULL && stat(path, &st) == 0) ? st.st_rdev : 0;
+}
+
+// Two reported nodes name the same device: by device number when both are in /dev, else by path
+static int kvm_drm_egl_same_node(dev_t a, const char *aPath, dev_t b, const char *bPath)
+{
+	if (a != 0 && b != 0) { return a == b; }
+	return aPath != NULL && bPath != NULL && strcmp(aPath, bPath) == 0;
+}
+
+// Opens and initializes one EGL device. A vendor that lists a GPU it cannot drive fails here instead of in
+// the caller, so the next vendor claiming the same card gets its turn.
+static EGLDisplay kvm_drm_egl_init_device_display(PFNEGLGETPLATFORMDISPLAYEXTPROC getPlatformDisplay, EGLDeviceEXT device, int debug)
+{
+	EGLint major = 0, minor = 0;
+	EGLDisplay dpy = getPlatformDisplay(EGL_PLATFORM_DEVICE_EXT, device, NULL);
+	if (dpy == EGL_NO_DISPLAY) { return EGL_NO_DISPLAY; }
+	if (eglInitialize(dpy, &major, &minor)) { return dpy; }
+	if (debug) { fprintf(stderr, "DRM EGL: eglInitialize failed on an EGL device for the capture GPU: 0x%04x\n", (unsigned int)eglGetError()); }
+	return EGL_NO_DISPLAY;
+}
+
 // Pin EGL to the GPU we capture from (by DRM node) so the loader uses the vendor that can import
 // its buffers (NVIDIA) instead of falling back to Mesa/swrast, which imports the tiles as black.
-// Sets *out_gpu_mismatch when our GPU exists but isn't an EGL device while others are, so the caller
-// fails instead of routing this card through a foreign vendor.
+// Sets *out_gpu_mismatch when a device for our card was identified but none initializes, or when nothing matched
+// our card and it either renders itself or several GPUs are present, so the caller fails instead of routing
+// this card through a foreign vendor.
 static EGLDisplay kvm_drm_egl_open_device_display(int drm_fd, bool *out_gpu_mismatch)
 {
 	PFNEGLQUERYDEVICESEXTPROC queryDevices = (PFNEGLQUERYDEVICESEXTPROC)eglGetProcAddress("eglQueryDevicesEXT");
 	PFNEGLQUERYDEVICESTRINGEXTPROC queryDeviceString = (PFNEGLQUERYDEVICESTRINGEXTPROC)eglGetProcAddress("eglQueryDeviceStringEXT");
 	PFNEGLGETPLATFORMDISPLAYEXTPROC getPlatformDisplay = (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT");
 	EGLDeviceEXT devices[16];
-	EGLDeviceEXT chosen = EGL_NO_DEVICE_EXT;
+	EGLDeviceEXT candidates[16];      // every device that matched our card, in vendor order
 	EGLDeviceEXT firstHardware = EGL_NO_DEVICE_EXT;
+	struct { dev_t card, render; const char *cardPath, *renderPath; } seen[16]; // distinct GPUs
 	EGLint count = 0;
+	EGLDisplay dpy;
 	struct stat cardSt, renderSt;
 	char renderPath[64];
-	int haveCard, haveRender;
-	int i;
+	int haveCard, cardIsRenderer, haveRender, hardwareCount = 0, candidateCount = 0;
+	int debug = (getenv("MESH_KVM_DRM_DEBUG") != NULL && atoi(getenv("MESH_KVM_DRM_DEBUG")) > 0);
+	int i, j;
 
 	if (out_gpu_mismatch != NULL) { *out_gpu_mismatch = false; }
 	if (queryDevices == NULL || queryDeviceString == NULL || getPlatformDisplay == NULL) { return EGL_NO_DISPLAY; }
@@ -289,32 +319,63 @@ static EGLDisplay kvm_drm_egl_open_device_display(int drm_fd, bool *out_gpu_mism
 	// The capture fd is a card node; an EGL device may report only its card node (Mesa) or only its
 	// render node (NVIDIA), so match against either by device-number.
 	haveCard = (drm_fd >= 0 && fstat(drm_fd, &cardSt) == 0) ? 1 : 0;
-	haveRender = (drm_fd >= 0 && kvm_drm_render_node_for_fd(drm_fd, renderPath, sizeof(renderPath)) && stat(renderPath, &renderSt) == 0) ? 1 : 0;
+	// libdrm answers from /sys/dev/char/<maj>:<min>/device/drm, so a name means the kernel driver renders
+	// even when the node is hidden in /dev (container, udev rules). The stat only serves the match below.
+	cardIsRenderer = (drm_fd >= 0 && kvm_drm_render_node_for_fd(drm_fd, renderPath, sizeof(renderPath))) ? 1 : 0;
+	haveRender = (cardIsRenderer && stat(renderPath, &renderSt) == 0) ? 1 : 0;
 	for (i = 0; i < count; ++i)
 	{
 		const char *cardNode = queryDeviceString(devices[i], EGL_DRM_DEVICE_FILE_EXT);
 		const char *renderNode = queryDeviceString(devices[i], EGL_DRM_RENDER_NODE_FILE_EXT);
-		struct stat st;
+		dev_t cardDev, renderDev;
+		int duplicate = 0;
 		if (cardNode == NULL && renderNode == NULL) { continue; } // software device: no DRM node
 		if (firstHardware == EGL_NO_DEVICE_EXT) { firstHardware = devices[i]; }
-		if (haveCard && cardNode != NULL && stat(cardNode, &st) == 0 && st.st_rdev == cardSt.st_rdev) { chosen = devices[i]; break; }
-		if (haveRender && renderNode != NULL && stat(renderNode, &st) == 0 && st.st_rdev == renderSt.st_rdev) { chosen = devices[i]; break; }
-	}
-	if (chosen == EGL_NO_DEVICE_EXT)
-	{
-		// Identified our GPU but no EGL device matched it. If another hardware EGL device exists, the
-		// default display would import this card's buffers through the wrong vendor (black) — flag it
-		// so the caller fails. Only guess firstHardware when our GPU was never identified at all.
-		if (haveCard || haveRender)
+		cardDev = kvm_drm_egl_node_dev(cardNode);
+		renderDev = kvm_drm_egl_node_dev(renderNode);
+		// With glvnd one GPU is listed once per vendor that claims it (Mesa lists every render node, driver or
+		// not), so count hardware, not entries.
+		for (j = 0; j < hardwareCount && !duplicate; ++j)
 		{
-			if (firstHardware != EGL_NO_DEVICE_EXT && out_gpu_mismatch != NULL) { *out_gpu_mismatch = true; }
-			if (getenv("MESH_KVM_DRM_DEBUG") != NULL && atoi(getenv("MESH_KVM_DRM_DEBUG")) > 0) { fprintf(stderr, "DRM EGL: no EGL device matched the capture GPU's DRM node\n"); }
-			return EGL_NO_DISPLAY;
+			duplicate = kvm_drm_egl_same_node(cardDev, cardNode, seen[j].card, seen[j].cardPath) ||
+				kvm_drm_egl_same_node(renderDev, renderNode, seen[j].render, seen[j].renderPath);
 		}
-		chosen = firstHardware;
+		if (!duplicate)
+		{
+			seen[hardwareCount].card = cardDev;
+			seen[hardwareCount].render = renderDev;
+			seen[hardwareCount].cardPath = cardNode;
+			seen[hardwareCount].renderPath = renderNode;
+			hardwareCount++;
+		}
+		if ((haveCard && cardDev != 0 && cardDev == cardSt.st_rdev) || (haveRender && renderDev != 0 && renderDev == renderSt.st_rdev))
+		{
+			candidates[candidateCount++] = devices[i];
+		}
 	}
-	if (chosen == EGL_NO_DEVICE_EXT) { return EGL_NO_DISPLAY; }
-	return getPlatformDisplay(EGL_PLATFORM_DEVICE_EXT, chosen, NULL);
+
+	// Try every vendor that claims our card, in list order. Mesa lists the NVIDIA render node too and cannot
+	// initialize it, so taking the first match would depend on the ICD file order.
+	for (i = 0; i < candidateCount; ++i)
+	{
+		if ((dpy = kvm_drm_egl_init_device_display(getPlatformDisplay, candidates[i], debug)) != EGL_NO_DISPLAY) { return dpy; }
+	}
+	if (candidateCount > 0 || (haveCard && (cardIsRenderer || hardwareCount > 1)))
+	{
+		// Our card is an EGL device no vendor can initialize, or it renders itself (or several GPUs are present) and
+		// nothing matched it. The default display would import its buffers through a foreign vendor (black) — flag it
+		// so the caller fails. Only guess when the card was never identified, or it is display-only and one GPU exists.
+		if (firstHardware != EGL_NO_DEVICE_EXT && out_gpu_mismatch != NULL) { *out_gpu_mismatch = true; }
+		if (debug) { fprintf(stderr, "DRM EGL: %d EGL device(s) matched the capture GPU, none usable (%d GPUs present)\n", candidateCount, hardwareCount); }
+		return EGL_NO_DISPLAY;
+	}
+	if (firstHardware == EGL_NO_DEVICE_EXT) { return EGL_NO_DISPLAY; }
+	// A display controller without a render node, like rockchip-drm on RK3588, is never an EGL device itself.
+	// With a single GPU present that GPU is what imports its scanout buffers.
+	dpy = kvm_drm_egl_init_device_display(getPlatformDisplay, firstHardware, debug);
+	// The one GPU that should import exists but will not initialize: the default display can only do worse
+	if (dpy == EGL_NO_DISPLAY && out_gpu_mismatch != NULL) { *out_gpu_mismatch = true; }
+	return dpy;
 }
 
 static bool kvm_drm_egl_init_gpu_readback(kvm_drm_egl_context *g, int drm_fd, char *out_error, size_t out_error_size)
@@ -336,10 +397,10 @@ static bool kvm_drm_egl_init_gpu_readback(kvm_drm_egl_context *g, int drm_fd, ch
 	g->dpy = kvm_drm_egl_open_device_display(drm_fd, &gpuMismatch);
 	if (g->dpy == EGL_NO_DISPLAY && gpuMismatch)
 	{
-		// This card's tiled buffers would read back black through another GPU's vendor; fail cleanly
-		// (its outputs can't be GPU-converted) rather than corrupting a multi-GPU desktop.
+		// This card's tiled buffers would read back black through another GPU's vendor, or no vendor drives it at all.
+		// Fail for good, since its outputs can't be GPU-converted, instead of trying the default display.
 		return kvm_drm_egl_fail_with_persistent_error(g, out_error, out_error_size,
-			"capture GPU has no matching EGL device on a multi-GPU system");
+			"no usable EGL device for the capture GPU (foreign vendor or driver missing)");
 	}
 	if (g->dpy == EGL_NO_DISPLAY)
 	{
