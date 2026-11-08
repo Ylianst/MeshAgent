@@ -1663,7 +1663,7 @@ int ILibIsRunningOnChainThread(void* chain);
 #else
 extern void ILib_POSIX_CrashHandler(int code);
 #define ILIBCRITICALERREXIT(ex) { ILibCriticalLog(NULL, __FILE__, __LINE__, errno, 0); fflush(stdout); exit(ex); }
-#if defined (_POSIX) && !(_NOILIBSTACKDEBUG)
+#if defined(_POSIX) && !defined(_NOILIBSTACKDEBUG)
 #define ILIBCRITICALEXIT(ex) ILib_POSIX_CrashHandler(ex);
 #else
 #define ILIBCRITICALEXIT(ex) {ILibCriticalLog(NULL, __FILE__, __LINE__, ex, errno); printf("CRITICALEXIT, FILE: %s, LINE: %d\r\n", __FILE__, __LINE__); fflush(stdout); exit(ex); }

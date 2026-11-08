@@ -284,7 +284,8 @@ CC = $(PATH_AARCH64)bin/aarch64-linux-gcc
 STRIP = $(PATH_AARCH64)bin/aarch64-linux-strip
 INCDIRS += -I$(PATH_AARCH64)include
 endif
-CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
+CRASH_HANDLER = 0
+CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
 KVM = 1
 LMS = 0
 endif
@@ -295,7 +296,8 @@ export PATH := $(PATH_AARCH64_CORTEXA53)bin:$(PATH_AARCH64_CORTEXA53)libexec/gcc
 export STAGING_DIR := $(PATH_AARCH64_CORTEXA53)
 CC = $(PATH_AARCH64_CORTEXA53)bin/aarch64-openwrt-linux-gcc
 STRIP = $(PATH_AARCH64_CORTEXA53)bin/aarch64-openwrt-linux-strip
-CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
+CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
+CRASH_HANDLER = 0
 INCDIRS += -I$(PATH_AARCH64_CORTEXA53)include
 KVM = 0
 LMS = 0
@@ -308,7 +310,8 @@ export PATH := $(PATH_ARMADA370_HF)bin:$(PATH_ARMADA370_HF)libexec/gcc/arm-unkno
 export STAGING_DIR := $(PATH_ARMADA370_HF)
 CC = $(PATH_ARMADA370_HF)bin/arm-unknown-linux-gnueabi-gcc
 STRIP = $(PATH_ARMADA370_HF)bin/arm-unknown-linux-gnueabi-strip
-CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
+CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
+CRASH_HANDLER = 0
 INCDIRS += -I$(PATH_AARCH64_CORTEXA53)include
 KVM = 0
 LMS = 0
@@ -334,6 +337,7 @@ endif
 # Official macOS x86 64bit
 ifeq ($(ARCHID),16)
 ARCHNAME = osx-x86-64
+CRASH_HANDLER = 0
 KVM = 1
 LMS = 0
 MACOSARCH = -mmacosx-version-min=10.12
@@ -343,6 +347,7 @@ endif
 # Official macOS ARM 64bit
 ifeq ($(ARCHID),29)
 ARCHNAME = osx-arm-64
+CRASH_HANDLER = 0
 KVM = 1
 LMS = 0
 MACOSARCH = -target arm64-apple-macos11
@@ -355,7 +360,8 @@ ifeq ($(ARCHID),7)
 ARCHNAME = mips
 CC = $(PATH_MIPS)mipsel-linux-gcc
 STRIP = $(PATH_MIPS)mipsel-linux-strip
-CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing -DILIBCHAIN_GLOBAL_LOCK
+CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing -DILIBCHAIN_GLOBAL_LOCK
+CRASH_HANDLER = 0
 CFLAGS += -DBADMATH 
 IPADDR_MONITOR_DISABLE = 1
 IFADDR_DISABLE = 1
@@ -371,7 +377,8 @@ export PATH := $(PATH_OPENWRT_X86_64)bin:$(PATH_OPENWRT_X86_64)libexec/gcc/x86_6
 export STAGING_DIR := $(PATH_OPENWRT_X86_64)
 CC = $(PATH_OPENWRT_X86_64)bin/x86_64-openwrt-linux-musl-gcc --sysroot=$(PATH_OPENWRT_X86_64)
 STRIP = $(PATH_OPENWRT_X86_64)bin/x86_64-openwrt-linux-musl-strip
-CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
+CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
+CRASH_HANDLER = 0
 CFLAGS += -DBADMATH 
 INCDIRS += -I$(PATH_OPENWRT_X86_64)include
 KVM = 0
@@ -386,7 +393,8 @@ export PATH := $(PATH_MIPS24KC)bin:$(PATH_MIPS24KC)libexec/gcc/mips-openwrt-linu
 export STAGING_DIR := $(PATH_MIPS24KC)
 CC = $(PATH_MIPS24KC)bin/mips-openwrt-linux-musl-gcc --sysroot=$(PATH_MIPS24KC)
 STRIP = $(PATH_MIPS24KC)bin/mips-openwrt-linux-musl-strip
-CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
+CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
+CRASH_HANDLER = 0
 CFLAGS += -DBADMATH 
 INCDIRS += -I$(PATH_MIPS24KC)include
 
@@ -401,7 +409,8 @@ export PATH := $(PATH_MIPSEL24KC)bin:$(PATH_MIPSEL24KC)libexec/gcc/mips-openwrt-
 export STAGING_DIR := $(PATH_MIPSEL24KC)
 CC = $(PATH_MIPSEL24KC)bin/mipsel-openwrt-linux-musl-gcc --sysroot=$(PATH_MIPSEL24KC)
 STRIP = $(PATH_MIPSEL24KC)bin/mipsel-openwrt-linux-musl-strip
-CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
+CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
+CRASH_HANDLER = 0
 CFLAGS += -DBADMATH 
 INCDIRS += -I$(PATH_MIPSEL24KC)include
 
@@ -416,7 +425,8 @@ export PATH := $(PATH_OPENWRT_ARMVIRT32)bin:$(PATH_OPENWRT_ARMVIRT32)libexec/gcc
 export STAGING_DIR := $(PATH_OPENWRT_ARMVIRT32)
 CC = $(PATH_OPENWRT_ARMVIRT32)bin/arm-openwrt-linux-gcc --sysroot=$(PATH_OPENWRT_ARMVIRT32)
 STRIP = $(PATH_OPENWRT_ARMVIRT32)bin/arm-openwrt-linux-muslgnueabi-strip
-CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
+CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
+CRASH_HANDLER = 0
 CFLAGS += -DBADMATH 
 INCDIRS += -I$(PATH_OPENWRT_ARMVIRT32)include
 
@@ -431,7 +441,8 @@ export PATH := $(PATH_RISCV64)bin:$(PATH_RISKV64)libexec/gcc/riscv64-unknown-lin
 export STAGING_DIR := $(PATH_RISCV64)
 CC = $(PATH_RISCV64)bin/riscv64-unknown-linux-musl-gcc
 STRIP = $(PATH_RISCV64)bin/riscv64-unknown-linux-musl-strip
-CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing -mcpu=c906fdv -march=rv64imafdcv0p7xthead -mcmodel=medany -mabi=lp64d
+CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing -mcpu=c906fdv -march=rv64imafdcv0p7xthead -mcmodel=medany -mabi=lp64d
+CRASH_HANDLER = 0
 INCDIRS += -I$(PATH_RISCV64)include
 KVM = 0
 LMS = 0
@@ -454,9 +465,10 @@ ifeq ($(ARCHID),13)
 ARCHNAME = pogo
 CC = $(PATH_POGO)arm-none-linux-gnueabi-gcc
 STRIP = $(PATH_POGO)arm-none-linux-gnueabi-strip
+CRASH_HANDLER = 0
 KVM = 0
 LMS = 0
-CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing -DILIBCHAIN_GLOBAL_LOCK
+CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing -DILIBCHAIN_GLOBAL_LOCK
 endif
 
 # Official Linux POKY
@@ -547,6 +559,7 @@ endif
 # Official FreeBSD x86-64
 ifeq ($(ARCHID),30)
 ARCHNAME = freebsd_x86-64
+CRASH_HANDLER = 0
 CC = clang
 CFLAGS += -I/usr/local/include
 KVM = 0
@@ -556,6 +569,7 @@ endif
 # Official OpenBSD x86-64
 ifeq ($(ARCHID),37)
 ARCHNAME = openbsd_x86-64
+CRASH_HANDLER = 0
 CC = clang
 CFLAGS += -I/usr/local/include
 KVM = 0
@@ -690,8 +704,19 @@ ifeq ($(FSWATCH_DISABLE),1)
 CFLAGS += -D_NOFSWATCHER
 endif
 
+# POSIX crash handler: backtrace on SIGSEGV, on the watchdog SIGUSR1 and on ILIBCRITICALEXIT.
+CRASH_HANDLER ?= 1
 ifeq ($(CRASH_HANDLER),0)
 CFLAGS += -D_NOILIBSTACKDEBUG
+else ifeq ($(CRASH_HANDLER),1)
+ifneq ($(filter 16 29,$(ARCHID)),)
+$(error CRASH_HANDLER=1 is not supported on macOS, ILib_POSIX_CrashHandler() excludes __APPLE__)
+endif
+ifneq ($(filter 30 37,$(ARCHID)),)
+LDFLAGS += -lexecinfo
+endif
+else
+$(error CRASH_HANDLER must be 0 or 1, got "$(CRASH_HANDLER)")
 endif
 
 ifeq ($(SSL_EXPORTABLE_KEYS),1)
@@ -860,16 +885,16 @@ linux:
 	$(STRIP)
 
 macos:
-	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES)" CFLAGS="$(MACOSARCH) -std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACSSL) $(MACOSFLAGS) -L. -lpthread -ldl -lz -lutil -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreServices -framework CoreGraphics -framework CoreFoundation -framework Security -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"
+	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES)" CFLAGS="$(MACOSARCH) -std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACSSL) $(MACOSFLAGS) -L. -lpthread -ldl -lz -lutil -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreServices -framework CoreGraphics -framework CoreFoundation -framework Security -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"
 	$(SYMBOLCP)
 	$(STRIP)
 
 freebsd:
-	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)"  AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_NOHECI -D_NOILIBSTACKDEBUG -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) $(BSDFLAGS) -L. -lpthread -ldl -lz $(filter-out -lutil,$(LDFLAGS)) $(LDEXTRA)"
+	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)"  AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_NOHECI -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) $(BSDFLAGS) -L. -lpthread -ldl -lz $(filter-out -lutil,$(LDFLAGS)) $(LDEXTRA)"
 	$(SYMBOLCP)
 	$(STRIP)
 
 openbsd:
-	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)"  AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_OPENBSD -D_NOHECI -D_NOILIBSTACKDEBUG -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) $(BSDFLAGS) -L. -lpthread -lz $(filter-out -lutil,$(LDFLAGS)) $(LDEXTRA)"
+	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)"  AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_OPENBSD -D_NOHECI -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) $(BSDFLAGS) -L. -lpthread -lz $(filter-out -lutil,$(LDFLAGS)) $(LDEXTRA)"
 	$(SYMBOLCP)
 	$(STRIP)
