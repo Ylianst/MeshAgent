@@ -107,7 +107,8 @@ typedef struct _XkbStateNotifyEvent
 	char 			req_minor;			/* Minor opcode of request */
 } XkbStateNotifyEvent;
 
-int curcursor = KVM_MouseCursor_HELP;
+int curcursor = KVM_MouseCursor_ARROW;
+static int sentCursor = -1;	// Last cursor type sent to the master, -1 so the next one always goes out
 int SLAVELOG = 0;
 
 int SCREEN_NUM = 0;
@@ -168,6 +169,7 @@ static void kvm_slave_send(const void *buffer, size_t len)
 }
 
 int remoteMouseX = 0, remoteMouseY = 0;
+static int remoteMouseInjected = 0;	// Set when this pass injected a mouse event, so the local-move check skips a pointer the X server may not have moved yet
 
 extern void* tilebuffer;
 extern char **environ;
@@ -323,17 +325,34 @@ void kvm_send_error(char *msg)
 	kvm_slave_send(buffer, msgLen + 4);
 }
 
-KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
+KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay, int animated)
 {
-	// Name was NULL, so as a last ditch effort, lets try to look at the XFixesCursorImage
+	// Identify the cursor from its image: the all-transparent check, the animated busy pointer, then the alpha CRC table
 	char *cursor_image = (char*)xfixes_exports->XFixesGetCursorImage(cursordisplay);
-	KVM_MouseCursors ret = KVM_MouseCursor_HELP;
+	KVM_MouseCursors ret = KVM_MouseCursor_ARROW;	// Standard arrow when the cursor is unknown
+	if (cursor_image == NULL) { return(ret); }	// XFixesGetCursorImage() returns NULL when the request fails, and every read below goes through it
 
 	unsigned short w = ((unsigned short*)(cursor_image + 4))[0];
 	unsigned short h = ((unsigned short*)(cursor_image + 6))[0];
 	char *pixels = cursor_image + (sizeof(void*) == 8 ? 24 : 16);
 	char alpha[65535];
 	int i;
+
+	// GTK hides the pointer while typing with a nameless 1x1 cursor whose alpha is 0, so it goes out as NONE instead of a visible pointer
+	// Offset 24 (16 on 32-bit) is the pixels pointer of XFixesCursorImage, so this reads the real alpha where the CRC loop below still walks the struct tail
+	unsigned long *argb = ((unsigned long**)(cursor_image + (sizeof(void*) == 8 ? 24 : 16)))[0];
+	for (i = 0; i < (w*h) && (argb[i] >> 24) == 0; ++i);
+	if (i == (w*h)) { x11_exports->XFree(cursor_image); return(KVM_MouseCursor_NONE); }
+
+	if (animated)
+	{
+		// A hotspot in the top-left third is an arrow with a busy indicator, a central one is the watch.
+		// A third fits every theme measured: the arrows sit at 4,4 of 32 (Breeze), 3,1 of 24 (Adwaita) and 6,4 of 24 (DMZ), the watches at 16,15, 11,11 and 12,12.
+		unsigned short xhot = ((unsigned short*)(cursor_image + 8))[0];
+		unsigned short yhot = ((unsigned short*)(cursor_image + 10))[0];
+		x11_exports->XFree(cursor_image);
+		return((xhot < w / 3 && yhot < h / 3) ? KVM_MouseCursor_APPSTARTING : KVM_MouseCursor_WAIT);
+	}
 
 	if (((size_t)(w*h) <= sizeof(alpha)) && ((size_t)(w*h) > 6))
 	{
@@ -936,6 +955,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 				if (g_enableEvents)
 				{
 					remoteMouseX = x, remoteMouseY = y;
+					remoteMouseInjected = 1;
 					MouseAction(x, y, (int)(unsigned char)(block[5]), w, eventdisplay);
 				}
 			}
@@ -952,6 +972,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 	case MNG_KVM_REFRESH: // Refresh
 		{
 			kvm_send_resolution();
+			sentCursor = -1;	// Sent on every viewer join, so the current cursor type goes out again on the next frame
 
 			int row, col;
 			if (size != 4) break;
@@ -1166,11 +1187,16 @@ void bitblt(char *sourcebitmap, int source_width, int source_height, int sx, int
 	{
 		for (x = 0; x < rw; ++x)
 		{
-			if (((bitmapdata2**)srect)[y][x].a > 128)
+			// XFixes cursor pixels are premultiplied ARGB, so the cursor colour is added as is and the frame only fades by the remaining alpha.
+			// This used to write 255 minus the cursor colour, which drew a black I-beam as a white outline that vanished over a text area.
+			int a = ((bitmapdata2**)srect)[y][x].a;
+			if (a != 0)
 			{
-				((bitmapdata2**)drect)[y][x].r = (255 - ((bitmapdata2**)srect)[y][x].r);
-				((bitmapdata2**)drect)[y][x].g = (255 - ((bitmapdata2**)srect)[y][x].g);
-				((bitmapdata2**)drect)[y][x].b = (255 - ((bitmapdata2**)srect)[y][x].b);
+				bitmapdata2 *s = &((bitmapdata2**)srect)[y][x];
+				bitmapdata2 *d = &((bitmapdata2**)drect)[y][x];
+				d->r = (unsigned char)(s->r + (d->r * (255 - a)) / 255);
+				d->g = (unsigned char)(s->g + (d->g * (255 - a)) / 255);
+				d->b = (unsigned char)(s->b + (d->b * (255 - a)) / 255);
 			}
 		}
 	}
@@ -1350,9 +1376,9 @@ void* kvm_server_mainloop_x11(void* parm)
 				{
 					xfixes_exports->XFixesSelectCursorInput(cursordisplay, rootwin, 1); // Register for Cursor Change Notifications
 					x11_exports->XSync(cursordisplay, 0);								// Sync with XServer
-					cursor_descriptor = x11_exports->XConnectionNumber(cursordisplay);	// Get the FD to use in select
+					cursor_descriptor = x11_exports->XConnectionNumber(cursordisplay);	// Set only when XFixes answered, which enables the cursor event block below
 				}
-				curcursor = kvm_fetch_currentCursor(cursordisplay);						// Cursor Type
+				curcursor = kvm_fetch_currentCursor(cursordisplay, 0);					// Cursor Type
 
 				if (xkb_exports != NULL)
 				{
@@ -1366,72 +1392,84 @@ void* kvm_server_mainloop_x11(void* parm)
 		}
 		else if (cursor_descriptor > 0)
 		{
-			FD_ZERO(&readset);
-			FD_ZERO(&errorset);
-			FD_ZERO(&writeset);
-			tv.tv_sec = 0;
-			tv.tv_usec = 0;
-			FD_SET(cursor_descriptor, &readset);
-			if (select(FD_SETSIZE, &readset, &writeset, &errorset, &tv) > 0 && FD_ISSET(cursor_descriptor, &readset))
+			// Only the events queued now, so notifies that arrive while the lookup below runs wait for the next frame
+			int pending = x11_exports->XPending(cursordisplay);
+			XEvent cursorXE;
+			int cursorNotified = 0;
+			int animFrames = 0;				// Nameless notifies with a new serial in this pass
+			unsigned long lastSerial = 0;
+			if (pending > 0)
 			{
 				// We have a waiting event
-				while (x11_exports->XPending(cursordisplay))
-				{					
+				while (pending-- > 0)
+				{
 					x11_exports->XNextEvent(cursordisplay, &XE);
 					if (XE.type == (event_base + 1))
 					{
-						char buffer[8];
+						cursorXE = XE; cursorNotified = 1;
+						// cursor_serial and cursor_name of XFixesCursorNotifyEvent, at 48 and 64 on 64-bit and 24 and 32 on 32-bit
+						unsigned long serial = ((unsigned long*)((char*)&XE + (sizeof(void*) == 8 ? 48 : 24)))[0];
+						unsigned long atom = ((unsigned long*)((char*)&XE + (sizeof(void*) == 8 ? 64 : 32)))[0];
+						if (atom == 0 && serial != lastSerial) { ++animFrames; lastSerial = serial; } else if (atom != 0) { animFrames = 0; }
+					}
+
+					// Looked up once, from the last notify, because every lookup is an X round trip and an animated cursor queues one notify per frame.
+					// One lookup per notify took 30 to 250 ms each on a Plasma X11 VM, so a screen pass grew to 3.3 s while a busy cursor animated.
+					if (pending == 0 && cursorNotified != 0)
+					{
 						char *name = NULL;
 
 						if (sizeof(void*) == 8)
 						{
 							// 64bit
-							if (((uint64_t*)((char*)&XE + 64))[0] != 0)
+							if (((uint64_t*)((char*)&cursorXE + 64))[0] != 0)
 							{
-								name = x11_exports->XGetAtomName(cursordisplay, ((Atom*)((char*)&XE + 64))[0]);
+								name = x11_exports->XGetAtomName(cursordisplay, ((Atom*)((char*)&cursorXE + 64))[0]);
 							}
 						}
 						else
 						{
 							// 32bit
-							if (((uint32_t*)((char*)&XE + 32))[0] != 0)
+							if (((uint32_t*)((char*)&cursorXE + 32))[0] != 0)
 							{
-								name = x11_exports->XGetAtomName(cursordisplay, ((Atom*)((char*)&XE + 32))[0]);
+								name = x11_exports->XGetAtomName(cursordisplay, ((Atom*)((char*)&cursorXE + 32))[0]);
 							}
 						}
 					
 						if (name != NULL)
 						{
+							if (strcmp(name, "blank") == 0) { curcursor = KVM_MouseCursor_NONE; }
 							if (strcmp(name, "bottom_left_corner") == 0 || strcmp(name, "sw-resize") == 0) { curcursor = KVM_MouseCursor_SIZENESW; }
 							if (strcmp(name, "bottom_right_corner") == 0 || strcmp(name, "se-resize") == 0) { curcursor = KVM_MouseCursor_SIZENWSE; }
 							if (strcmp(name, "bottom_side") == 0) { curcursor = KVM_MouseCursor_SIZENS; }
-							if (strcmp(name, "fleur") == 0) { curcursor = KVM_MouseCursor_SIZEALL; }
-							if (strcmp(name, "hand1") == 0 || strcmp(name, "pointer")==0) { curcursor = KVM_MouseCursor_HAND; }
+							if (strcmp(name, "col-resize") == 0 || strcmp(name, "ew-resize") == 0 || strcmp(name, "sb_h_double_arrow") == 0 || strcmp(name, "size_hor") == 0 || strcmp(name, "split_h") == 0 || strcmp(name, "h_double_arrow") == 0) { curcursor = KVM_MouseCursor_SIZEWE; }
+							if (strcmp(name, "crosshair") == 0 || strcmp(name, "cross") == 0 || strcmp(name, "tcross") == 0 || strcmp(name, "cell") == 0) { curcursor = KVM_MouseCursor_CROSS; }
+							if (strcmp(name, "fleur") == 0 || strcmp(name, "move") == 0 || strcmp(name, "all-scroll") == 0 || strcmp(name, "size_all") == 0) { curcursor = KVM_MouseCursor_SIZEALL; }
+							if (strcmp(name, "hand1") == 0 || strcmp(name, "pointer")==0 || strcmp(name, "pointing_hand") == 0 || strcmp(name, "hand") == 0) { curcursor = KVM_MouseCursor_HAND; }
 							if (strcmp(name, "hand2") == 0) { curcursor = KVM_MouseCursor_HAND; }
-							if (strcmp(name, "left_ptr") == 0) { curcursor = KVM_MouseCursor_ARROW; }
+							if (strcmp(name, "help") == 0 || strcmp(name, "question_arrow") == 0 || strcmp(name, "whats_this") == 0) { curcursor = KVM_MouseCursor_HELP; }
+							if (strcmp(name, "left_ptr") == 0 || strcmp(name, "default") == 0 || strcmp(name, "arrow") == 0 || strcmp(name, "context-menu") == 0 || strcmp(name, "top_left_arrow") == 0 || strcmp(name, "left_arrow") == 0) { curcursor = KVM_MouseCursor_ARROW; }
 							if (strcmp(name, "left_side") == 0 || strcmp(name, "w-resize") == 0 || strcmp(name, "e-resize") == 0) { curcursor = KVM_MouseCursor_SIZEWE; }
+							if (strcmp(name, "nesw-resize") == 0 || strcmp(name, "fd_double_arrow") == 0 || strcmp(name, "size_bdiag") == 0) { curcursor = KVM_MouseCursor_SIZENESW; }
+							if (strcmp(name, "no-drop") == 0 || strcmp(name, "dnd-none") == 0) { curcursor = KVM_MouseCursor_NO; }
+							if (strcmp(name, "not-allowed") == 0 || strcmp(name, "crossed_circle") == 0 || strcmp(name, "forbidden") == 0 || strcmp(name, "circle") == 0) { curcursor = KVM_MouseCursor_NOTALLOWED; }
+							if (strcmp(name, "nwse-resize") == 0 || strcmp(name, "bd_double_arrow") == 0 || strcmp(name, "size_fdiag") == 0) { curcursor = KVM_MouseCursor_SIZENWSE; }
+							if (strcmp(name, "progress") == 0 || strcmp(name, "left_ptr_watch") == 0 || strcmp(name, "half-busy") == 0) { curcursor = KVM_MouseCursor_APPSTARTING; }
 							if (strcmp(name, "right_side") == 0) { curcursor = KVM_MouseCursor_SIZEWE; }
+							if (strcmp(name, "row-resize") == 0 || strcmp(name, "ns-resize") == 0 || strcmp(name, "sb_v_double_arrow") == 0 || strcmp(name, "size_ver") == 0 || strcmp(name, "split_v") == 0 || strcmp(name, "v_double_arrow") == 0) { curcursor = KVM_MouseCursor_SIZENS; }
 							if (strcmp(name, "top_left_corner") == 0 || strcmp(name, "nw-resize") == 0) { curcursor = KVM_MouseCursor_SIZENWSE; }
 							if (strcmp(name, "top_right_corner") == 0 || strcmp(name, "ne-resize") == 0) { curcursor = KVM_MouseCursor_SIZENESW; }
 							if (strcmp(name, "top_side") == 0) { curcursor = KVM_MouseCursor_SIZENS; }
-							if (strcmp(name, "watch") == 0) { curcursor = KVM_MouseCursor_WAIT; }
+							if (strcmp(name, "watch") == 0 || strcmp(name, "wait") == 0) { curcursor = KVM_MouseCursor_WAIT; }
 							if (strcmp(name, "top_side") == 0 || strcmp(name, "n-resize") == 0 || strcmp(name, "s-resize") == 0) { curcursor = KVM_MouseCursor_SIZENS; }
-							if (strcmp(name, "xterm") == 0 || strcmp(name, "ibeam") == 0 || strcmp(name, "text") == 0) { curcursor = KVM_MouseCursor_IBEAM; }
+							if (strcmp(name, "xterm") == 0 || strcmp(name, "ibeam") == 0 || strcmp(name, "text") == 0 || strcmp(name, "vertical-text") == 0) { curcursor = KVM_MouseCursor_IBEAM; }
 							x11_exports->XFree(name);
 						}
 						else
 						{
-							// Name was NULL, so as a last ditch effort, lets try to look at the XFixesCursorImage
-							curcursor = kvm_fetch_currentCursor(cursordisplay);
-						}
-
-						if (sentHideCursor == 0)
-						{
-							((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
-							((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
-							buffer[4] = (char)curcursor;																// Cursor Type
-							written = write(slave2master[1], buffer, 5);
-							fsync(slave2master[1]);
+							// Animated cursors never carry a name: the server shows them frame by frame and libXcursor only named the container cursor.
+							// Three or more nameless frames in one pass means an animation, so this is the busy pointer and not an unknown image.
+							curcursor = kvm_fetch_currentCursor(cursordisplay, animFrames >= 3);
 						}
 					}
 					if (kbevent_base != 0 && XE.type == kbevent_base)
@@ -1449,6 +1487,18 @@ void* kvm_server_mainloop_x11(void* parm)
 						}
 					}
 				}
+			}
+
+			// Sent after the loop and only when the type changed, so a refresh resends the current cursor to a joining viewer
+			if (sentHideCursor == 0 && curcursor != sentCursor)
+			{
+				char buffer[8];
+				((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
+				((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
+				buffer[4] = (char)curcursor;																// Cursor Type
+				written = write(slave2master[1], buffer, 5);
+				fsync(slave2master[1]);
+				sentCursor = curcursor;
 			}
 		}
 
@@ -1484,9 +1534,14 @@ void* kvm_server_mainloop_x11(void* parm)
 				&rr, &cr, &rx, &ry, &wx, &wy, &mr);
 			if (rs == 1 && cursordisplay != NULL)
 			{
-				if (gRemoteMouseRenderDefault != 0 || (remoteMouseX != rx && remoteMouseY != ry))
+				// XTest moves the pointer on eventdisplay and XQueryPointer reads it on imagedisplay, so in a pass with injected input rx and ry can still be the old position.
+				// Without this check a browser drag counted as a local move every other pass, and the viewer pointer flipped between its own and the one drawn into the frame.
+				int localMove = (remoteMouseInjected == 0 && (remoteMouseX != rx || remoteMouseY != ry));
+				remoteMouseInjected = 0;
+				cimage = (gRemoteMouseRenderDefault != 0 || localMove) ? (char*)xfixes_exports->XFixesGetCursorImage(cursordisplay) : NULL;
+				// A failed fetch draws no pointer into the frame, so it takes the unhide branch and the viewer keeps its own pointer
+				if (cimage != NULL)
 				{
-					cimage = (char*)xfixes_exports->XFixesGetCursorImage(cursordisplay);
 					unsigned short w = ((unsigned short*)(cimage + 4))[0];
 					unsigned short h = ((unsigned short*)(cimage + 6))[0];
 					unsigned short xhot = ((unsigned short*)(cimage + 8))[0];
@@ -1496,7 +1551,9 @@ void* kvm_server_mainloop_x11(void* parm)
 					int localRy = ry - CAPTURE_Y;
 					unsigned short mx = (localRx > (int)xhot) ? (unsigned short)(localRx - xhot) : 0;
 					unsigned short my = (localRy > (int)yhot) ? (unsigned short)(localRy - yhot) : 0;
-					char *pixels = cimage + (sizeof(void*) == 8 ? 24 : 16);
+					// Offset 24 (16 on 32-bit) holds the pixels pointer of XFixesCursorImage, the data itself follows the struct.
+					// Reading from the offset itself took the pixels, atom and name fields as the first three pixels and shifted the image.
+					char *pixels = (char*)((unsigned long**)(cimage + (sizeof(void*) == 8 ? 24 : 16)))[0];
 
 					if ((mx + w) > (unsigned short)SCREEN_WIDTH)  { mx = (unsigned short)(SCREEN_WIDTH  - w); }
 					if ((my + h) > (unsigned short)SCREEN_HEIGHT) { my = (unsigned short)(SCREEN_HEIGHT - h); }
@@ -1507,30 +1564,23 @@ void* kvm_server_mainloop_x11(void* parm)
 						bitblt(pixels, (int)w, (int)h, 0, 0, (int)w, (int)h, image->data, SCREEN_WIDTH, SCREEN_HEIGHT, mx, my, 1);
 					}
 
-					if (sentHideCursor == 0)
+					// Gated on sentCursor, not sentHideCursor, so a refresh from a joining viewer resends the hide as well
+					sentHideCursor = 1;
+					if (sentCursor != KVM_MouseCursor_NONE)
 					{
 						char tmpbuffer[8];
-						sentHideCursor = 1;
 						((unsigned short*)tmpbuffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
 						((unsigned short*)tmpbuffer)[1] = (unsigned short)htons((unsigned short)5);						// Write the size
 						tmpbuffer[4] = (char)KVM_MouseCursor_NONE;														// Cursor Type
 						written = write(slave2master[1], tmpbuffer, 5);
 						fsync(slave2master[1]);
+						sentCursor = KVM_MouseCursor_NONE;
 					}
 					x11_exports->XFree(cimage);
 				}
 				else
 				{
-					if (sentHideCursor != 0)
-					{
-						char tmpbuffer[8];
-						sentHideCursor = 1;
-						((unsigned short*)tmpbuffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
-						((unsigned short*)tmpbuffer)[1] = (unsigned short)htons((unsigned short)5);						// Write the size
-						tmpbuffer[4] = (char)curcursor;																	// Cursor Type
-						written = write(slave2master[1], tmpbuffer, 5);
-						fsync(slave2master[1]);
-					}
+					// After a hide, the event block sends curcursor on the next frame, because the hide path left sentCursor at NONE
 					sentHideCursor = 0;
 				}
 			}
