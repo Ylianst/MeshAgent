@@ -325,9 +325,9 @@ void kvm_send_error(char *msg)
 	kvm_slave_send(buffer, msgLen + 4);
 }
 
-KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
+KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay, int animated)
 {
-	// Identify the cursor from its image: the all-transparent check, then the alpha CRC table
+	// Identify the cursor from its image: the all-transparent check, the animated busy pointer, then the alpha CRC table
 	char *cursor_image = (char*)xfixes_exports->XFixesGetCursorImage(cursordisplay);
 	KVM_MouseCursors ret = KVM_MouseCursor_ARROW;	// Standard arrow when the cursor is unknown
 	if (cursor_image == NULL) { return(ret); }	// XFixesGetCursorImage() returns NULL when the request fails, and every read below goes through it
@@ -343,6 +343,16 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 	unsigned long *argb = ((unsigned long**)(cursor_image + (sizeof(void*) == 8 ? 24 : 16)))[0];
 	for (i = 0; i < (w*h) && (argb[i] >> 24) == 0; ++i);
 	if (i == (w*h)) { x11_exports->XFree(cursor_image); return(KVM_MouseCursor_NONE); }
+
+	if (animated)
+	{
+		// A hotspot in the top-left third is an arrow with a busy indicator, a central one is the watch.
+		// A third fits every theme measured: the arrows sit at 4,4 of 32 (Breeze), 3,1 of 24 (Adwaita) and 6,4 of 24 (DMZ), the watches at 16,15, 11,11 and 12,12.
+		unsigned short xhot = ((unsigned short*)(cursor_image + 8))[0];
+		unsigned short yhot = ((unsigned short*)(cursor_image + 10))[0];
+		x11_exports->XFree(cursor_image);
+		return((xhot < w / 3 && yhot < h / 3) ? KVM_MouseCursor_APPSTARTING : KVM_MouseCursor_WAIT);
+	}
 
 	if (((size_t)(w*h) <= sizeof(alpha)) && ((size_t)(w*h) > 6))
 	{
@@ -1368,7 +1378,7 @@ void* kvm_server_mainloop_x11(void* parm)
 					x11_exports->XSync(cursordisplay, 0);								// Sync with XServer
 					cursor_descriptor = x11_exports->XConnectionNumber(cursordisplay);	// Set only when XFixes answered, which enables the cursor event block below
 				}
-				curcursor = kvm_fetch_currentCursor(cursordisplay);						// Cursor Type
+				curcursor = kvm_fetch_currentCursor(cursordisplay, 0);					// Cursor Type
 
 				if (xkb_exports != NULL)
 				{
@@ -1386,13 +1396,22 @@ void* kvm_server_mainloop_x11(void* parm)
 			int pending = x11_exports->XPending(cursordisplay);
 			XEvent cursorXE;
 			int cursorNotified = 0;
+			int animFrames = 0;				// Nameless notifies with a new serial in this pass
+			unsigned long lastSerial = 0;
 			if (pending > 0)
 			{
 				// We have a waiting event
 				while (pending-- > 0)
-				{					
+				{
 					x11_exports->XNextEvent(cursordisplay, &XE);
-					if (XE.type == (event_base + 1)) { cursorXE = XE; cursorNotified = 1; }
+					if (XE.type == (event_base + 1))
+					{
+						cursorXE = XE; cursorNotified = 1;
+						// cursor_serial and cursor_name of XFixesCursorNotifyEvent, at 48 and 64 on 64-bit and 24 and 32 on 32-bit
+						unsigned long serial = ((unsigned long*)((char*)&XE + (sizeof(void*) == 8 ? 48 : 24)))[0];
+						unsigned long atom = ((unsigned long*)((char*)&XE + (sizeof(void*) == 8 ? 64 : 32)))[0];
+						if (atom == 0 && serial != lastSerial) { ++animFrames; lastSerial = serial; } else if (atom != 0) { animFrames = 0; }
+					}
 
 					// Looked up once, from the last notify, because every lookup is an X round trip and an animated cursor queues one notify per frame.
 					// One lookup per notify took 30 to 250 ms each on a Plasma X11 VM, so a screen pass grew to 3.3 s while a busy cursor animated.
@@ -1448,8 +1467,9 @@ void* kvm_server_mainloop_x11(void* parm)
 						}
 						else
 						{
-							// Name was NULL, so as a last ditch effort, lets try to look at the XFixesCursorImage
-							curcursor = kvm_fetch_currentCursor(cursordisplay);
+							// Animated cursors never carry a name: the server shows them frame by frame and libXcursor only named the container cursor.
+							// Three or more nameless frames in one pass means an animation, so this is the busy pointer and not an unknown image.
+							curcursor = kvm_fetch_currentCursor(cursordisplay, animFrames >= 3);
 						}
 					}
 					if (kbevent_base != 0 && XE.type == kbevent_base)
