@@ -2012,7 +2012,9 @@ void *ILibCreateChainEx(int extraMemorySize)
 #if defined(WIN32) || defined(_WIN32_WCE)
 	RetVal->TerminateFlag = 1;
 	RetVal->ChainProcessHandle = GetCurrentProcess();
+#ifndef _NOILIBSTACKDEBUG
 	if (!SymInitialize(RetVal->ChainProcessHandle, NULL, TRUE)) { RetVal->ChainProcessHandle = NULL; }
+#endif
 #endif
 
 	RetVal->TerminateFlag = 0;
@@ -2717,6 +2719,7 @@ int ILib_WindowsExceptionFilterEx(DWORD exceptionCode, void *exceptionInfo, ILib
 		memcpy_s(exceptionContext->prec, sizeof(EXCEPTION_RECORD), ((EXCEPTION_POINTERS*)exceptionInfo)->ExceptionRecord, sizeof(EXCEPTION_RECORD));
 		exceptionContext->frameCount = 0;
 
+#ifndef _NOILIBSTACKDEBUG
 		// The stack is walked here in the filter, because once the __except block runs the crashed frames have been unwound and the handler's own calls have overwritten them.
 		// Walked from the handler, frame 1 onward was dbghelp's own call chain on x86 Release (measured 2026-11-05).
 		// On a stack overflow the filter itself runs on the last guard page, so only the crashing frame is kept there.
@@ -2735,6 +2738,7 @@ int ILib_WindowsExceptionFilterEx(DWORD exceptionCode, void *exceptionInfo, ILib
 				exceptionContext->framePCs[exceptionContext->frameCount++] = frame.AddrPC.Offset;
 			}
 		}
+#endif
 		return(EXCEPTION_EXECUTE_HANDLER);
 	}
 	return(EXCEPTION_CONTINUE_SEARCH);
@@ -2744,13 +2748,15 @@ void ILib_WindowsExceptionDebugEx(ILib_DumpEnabledContext *dumpEnabledExceptionC
 {
 	char buffer[4096];
 	STACKFRAME64 StackFrame;
+	int len = 0;
+	DWORD64 baseAddr = (DWORD64)(ILibPtrCAST)&ILibCreateChain;
+#ifndef _NOILIBSTACKDEBUG
 	char symBuffer[4096];
 	char imgBuffer[4096];
-	int len = 0;
 	int frame;
 	PIMAGEHLP_LINE64 pimg = (PIMAGEHLP_LINE64)imgBuffer;
 	PSYMBOL_INFO psym = (PSYMBOL_INFO)symBuffer;
-	DWORD64 baseAddr = (DWORD64)(ILibPtrCAST)&ILibCreateChain;
+#endif
 
 	// Frame 0 comes from the saved context, so it is there even when the filter could not walk
 	ILib_InitStackFrame(&StackFrame, dumpEnabledExceptionContext->pctx);
@@ -2761,6 +2767,7 @@ void ILib_WindowsExceptionDebugEx(ILib_DumpEnabledContext *dumpEnabledExceptionC
 	}
 	buffer[0] = 0;
 
+#ifndef _NOILIBSTACKDEBUG
 	if (g_ILibCrashDump_path != NULL)
 	{
 		HANDLE hDumpFile = CreateFileW((LPCWSTR)g_ILibCrashDump_path, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
@@ -2778,6 +2785,7 @@ void ILib_WindowsExceptionDebugEx(ILib_DumpEnabledContext *dumpEnabledExceptionC
 			MiniDumpWithUnloadedModules , &i, NULL, NULL);
 		CloseHandle(hDumpFile);
 	}
+#endif
 
 	len = sprintf_s(buffer, sizeof(buffer), "FATAL EXCEPTION @ ");
 #ifdef _WIN64
@@ -2786,6 +2794,7 @@ void ILib_WindowsExceptionDebugEx(ILib_DumpEnabledContext *dumpEnabledExceptionC
 	len += sprintf_s(buffer + len, sizeof(buffer) - len, "[FuncAddr: 0x%08x / BaseAddr: 0x%08x / Delta: %d]\n", (unsigned __int32)StackFrame.AddrPC.Offset, (unsigned __int32)baseAddr, (unsigned __int32)baseAddr - (unsigned __int32)StackFrame.AddrPC.Offset);
 #endif
 
+#ifndef _NOILIBSTACKDEBUG
 	psym->SizeOfStruct = sizeof(SYMBOL_INFO);
 	psym->MaxNameLen = MAX_SYM_NAME;
 	pimg->SizeOfStruct = sizeof(IMAGEHLP_LINE64);
@@ -2817,6 +2826,7 @@ void ILib_WindowsExceptionDebugEx(ILib_DumpEnabledContext *dumpEnabledExceptionC
 			len += sprintf_s(buffer + len, sizeof(buffer) - len, "    [Delta: %lld]\n", (long long)(baseAddr - pc));
 		}
 	}
+#endif
 
 	ILIBCRITICALEXITMSG(254, buffer);
 }
@@ -3041,6 +3051,9 @@ void ILibChain_DebugOffset(char *buffer, int bufferLen, uint64_t addrOffset)
 		buffer[len] = 0;
 	}
 #endif
+#else
+	(void)addrOffset;
+	sprintf_s(buffer, bufferLen, "[Built without the crash handler, no symbol lookup]");
 #endif
 }
 
@@ -3048,7 +3061,13 @@ char* ILibChain_Debug(void *chain, char* buffer, int bufferLen)
 {
 	char *retVal = NULL;
 	ILibBaseChain *bChain = (ILibBaseChain*)chain;
-#if defined(WIN32)
+#if defined(WIN32) && defined(_NOILIBSTACKDEBUG)
+	// Built without the stack walk, the watchdog logs its own line instead
+	UNREFERENCED_PARAMETER(buffer);
+	UNREFERENCED_PARAMETER(bufferLen);
+	UNREFERENCED_PARAMETER(bChain);
+	return(retVal);
+#elif defined(WIN32)
 	char symBuffer[4096];
 	char imgBuffer[4096];
 	DWORD MachineType;
@@ -3307,7 +3326,15 @@ void ILibChain_WatchDogStart(void *obj)
 		if (stuck == 1)
 		{
 #ifdef WIN32
+#ifdef _NOILIBSTACKDEBUG
+			{
+				ILibChain_Link *stuckLink = (chain->node != NULL) ? (ILibChain_Link*)ILibLinkedList_GetDataFromNode(chain->node) : NULL;
+				char *stuckIn = (stuckLink == NULL) ? "outside the link handlers" : ((stuckLink->MetaData != NULL) ? stuckLink->MetaData : "a link without a description");
+				sprintf_s(msg, sizeof(msg), "Microstack STUCK: the event loop made no progress for %u to %u seconds (select count %u) in [%s], ending the process\r\n", noProgressChecks * ILibChain_WATCHDOG_WAKE_SEC, (noProgressChecks + 1) * ILibChain_WATCHDOG_WAKE_SEC, currentPreCount, stuckIn);
+			}
+#else
 			__try { ILibChain_Debug(chain, msg+20, sizeof(msg)-20); } __except (EXCEPTION_EXECUTE_HANDLER) { }
+#endif
 			printf("%s", ILibCriticalLog(msg, __FILE__, __LINE__, 0, 0)); fflush(stdout);
 			TerminateProcess(GetCurrentProcess(), 254);
 #else
