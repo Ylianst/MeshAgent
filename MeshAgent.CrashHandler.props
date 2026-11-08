@@ -1,0 +1,27 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!-- Build switch for the crash handler, imported by every agent project right after Microsoft.Cpp.props.
+     msbuild /p:CrashHandler=0 defines _NOILIBSTACKDEBUG, the same as CRASH_HANDLER=0 in the makefile: no stack walk, no symbol
+     lookup at crash or hang time, no minidump. The exception filter, the FATAL EXCEPTION line and -faddr/-fdelta stay.
+     DbgHelp.lib is always linked for the -fdelta decoder, delay-loaded in an off build so dbghelp.dll is only loaded by that command. -->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <CrashHandler Condition="'$(CrashHandler)'==''">1</CrashHandler>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <Link>
+      <AdditionalDependencies>DbgHelp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(CrashHandler)'=='0'">
+    <ClCompile>
+      <PreprocessorDefinitions>_NOILIBSTACKDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <DelayLoadDLLs>dbghelp.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
+      <AdditionalDependencies>delayimp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <Target Name="MeshAgentCheckCrashHandler" BeforeTargets="ClCompile">
+    <Error Condition="'$(CrashHandler)'!='0' and '$(CrashHandler)'!='1'" Text="CrashHandler must be 0 or 1, got &quot;$(CrashHandler)&quot;" />
+  </Target>
+</Project>

@@ -5712,7 +5712,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			ILibDuktape_SetNativeUncaughtExceptionHandler(agentHost->meshCoreCtx, MeshAgent_CoreModule_UncaughtException, agentHost);
 			if ((agentHost->coreDumpEnabled = ILibSimpleDataStore_Get(agentHost->masterDb, "coreDumpEnabled", NULL, 0)) != 0)
 			{
-				duk_eval_string_noresult(agentHost->meshCoreCtx, "process.coreDumpLocation = process.platform=='win32'?(process.execPath.replace('.exe', '.dmp')):(process.execPath + '.dmp');");
+				duk_eval_string_noresult(agentHost->meshCoreCtx, "process.coreDumpLocation = (process.platform=='win32' ? process.execPath.replace(/\\.exe$/i, '') : process.execPath) + '.dmp';");
 			}
 			if (ILibSimpleDataStore_Get(agentHost->masterDb, "finalizer-messages", ILibScratchPad, sizeof(ILibScratchPad)) != 0)
 			{

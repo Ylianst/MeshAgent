@@ -49,6 +49,7 @@
     <PlatformToolset>v140</PlatformToolset>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <Import Project="..\MeshAgent.CrashHandler.props" />
   <ImportGroup Label="ExtensionSettings">
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="PropertySheets">
@@ -119,7 +120,7 @@
       <ExceptionHandling>Async</ExceptionHandling>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>Comctl32.lib;SetupAPI.lib;DbgHelp.lib;Gdiplus.lib;Iphlpapi.lib;ws2_32.lib;Setupapi.lib;Psapi.lib;Crypt32.lib;Ncrypt.lib;Wintrust.lib;Version.lib;Wtsapi32.lib;Winhttp.lib;..\openssl\libstatic\libcrypto32MTd.lib;..\openssl\libstatic\libssl32MTd.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Comctl32.lib;SetupAPI.lib;Gdiplus.lib;Iphlpapi.lib;ws2_32.lib;Setupapi.lib;Psapi.lib;Crypt32.lib;Ncrypt.lib;Wintrust.lib;Version.lib;Wtsapi32.lib;Winhttp.lib;..\openssl\libstatic\libcrypto32MTd.lib;..\openssl\libstatic\libssl32MTd.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
       <TargetMachine>MachineX86</TargetMachine>
@@ -167,7 +168,7 @@
       <ExceptionHandling>Async</ExceptionHandling>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>Comctl32.lib;SetupAPI.lib;DbgHelp.lib;Iphlpapi.lib;ws2_32.lib;Setupapi.lib;Psapi.lib;Crypt32.lib;Wintrust.lib;Version.lib;Wtsapi32.lib;Gdiplus.lib;Winhttp.lib;Ncrypt.lib;..\openssl\libstatic\libcrypto64MTd.lib;..\openssl\libstatic\libssl64MTd.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Comctl32.lib;SetupAPI.lib;Iphlpapi.lib;ws2_32.lib;Setupapi.lib;Psapi.lib;Crypt32.lib;Wintrust.lib;Version.lib;Wtsapi32.lib;Gdiplus.lib;Winhttp.lib;Ncrypt.lib;..\openssl\libstatic\libcrypto64MTd.lib;..\openssl\libstatic\libssl64MTd.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
       <TargetMachine>MachineX64</TargetMachine>
@@ -210,7 +211,7 @@ powershell -ExecutionPolicy Unrestricted $(ProjectDir)prebuild.ps1 $(ProjectDir)
       <FavorSizeOrSpeed>Size</FavorSizeOrSpeed>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>Comctl32.lib;SetupAPI.lib;Crypt32.lib;Ncrypt.lib;DbgHelp.lib;Iphlpapi.lib;ws2_32.lib;Setupapi.lib;Psapi.lib;Wintrust.lib;Version.lib;Wtsapi32.lib;Gdiplus.lib;Winhttp.lib;..\openssl\libstatic\libcrypto32MT.lib;..\openssl\libstatic\libssl32MT.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Comctl32.lib;SetupAPI.lib;Crypt32.lib;Ncrypt.lib;Iphlpapi.lib;ws2_32.lib;Setupapi.lib;Psapi.lib;Wintrust.lib;Version.lib;Wtsapi32.lib;Gdiplus.lib;Winhttp.lib;..\openssl\libstatic\libcrypto32MT.lib;..\openssl\libstatic\libssl32MT.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
@@ -253,7 +254,7 @@ powershell -ExecutionPolicy Unrestricted $(ProjectDir)prebuild.ps1 $(ProjectDir)
       <ExceptionHandling>Async</ExceptionHandling>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>Comctl32.lib;SetupAPI.lib;DbgHelp.lib;Iphlpapi.lib;ws2_32.lib;Setupapi.lib;Psapi.lib;Crypt32.lib;Wintrust.lib;Version.lib;Wtsapi32.lib;Gdiplus.lib;Winhttp.lib;Ncrypt.lib;..\openssl\libstatic\libcrypto64MT.lib;..\openssl\libstatic\libssl64MT.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Comctl32.lib;SetupAPI.lib;Iphlpapi.lib;ws2_32.lib;Setupapi.lib;Psapi.lib;Crypt32.lib;Wintrust.lib;Version.lib;Wtsapi32.lib;Gdiplus.lib;Winhttp.lib;Ncrypt.lib;..\openssl\libstatic\libcrypto64MT.lib;..\openssl\libstatic\libssl64MT.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>

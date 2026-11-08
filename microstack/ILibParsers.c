@@ -40,9 +40,9 @@ limitations under the License.
 			#include <sys/mount.h>
 		#endif
 		#include <pthread.h>
+		#include <inttypes.h>
 		#ifndef _NOILIBSTACKDEBUG
 			#include <execinfo.h>
-			#include <inttypes.h>
 		#endif
 	#endif
 #endif 
@@ -2012,7 +2012,9 @@ void *ILibCreateChainEx(int extraMemorySize)
 #if defined(WIN32) || defined(_WIN32_WCE)
 	RetVal->TerminateFlag = 1;
 	RetVal->ChainProcessHandle = GetCurrentProcess();
+#ifndef _NOILIBSTACKDEBUG
 	if (!SymInitialize(RetVal->ChainProcessHandle, NULL, TRUE)) { RetVal->ChainProcessHandle = NULL; }
+#endif
 #endif
 
 	RetVal->TerminateFlag = 0;
@@ -2680,6 +2682,33 @@ char* g_ILibCrashID_HASH = NULL;
 char* g_ILibCrashDump_path = NULL;
 
 #if defined(WIN32)
+// Starts a StackWalk64() frame from a CONTEXT and returns the machine type for it
+static DWORD ILib_InitStackFrame(STACKFRAME64 *frame, const CONTEXT *ctx)
+{
+	ZeroMemory(frame, sizeof(STACKFRAME64));
+	frame->AddrPC.Mode = AddrModeFlat;
+	frame->AddrFrame.Mode = AddrModeFlat;
+	frame->AddrStack.Mode = AddrModeFlat;
+#if defined(_M_IX86)
+	frame->AddrPC.Offset = ctx->Eip;
+	frame->AddrFrame.Offset = ctx->Ebp;
+	frame->AddrStack.Offset = ctx->Esp;
+	return(IMAGE_FILE_MACHINE_I386);
+#elif defined(_M_ARM64)
+	frame->AddrPC.Offset = ctx->Pc;
+	frame->AddrFrame.Offset = ctx->Sp;
+	frame->AddrStack.Offset = ctx->Sp;
+	return(IMAGE_FILE_MACHINE_ARM64);
+#elif defined(_M_X64)
+	frame->AddrPC.Offset = ctx->Rip;
+	frame->AddrFrame.Offset = ctx->Rsp;
+	frame->AddrStack.Offset = ctx->Rsp;
+	return(IMAGE_FILE_MACHINE_AMD64);
+#else
+#error Unsupported Windows architecture
+#endif
+}
+
 int ILib_WindowsExceptionFilterEx(DWORD exceptionCode, void *exceptionInfo, ILib_DumpEnabledContext *exceptionContext)
 {
 	if (IsDebuggerPresent()) { return(EXCEPTION_CONTINUE_SEARCH); }
@@ -2688,6 +2717,28 @@ int ILib_WindowsExceptionFilterEx(DWORD exceptionCode, void *exceptionInfo, ILib
 		exceptionContext->pctx = &(exceptionContext->ctx); exceptionContext->prec = &(exceptionContext->rec);
 		memcpy_s(exceptionContext->pctx, sizeof(CONTEXT), ((EXCEPTION_POINTERS*)exceptionInfo)->ContextRecord, sizeof(CONTEXT));
 		memcpy_s(exceptionContext->prec, sizeof(EXCEPTION_RECORD), ((EXCEPTION_POINTERS*)exceptionInfo)->ExceptionRecord, sizeof(EXCEPTION_RECORD));
+		exceptionContext->frameCount = 0;
+
+#ifndef _NOILIBSTACKDEBUG
+		// The stack is walked here in the filter, because once the __except block runs the crashed frames have been unwound and the handler's own calls have overwritten them.
+		// Walked from the handler, frame 1 onward was dbghelp's own call chain on x86 Release (measured 2026-11-05).
+		// On a stack overflow the filter itself runs on the last guard page, so only the crashing frame is kept there.
+		if (exceptionCode != EXCEPTION_STACK_OVERFLOW)
+		{
+			STACKFRAME64 frame;
+			CONTEXT walkContext;
+			DWORD machineType = ILib_InitStackFrame(&frame, exceptionContext->pctx);
+
+			// StackWalk64() modifies the context it is given, so it gets a copy and the minidump keeps the original
+			memcpy_s(&walkContext, sizeof(CONTEXT), exceptionContext->pctx, sizeof(CONTEXT));
+			while (exceptionContext->frameCount < (int)(sizeof(exceptionContext->framePCs) / sizeof(exceptionContext->framePCs[0])) &&
+				StackWalk64(machineType, GetCurrentProcess(), GetCurrentThread(), &frame, &walkContext, NULL, SymFunctionTableAccess64, SymGetModuleBase64, NULL) &&
+				frame.AddrPC.Offset != 0)
+			{
+				exceptionContext->framePCs[exceptionContext->frameCount++] = frame.AddrPC.Offset;
+			}
+		}
+#endif
 		return(EXCEPTION_EXECUTE_HANDLER);
 	}
 	return(EXCEPTION_CONTINUE_SEARCH);
@@ -2697,15 +2748,26 @@ void ILib_WindowsExceptionDebugEx(ILib_DumpEnabledContext *dumpEnabledExceptionC
 {
 	char buffer[4096];
 	STACKFRAME64 StackFrame;
+	int len = 0;
+	DWORD64 baseAddr = (DWORD64)(ILibPtrCAST)&ILibCreateChain;
+#ifndef _NOILIBSTACKDEBUG
 	char symBuffer[4096];
 	char imgBuffer[4096];
-	DWORD MachineType;
-	int len = 0;
-	CONTEXT *exceptionContext = dumpEnabledExceptionContext->pctx;
+	int frame;
+	PIMAGEHLP_LINE64 pimg = (PIMAGEHLP_LINE64)imgBuffer;
+	PSYMBOL_INFO psym = (PSYMBOL_INFO)symBuffer;
+#endif
 
-	ZeroMemory(&StackFrame, sizeof(STACKFRAME64));
+	// Frame 0 comes from the saved context, so it is there even when the filter could not walk
+	ILib_InitStackFrame(&StackFrame, dumpEnabledExceptionContext->pctx);
+	if (dumpEnabledExceptionContext->frameCount == 0)
+	{
+		dumpEnabledExceptionContext->framePCs[0] = StackFrame.AddrPC.Offset;
+		dumpEnabledExceptionContext->frameCount = 1;
+	}
 	buffer[0] = 0;
 
+#ifndef _NOILIBSTACKDEBUG
 	if (g_ILibCrashDump_path != NULL)
 	{
 		HANDLE hDumpFile = CreateFileW((LPCWSTR)g_ILibCrashDump_path, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
@@ -2723,89 +2785,55 @@ void ILib_WindowsExceptionDebugEx(ILib_DumpEnabledContext *dumpEnabledExceptionC
 			MiniDumpWithUnloadedModules , &i, NULL, NULL);
 		CloseHandle(hDumpFile);
 	}
-
-
-#ifndef WIN64
-	MachineType = IMAGE_FILE_MACHINE_I386;
-	StackFrame.AddrPC.Offset = exceptionContext->Eip;
-	StackFrame.AddrPC.Mode = AddrModeFlat;
-	StackFrame.AddrFrame.Offset = exceptionContext->Ebp;
-	StackFrame.AddrFrame.Mode = AddrModeFlat;
-	StackFrame.AddrStack.Offset = exceptionContext->Esp;
-	StackFrame.AddrStack.Mode = AddrModeFlat;
-#elif ARM64
-	MachineType = IMAGE_FILE_MACHINE_ARM64;
-	StackFrame.AddrPC.Offset = exceptionContext->Pc;
-	StackFrame.AddrPC.Mode = AddrModeFlat;
-	StackFrame.AddrFrame.Offset = exceptionContext->Sp;
-	StackFrame.AddrFrame.Mode = AddrModeFlat;
-	StackFrame.AddrStack.Offset = exceptionContext->Sp;
-	StackFrame.AddrStack.Mode = AddrModeFlat;
-#else
-	MachineType = IMAGE_FILE_MACHINE_AMD64;
-	StackFrame.AddrPC.Offset = exceptionContext->Rip;
-	StackFrame.AddrPC.Mode = AddrModeFlat;
-	StackFrame.AddrFrame.Offset = exceptionContext->Rsp;
-	StackFrame.AddrFrame.Mode = AddrModeFlat;
-	StackFrame.AddrStack.Offset = exceptionContext->Rsp;
-	StackFrame.AddrStack.Mode = AddrModeFlat;
 #endif
 
+	len = sprintf_s(buffer, sizeof(buffer), "FATAL EXCEPTION @ ");
+#ifdef _WIN64
+	len += sprintf_s(buffer + len, sizeof(buffer) - len, "[FuncAddr: 0x%016llx / BaseAddr: 0x%016llx / Delta: %lld]\n", (unsigned __int64)StackFrame.AddrPC.Offset, (unsigned __int64)baseAddr, (unsigned __int64)baseAddr - (unsigned __int64)StackFrame.AddrPC.Offset);
+#else
+	len += sprintf_s(buffer + len, sizeof(buffer) - len, "[FuncAddr: 0x%08x / BaseAddr: 0x%08x / Delta: %d]\n", (unsigned __int32)StackFrame.AddrPC.Offset, (unsigned __int32)baseAddr, (unsigned __int32)baseAddr - (unsigned __int32)StackFrame.AddrPC.Offset);
+#endif
 
-	if (StackWalk64(
-		MachineType,
-		GetCurrentProcess(),
-		GetCurrentThread(),
-		&StackFrame,
-		MachineType == IMAGE_FILE_MACHINE_I386
-		? NULL
-		: exceptionContext,
-		NULL,
-		SymFunctionTableAccess64,
-		SymGetModuleBase64,
-		NULL))
+#ifndef _NOILIBSTACKDEBUG
+	psym->SizeOfStruct = sizeof(SYMBOL_INFO);
+	psym->MaxNameLen = MAX_SYM_NAME;
+	pimg->SizeOfStruct = sizeof(IMAGEHLP_LINE64);
+
+	// The 3000 cap leaves room for the longest frame line and for the prefix ILibCriticalLog() adds in its own 4096 byte buffer.
+	// On Windows sprintf_s() terminates the process when its buffer is too small, which would lose the whole dump.
+	for (frame = 0; frame < dumpEnabledExceptionContext->frameCount && len < 3000; ++frame)
 	{
+		DWORD64 pc = dumpEnabledExceptionContext->framePCs[frame];
+		DWORD64 displacement = 0;
+		DWORD lineDisplacement = 0;
 
-		if (StackFrame.AddrPC.Offset != 0)
+		if (SymFromAddr(GetCurrentProcess(), pc, &displacement, psym))
 		{
-			//
-			// Valid frame.
-			//
-			PIMAGEHLP_LINE64 pimg = (PIMAGEHLP_LINE64)imgBuffer;
-			DWORD64 tmp = 0;
-			DWORD tmp2;
-			PSYMBOL_INFO psym = (PSYMBOL_INFO)symBuffer;
-			psym->SizeOfStruct = sizeof(SYMBOL_INFO);
-			psym->MaxNameLen = MAX_SYM_NAME;
-			pimg->SizeOfStruct = sizeof(IMAGEHLP_LINE64);
-
-			len = sprintf_s(buffer, sizeof(buffer), "FATAL EXCEPTION @ ");
-#ifdef WIN64
-			len += sprintf_s(buffer + len, sizeof(buffer) - len, "[FuncAddr: 0x%016llx / BaseAddr: 0x%016llx / Delta: %lld]\n", (unsigned __int64)StackFrame.AddrPC.Offset, (unsigned __int64)&ILibCreateChain, (unsigned __int64)&ILibCreateChain - (unsigned __int64)StackFrame.AddrPC.Offset);
-#else
-			len += sprintf_s(buffer + len, sizeof(buffer) - len, "[FuncAddr: 0x%08x / BaseAddr: 0x%08x / Delta: %d]\n", (unsigned __int32)StackFrame.AddrPC.Offset, (unsigned __int32)&ILibCreateChain, (unsigned __int32)&ILibCreateChain - (unsigned __int32)StackFrame.AddrPC.Offset);
-#endif
-
-			if (SymFromAddr(GetCurrentProcess(), StackFrame.AddrPC.Offset, &tmp, psym))
+			// Without a PDB for the module the name is only the nearest export, so the displacement shows how far off it is
+			len += sprintf_s(buffer + len, sizeof(buffer) - len, "    [%.256s+0x%llx", (char*)(psym->Name), (unsigned __int64)displacement);
+			if (SymGetLineFromAddr64(GetCurrentProcess(), pc, &lineDisplacement, pimg))
 			{
-				len += sprintf_s(buffer + len, sizeof(buffer) - len, "    [%s", (char*)(psym->Name));
-				if (SymGetLineFromAddr64(GetCurrentProcess(), StackFrame.AddrPC.Offset, &tmp2, pimg))
-				{
-					len += sprintf_s(buffer + len, sizeof(buffer) - len, " => %s:%d]\n", (char*)(pimg->FileName), pimg->LineNumber);
-				}
-				else
-				{
-					len += sprintf_s(buffer + len, sizeof(buffer) - len, "]\n");
-				}
+				len += sprintf_s(buffer + len, sizeof(buffer) - len, " => %.256s:%d]\n", (char*)(pimg->FileName), pimg->LineNumber);
+			}
+			else
+			{
+				len += sprintf_s(buffer + len, sizeof(buffer) - len, "]\n");
 			}
 		}
+		else
+		{
+			// Same delta as the header line, which "-fdelta" decodes on a machine that has the PDB
+			len += sprintf_s(buffer + len, sizeof(buffer) - len, "    [Delta: %lld]\n", (long long)(baseAddr - pc));
+		}
 	}
-	
+#endif
+
 	ILIBCRITICALEXITMSG(254, buffer);
 }
 #elif defined(_POSIX) && !defined(__APPLE__)
 #ifndef _NOILIBSTACKDEBUG
-char ILib_POSIX_CrashParamBuffer[5 * sizeof(void*)];
+extern char ILib_POSIX_CrashParamBuffer[];
+#define ILIB_POSIX_CRASHFRAME_MAXLEN 256
 void ILib_POSIX_CrashHandler(int code)
 {
 	struct rlimit r;
@@ -2838,18 +2866,19 @@ void ILib_POSIX_CrashHandler(int code)
 		msgLen += 30;
 	}
 
-	for (i = 1; i < sz; ++i)
+	for (i = 1; i < sz && msgLen < (int)sizeof(msgBuffer) - 600; ++i)
 	{
 		pid_t pid;
 		int fd[2];
 		size_t symlen = strnlen_s(strings[i], sizeof(msgBuffer));
+		size_t dispLen = symlen > ILIB_POSIX_CRASHFRAME_MAXLEN ? ILIB_POSIX_CRASHFRAME_MAXLEN : symlen;
 
-		memcpy_s(msgBuffer + msgLen, sizeof(msgBuffer) - msgLen, strings[i], symlen);
-		msgLen += symlen;
+		memcpy_s(msgBuffer + msgLen, sizeof(msgBuffer) - msgLen, strings[i], dispLen);
+		msgLen += (int)dispLen;
 		msgBuffer[msgLen] = '\n';
 		msgLen += 1;
 
-
+		
 		ptr = strings[i];
 		for (c = 0; c < (int)symlen; ++c)
 		{
@@ -2884,10 +2913,11 @@ void ILib_POSIX_CrashHandler(int code)
 				len = read(fd[0], tmp, 8192);
 				if (len > 0 && tmp[0] != '?')
 				{
+					size_t addrLen = (size_t)len > ILIB_POSIX_CRASHFRAME_MAXLEN ? ILIB_POSIX_CRASHFRAME_MAXLEN : (size_t)len;
 					memcpy_s(msgBuffer + msgLen, sizeof(msgBuffer) - msgLen, "=> ", 3);
 					msgLen += 3;
-					memcpy_s(msgBuffer + msgLen, sizeof(msgBuffer) - msgLen, tmp, len);
-					msgLen += len;
+					memcpy_s(msgBuffer + msgLen, sizeof(msgBuffer) - msgLen, tmp, addrLen);
+					msgLen += (int)addrLen;
 				}
 				close(fd[0]);
 			}
@@ -2911,6 +2941,12 @@ void ILib_POSIX_CrashHandler(int code)
 		ILIBCRITICALEXITMSG(254, msgBuffer);
 	}
 }
+#endif
+#endif
+
+#if defined(_POSIX)
+// Built in every POSIX build, also without the crash handler and on macOS, because -faddr and -fdelta decode through addr2line with the path set here
+char ILib_POSIX_CrashParamBuffer[5 * sizeof(void*)];
 char* ILib_POSIX_InstallCrashHandler(char *exename)
 {
 	char *retVal = NULL;
@@ -2920,11 +2956,12 @@ char* ILib_POSIX_InstallCrashHandler(char *exename)
 		((char**)ILib_POSIX_CrashParamBuffer)[2] = "-e";
 		((char**)ILib_POSIX_CrashParamBuffer)[3] = retVal;
 		((char**)ILib_POSIX_CrashParamBuffer)[4] = NULL;
+#if !defined(__APPLE__) && !defined(_NOILIBSTACKDEBUG)
 		signal(SIGSEGV, ILib_POSIX_CrashHandler);
+#endif
 	}
 	return retVal;
 }
-#endif
 #endif
 
 void ILibChain_DebugDelta(char *buffer, int bufferLen, uint64_t delta)
@@ -2934,7 +2971,6 @@ void ILibChain_DebugDelta(char *buffer, int bufferLen, uint64_t delta)
 
 void ILibChain_DebugOffset(char *buffer, int bufferLen, uint64_t addrOffset)
 {
-#ifndef _NOILIBSTACKDEBUG
 #ifdef WIN32
 	int len = 0;
 	char symBuffer[4096];
@@ -2948,7 +2984,7 @@ void ILibChain_DebugOffset(char *buffer, int bufferLen, uint64_t addrOffset)
 	pimg->SizeOfStruct = sizeof(IMAGEHLP_LINE64);
 	SymInitialize(GetCurrentProcess(), NULL, TRUE);
 
-#ifdef WIN64
+#ifdef _WIN64
 	sprintf_s(buffer, bufferLen, "[Unable to decode function address, BaseAddr: 0x%016llx]", (unsigned __int64)&ILibCreateChain);
 #else
 	sprintf_s(buffer, bufferLen, "[Unable to decode function address, BaseAddr: 0x%08x]", (unsigned __int32)&ILibCreateChain);
@@ -2956,7 +2992,7 @@ void ILibChain_DebugOffset(char *buffer, int bufferLen, uint64_t addrOffset)
 
 	if (SymFromAddr(GetCurrentProcess(), (DWORD64)addrOffset, &tmp, psym))
 	{
-#ifdef WIN64
+#ifdef _WIN64
 		len += sprintf_s(buffer + len, bufferLen - len, "[BaseAddr: 0x%016llx, %s", (unsigned __int64)&ILibCreateChain, (char*)(psym->Name));
 #else
 		len += sprintf_s(buffer + len, bufferLen - len, "[BaseAddr: 0x%08x, %s", (unsigned __int32)&ILibCreateChain, (char*)(psym->Name));
@@ -3021,14 +3057,19 @@ void ILibChain_DebugOffset(char *buffer, int bufferLen, uint64_t addrOffset)
 		buffer[len] = 0;
 	}
 #endif
-#endif
 }
 
 char* ILibChain_Debug(void *chain, char* buffer, int bufferLen)
 {
 	char *retVal = NULL;
 	ILibBaseChain *bChain = (ILibBaseChain*)chain;
-#if defined(WIN32)
+#if defined(WIN32) && defined(_NOILIBSTACKDEBUG)
+	// Built without the stack walk, the watchdog logs its own line instead
+	UNREFERENCED_PARAMETER(buffer);
+	UNREFERENCED_PARAMETER(bufferLen);
+	UNREFERENCED_PARAMETER(bChain);
+	return(retVal);
+#elif defined(WIN32)
 	char symBuffer[4096];
 	char imgBuffer[4096];
 	DWORD MachineType;
@@ -3037,7 +3078,6 @@ char* ILibChain_Debug(void *chain, char* buffer, int bufferLen)
 	int len = 0;
 	CONTEXT ctx;
 
-	ZeroMemory(&StackFrame, sizeof(STACKFRAME64));
 	if (chain != NULL)
 	{
 		if (bChain->MicrostackThreadHandle != NULL)
@@ -3059,31 +3099,7 @@ char* ILibChain_Debug(void *chain, char* buffer, int bufferLen)
 
 	if (len != 0) { return(NULL); }
 
-#ifndef WIN64
-	MachineType = IMAGE_FILE_MACHINE_I386;
-	StackFrame.AddrPC.Offset = bChain != NULL ? bChain->MicrostackThreadContext.Eip : ctx.Eip;
-	StackFrame.AddrPC.Mode = AddrModeFlat;
-	StackFrame.AddrFrame.Offset = bChain != NULL ? bChain->MicrostackThreadContext.Ebp : ctx.Ebp;
-	StackFrame.AddrFrame.Mode = AddrModeFlat;
-	StackFrame.AddrStack.Offset = bChain != NULL ? bChain->MicrostackThreadContext.Esp : ctx.Esp;
-	StackFrame.AddrStack.Mode = AddrModeFlat;
-#elif ARM64
-	MachineType = IMAGE_FILE_MACHINE_ARM64;
-	StackFrame.AddrPC.Offset = bChain != NULL ? bChain->MicrostackThreadContext.Pc : ctx.Pc;
-	StackFrame.AddrPC.Mode = AddrModeFlat;
-	StackFrame.AddrFrame.Offset = bChain != NULL ? bChain->MicrostackThreadContext.Sp : ctx.Sp;
-	StackFrame.AddrFrame.Mode = AddrModeFlat;
-	StackFrame.AddrStack.Offset = bChain != NULL ? bChain->MicrostackThreadContext.Sp : ctx.Sp;
-	StackFrame.AddrStack.Mode = AddrModeFlat;
-#else
-	MachineType = IMAGE_FILE_MACHINE_AMD64;
-	StackFrame.AddrPC.Offset = bChain != NULL ? bChain->MicrostackThreadContext.Rip : ctx.Rip;
-	StackFrame.AddrPC.Mode = AddrModeFlat;
-	StackFrame.AddrFrame.Offset = bChain != NULL ? bChain->MicrostackThreadContext.Rsp : ctx.Rsp;
-	StackFrame.AddrFrame.Mode = AddrModeFlat;
-	StackFrame.AddrStack.Offset = bChain != NULL ? bChain->MicrostackThreadContext.Rsp : ctx.Rsp;
-	StackFrame.AddrStack.Mode = AddrModeFlat;
-#endif
+	MachineType = ILib_InitStackFrame(&StackFrame, bChain != NULL ? &(bChain->MicrostackThreadContext) : &ctx);
 
 	buffer[0] = 0;
 	retVal = buffer;
@@ -3095,9 +3111,7 @@ char* ILibChain_Debug(void *chain, char* buffer, int bufferLen)
 			bChain != NULL ? bChain->ChainProcessHandle : GetCurrentProcess(),
 			bChain != NULL ? bChain->MicrostackThreadHandle : GetCurrentThread(),
 			&StackFrame,
-			MachineType == IMAGE_FILE_MACHINE_I386
-			? NULL
-			: (bChain!=NULL ? &(bChain->MicrostackThreadContext) : &ctx),
+			bChain != NULL ? &(bChain->MicrostackThreadContext) : &ctx,
 			NULL,
 			SymFunctionTableAccess64,
 			SymGetModuleBase64,
@@ -3314,7 +3328,15 @@ void ILibChain_WatchDogStart(void *obj)
 		if (stuck == 1)
 		{
 #ifdef WIN32
+#ifdef _NOILIBSTACKDEBUG
+			{
+				ILibChain_Link *stuckLink = (chain->node != NULL) ? (ILibChain_Link*)ILibLinkedList_GetDataFromNode(chain->node) : NULL;
+				char *stuckIn = (stuckLink == NULL) ? "outside the link handlers" : ((stuckLink->MetaData != NULL) ? stuckLink->MetaData : "a link without a description");
+				sprintf_s(msg, sizeof(msg), "Microstack STUCK: the event loop made no progress for %u to %u seconds (select count %u) in [%s], ending the process\r\n", noProgressChecks * ILibChain_WATCHDOG_WAKE_SEC, (noProgressChecks + 1) * ILibChain_WATCHDOG_WAKE_SEC, currentPreCount, stuckIn);
+			}
+#else
 			__try { ILibChain_Debug(chain, msg+20, sizeof(msg)-20); } __except (EXCEPTION_EXECUTE_HANDLER) { }
+#endif
 			printf("%s", ILibCriticalLog(msg, __FILE__, __LINE__, 0, 0)); fflush(stdout);
 			TerminateProcess(GetCurrentProcess(), 254);
 #else

@@ -1108,6 +1108,14 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_coreDumpLocation_setter(duk_contex
 		duk_eval_string_noresult(ctx, "process.rlimit.set(process.RLIMITS.CORE, {soft: 0, hard: 0});");
 #endif
 	}
+#if defined(WIN32) && defined(_NOILIBSTACKDEBUG)
+	else
+	{
+		// Built without the crash handler there is no MiniDumpWriteDump(), so the path stays NULL and nothing downstream (getter, KVM child's -coredump) believes a dump is coming
+		static int reported = 0;
+		if (reported == 0) { reported = 1; ILIBLOGMESSSAGE("coreDumpLocation ignored, this build has no crash handler (CrashHandler=0)"); }
+	}
+#else
 	else
 	{
 		duk_push_this(ctx);																// [process]
@@ -1122,6 +1130,7 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_coreDumpLocation_setter(duk_contex
 		duk_eval_string_noresult(ctx, "process.rlimit.set(process.RLIMITS.CORE, {soft: -1, hard: -1});");
 #endif
 	}
+#endif
 	return(0);
 }
 #ifndef WIN32
