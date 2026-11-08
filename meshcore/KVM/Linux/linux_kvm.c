@@ -107,7 +107,7 @@ typedef struct _XkbStateNotifyEvent
 	char 			req_minor;			/* Minor opcode of request */
 } XkbStateNotifyEvent;
 
-int curcursor = KVM_MouseCursor_HELP;
+int curcursor = KVM_MouseCursor_ARROW;
 static int sentCursor = -1;	// Last cursor type sent to the master, -1 so the next one always goes out
 int SLAVELOG = 0;
 
@@ -327,9 +327,9 @@ void kvm_send_error(char *msg)
 
 KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 {
-	// Name was NULL, so as a last ditch effort, lets try to look at the XFixesCursorImage
+	// Identify the cursor from its image: the all-transparent check, then the alpha CRC table
 	char *cursor_image = (char*)xfixes_exports->XFixesGetCursorImage(cursordisplay);
-	KVM_MouseCursors ret = KVM_MouseCursor_HELP;
+	KVM_MouseCursors ret = KVM_MouseCursor_ARROW;	// Standard arrow when the cursor is unknown
 	if (cursor_image == NULL) { return(ret); }	// XFixesGetCursorImage() returns NULL when the request fails, and every read below goes through it
 
 	unsigned short w = ((unsigned short*)(cursor_image + 4))[0];
@@ -337,6 +337,12 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 	char *pixels = cursor_image + (sizeof(void*) == 8 ? 24 : 16);
 	char alpha[65535];
 	int i;
+
+	// GTK hides the pointer while typing with a nameless 1x1 cursor whose alpha is 0, so it goes out as NONE instead of a visible pointer
+	// Offset 24 (16 on 32-bit) is the pixels pointer of XFixesCursorImage, so this reads the real alpha where the CRC loop below still walks the struct tail
+	unsigned long *argb = ((unsigned long**)(cursor_image + (sizeof(void*) == 8 ? 24 : 16)))[0];
+	for (i = 0; i < (w*h) && (argb[i] >> 24) == 0; ++i);
+	if (i == (w*h)) { x11_exports->XFree(cursor_image); return(KVM_MouseCursor_NONE); }
 
 	if (((size_t)(w*h) <= sizeof(alpha)) && ((size_t)(w*h) > 6))
 	{
@@ -1408,21 +1414,31 @@ void* kvm_server_mainloop_x11(void* parm)
 					
 						if (name != NULL)
 						{
+							if (strcmp(name, "blank") == 0) { curcursor = KVM_MouseCursor_NONE; }
 							if (strcmp(name, "bottom_left_corner") == 0 || strcmp(name, "sw-resize") == 0) { curcursor = KVM_MouseCursor_SIZENESW; }
 							if (strcmp(name, "bottom_right_corner") == 0 || strcmp(name, "se-resize") == 0) { curcursor = KVM_MouseCursor_SIZENWSE; }
 							if (strcmp(name, "bottom_side") == 0) { curcursor = KVM_MouseCursor_SIZENS; }
-							if (strcmp(name, "fleur") == 0) { curcursor = KVM_MouseCursor_SIZEALL; }
-							if (strcmp(name, "hand1") == 0 || strcmp(name, "pointer")==0) { curcursor = KVM_MouseCursor_HAND; }
+							if (strcmp(name, "col-resize") == 0 || strcmp(name, "ew-resize") == 0 || strcmp(name, "sb_h_double_arrow") == 0 || strcmp(name, "size_hor") == 0 || strcmp(name, "split_h") == 0 || strcmp(name, "h_double_arrow") == 0) { curcursor = KVM_MouseCursor_SIZEWE; }
+							if (strcmp(name, "crosshair") == 0 || strcmp(name, "cross") == 0 || strcmp(name, "tcross") == 0 || strcmp(name, "cell") == 0) { curcursor = KVM_MouseCursor_CROSS; }
+							if (strcmp(name, "fleur") == 0 || strcmp(name, "move") == 0 || strcmp(name, "all-scroll") == 0 || strcmp(name, "size_all") == 0) { curcursor = KVM_MouseCursor_SIZEALL; }
+							if (strcmp(name, "hand1") == 0 || strcmp(name, "pointer")==0 || strcmp(name, "pointing_hand") == 0 || strcmp(name, "hand") == 0) { curcursor = KVM_MouseCursor_HAND; }
 							if (strcmp(name, "hand2") == 0) { curcursor = KVM_MouseCursor_HAND; }
-							if (strcmp(name, "left_ptr") == 0) { curcursor = KVM_MouseCursor_ARROW; }
+							if (strcmp(name, "help") == 0 || strcmp(name, "question_arrow") == 0 || strcmp(name, "whats_this") == 0) { curcursor = KVM_MouseCursor_HELP; }
+							if (strcmp(name, "left_ptr") == 0 || strcmp(name, "default") == 0 || strcmp(name, "arrow") == 0 || strcmp(name, "context-menu") == 0 || strcmp(name, "top_left_arrow") == 0 || strcmp(name, "left_arrow") == 0) { curcursor = KVM_MouseCursor_ARROW; }
 							if (strcmp(name, "left_side") == 0 || strcmp(name, "w-resize") == 0 || strcmp(name, "e-resize") == 0) { curcursor = KVM_MouseCursor_SIZEWE; }
+							if (strcmp(name, "nesw-resize") == 0 || strcmp(name, "fd_double_arrow") == 0 || strcmp(name, "size_bdiag") == 0) { curcursor = KVM_MouseCursor_SIZENESW; }
+							if (strcmp(name, "no-drop") == 0 || strcmp(name, "dnd-none") == 0) { curcursor = KVM_MouseCursor_NO; }
+							if (strcmp(name, "not-allowed") == 0 || strcmp(name, "crossed_circle") == 0 || strcmp(name, "forbidden") == 0 || strcmp(name, "circle") == 0) { curcursor = KVM_MouseCursor_NOTALLOWED; }
+							if (strcmp(name, "nwse-resize") == 0 || strcmp(name, "bd_double_arrow") == 0 || strcmp(name, "size_fdiag") == 0) { curcursor = KVM_MouseCursor_SIZENWSE; }
+							if (strcmp(name, "progress") == 0 || strcmp(name, "left_ptr_watch") == 0 || strcmp(name, "half-busy") == 0) { curcursor = KVM_MouseCursor_APPSTARTING; }
 							if (strcmp(name, "right_side") == 0) { curcursor = KVM_MouseCursor_SIZEWE; }
+							if (strcmp(name, "row-resize") == 0 || strcmp(name, "ns-resize") == 0 || strcmp(name, "sb_v_double_arrow") == 0 || strcmp(name, "size_ver") == 0 || strcmp(name, "split_v") == 0 || strcmp(name, "v_double_arrow") == 0) { curcursor = KVM_MouseCursor_SIZENS; }
 							if (strcmp(name, "top_left_corner") == 0 || strcmp(name, "nw-resize") == 0) { curcursor = KVM_MouseCursor_SIZENWSE; }
 							if (strcmp(name, "top_right_corner") == 0 || strcmp(name, "ne-resize") == 0) { curcursor = KVM_MouseCursor_SIZENESW; }
 							if (strcmp(name, "top_side") == 0) { curcursor = KVM_MouseCursor_SIZENS; }
-							if (strcmp(name, "watch") == 0) { curcursor = KVM_MouseCursor_WAIT; }
+							if (strcmp(name, "watch") == 0 || strcmp(name, "wait") == 0) { curcursor = KVM_MouseCursor_WAIT; }
 							if (strcmp(name, "top_side") == 0 || strcmp(name, "n-resize") == 0 || strcmp(name, "s-resize") == 0) { curcursor = KVM_MouseCursor_SIZENS; }
-							if (strcmp(name, "xterm") == 0 || strcmp(name, "ibeam") == 0 || strcmp(name, "text") == 0) { curcursor = KVM_MouseCursor_IBEAM; }
+							if (strcmp(name, "xterm") == 0 || strcmp(name, "ibeam") == 0 || strcmp(name, "text") == 0 || strcmp(name, "vertical-text") == 0) { curcursor = KVM_MouseCursor_IBEAM; }
 							x11_exports->XFree(name);
 						}
 						else
