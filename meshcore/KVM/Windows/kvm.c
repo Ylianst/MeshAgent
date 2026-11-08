@@ -1242,13 +1242,15 @@ DWORD WINAPI kvm_server_mainloop(LPVOID parm)
 		// Enable Core Dump in KVM Child
 		ILib_DumpEnabledContext winException;
 		WCHAR str[_MAX_PATH];
-		DWORD strLen;
-		if ((strLen = GetModuleFileNameW(NULL, str, _MAX_PATH)) > 5)
+		DWORD strLen = GetModuleFileNameW(NULL, str, _MAX_PATH);
+		ILibCriticalLogFilename = "KVMSlave.log";
+
+		// A full buffer means the path was cut off, and a dump path into a directory that does not exist is worse than none
+		if (strLen > 4 && strLen < _MAX_PATH)
 		{
-			str[strLen - 4] = 0;														  // We're going to convert .exe to _kvm.dmp
-			g_ILibCrashDump_path = ILibMemory_Allocate((strLen * 2) + 10, 0, NULL, NULL); // Add enough space to add '.dmp' to the end of the path
-			swprintf_s((wchar_t *)g_ILibCrashDump_path, strLen + 5, L"%s_kvm.dmp", str);
-			ILibCriticalLogFilename = "KVMSlave.log";
+			if (_wcsicmp(str + strLen - 4, L".exe") == 0) { strLen -= 4; str[strLen] = 0; }
+			g_ILibCrashDump_path = ILibMemory_Allocate((int)((strLen + 9) * sizeof(WCHAR)), 0, NULL, NULL);
+			swprintf_s((wchar_t *)g_ILibCrashDump_path, strLen + 9, L"%s_kvm.dmp", str);
 		}
 
 		__try
