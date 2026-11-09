@@ -14,7 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 var promise = require('promise');
-var systemd_escape = null;
 
 function failureActionToInteger(action)
 {
@@ -1846,21 +1845,18 @@ function serviceManager()
                                 });
                             ret.description = function description()
                             {
-                                var child = require('child_process').execFile('/bin/sh', ['sh']);
-                                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                                if (require('fs').existsSync('/lib/systemd/system/' + this.escname.split('\\').join('\\\\') + '.service'))
+                                // Read the unit file directly, a shell per service made enumerateService() cost one process per unit.
+                                // Same result as the old awk line: every line whose key is exactly Description, further '=' become spaces.
+                                var text;
+                                try { text = require('fs').readFileSync(this.conf).toString(); } catch (e) { return (''); }
+                                if (text == null) { return (''); } // An empty file, or a masked unit linked to /dev/null, gives null here
+                                var out = [];
+                                text.split('\n').forEach(function (line)
                                 {
-                                    console.info1('cat /lib/systemd/system/' + this.escname.split('\\').join('\\\\') + '.service')
-                                    child.stdin.write('cat /lib/systemd/system/' + this.escname.split('\\').join('\\\\') + '.service');
-                                }
-                                else
-                                {
-                                    console.info1('cat /usr/lib/systemd/system/' + this.escname.split('\\').join('\\\\') + '.service')
-                                    child.stdin.write('cat /usr/lib/systemd/system/' + this.escname.split('\\').join('\\\\') + '.service');
-                                }
-                                child.stdin.write(' | grep Description= | awk -F= \'{ if($1=="Description") { $1=""; print $0; }}\'\nexit\n');
-                                child.waitExit();
-                                return (child.stdout.str.trim());
+                                    var f = line.split('=');
+                                    if (f.length > 1 && f[0] == 'Description') { out.push(f.slice(1).join(' ')); }
+                                });
+                                return (out.join('\n').trim());
                             }
                             ret.appWorkingDirectory = function appWorkingDirectory()
                             {
@@ -2120,6 +2116,7 @@ function serviceManager()
             var results = [];
             var paths = [];
             var runtable = {};
+            var seen = {};
             switch(process.platform)
             {
                 case 'linux':
@@ -2198,8 +2195,9 @@ function serviceManager()
                                     }
                                     break;
                                 case 'systemd':
-                                    if (files[j].endsWith('.service'))
+                                    if (files[j].endsWith('.service') && !seen[files[j]])
                                     {
+                                        seen[files[j]] = true;
                                         try
                                         {
                                             results.push(this.getService(files[j].split('.service')[0], 'systemd'));
@@ -3355,34 +3353,38 @@ function serviceManager()
     this.escape = function escape(str)
     {
         if (this.getServiceType() != 'systemd') { return (str); }
-        if (systemd_escape == null)
+        var b = Buffer.from(str), ret = '', i, c, hex;
+        for (i = 0; i < b.length; ++i)
         {
-            systemd_escape = require('lib-finder').findBinary('systemd-escape');
-            if (systemd_escape == null) { systemd_escape = false; }
+            c = b[i];
+            if (c == 0x2F) { ret += '-'; continue; }
+            if ((c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A) || c == 0x3A || c == 0x5F || (c == 0x2E && i > 0))
+            {
+                ret += String.fromCharCode(c);
+                continue;
+            }
+            hex = c.toString(16);
+            ret += ('\\x' + (hex.length < 2 ? '0' : '') + hex);
         }
-        if (systemd_escape === false) { return (str); }
-
-        var child = require('child_process').execFile(systemd_escape, ['systemd-escape', str]);
-        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-        child.waitExit();
-
-        return (child.stdout.str.trim());
+        return (ret);
     }
     this.unescape = function unescape(str)
     {
         if (this.getServiceType() != 'systemd') { return (str); }
-        if (systemd_escape == null)
+        var hex = '', i = 0;
+        while (i < str.length)
         {
-            systemd_escape = require('lib-finder').findBinary('systemd-escape');
-            if (systemd_escape == null) { systemd_escape = false; }
+            if (str[i] == '-') { hex += '2f'; ++i; continue; }
+            if (str[i] == '\\' && str[i + 1] == 'x' && /^[0-9A-Fa-f]{2}$/.test(str.substr(i + 2, 2)))
+            {
+                hex += str.substr(i + 2, 2);
+                i += 4;
+                continue;
+            }
+            hex += Buffer.from(str[i]).toString('hex');
+            ++i;
         }
-        if (systemd_escape === false) { return (str); }
-
-        var child = require('child_process').execFile(systemd_escape, ['systemd-escape', '-u', str]);
-        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-        child.waitExit();
-
-        return (child.stdout.str.trim());
+        return (hex == '' ? '' : Buffer.from(hex, 'hex').toString()); // Buffer.from('', 'hex').toString() gives null here
     }
 
 
