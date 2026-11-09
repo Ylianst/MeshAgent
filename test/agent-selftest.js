@@ -1210,6 +1210,7 @@ function testDialogBox_UTF8()
             {
                 console.log('   => Dialog Test.........................[N/A]');
                 ret._res();
+                break;
             }
             process.stdout.write('   => Dialog Test... Press any button...');
             var r = require('message-box').create('示例標題 (Example Title)', '示例標題 (Example Caption)', 10, ['按鈕_1', '按鈕_2']);
@@ -1221,10 +1222,10 @@ function testDialogBox_UTF8()
                     console.log('   => Dialog Test.........................[OK]');
                     this.promise._res();
                 },
-                function ()
+                function (e)
                 {
                     process.stdout.write('\r');
-                    this.promise._rej('   => Dialog Test.........................[FAILED]');
+                    this.promise._rej('   => Dialog Test.........................[FAILED] ' + e);
                 });
             break;
     }
