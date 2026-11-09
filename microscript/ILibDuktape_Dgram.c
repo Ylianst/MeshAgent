@@ -508,6 +508,8 @@ duk_ret_t ILibDuktape_DGram_createSocket(duk_context *ctx)
 	ILibDuktape_EventEmitter_CreateEventEx(ptrs->emitter, "message");
 	ILibDuktape_EventEmitter_CreateEventEx(ptrs->emitter, "flushed");
 
+	if (duk_is_function(ctx, 1)) { ILibDuktape_EventEmitter_AddOn(ptrs->emitter, "message", duk_require_heapptr(ctx, 1)); }
+
 	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "config", config, "bind", ILibDuktape_DGram_Socket_bind, DUK_VARARGS);
 
 	ILibDuktape_CreateInstanceMethodWithStringProperty(ctx, ILibDuktape_DGRAM_MULTICAST_MEMBERSHIP_TYPE, "add", "addMembership", ILibDuktape_DGram_multicastMembership, DUK_VARARGS);
@@ -555,9 +557,10 @@ public:
 	Once the socket is created, calling bind() will instruct the Socket to begin listening for datagram messages.\n
 	When address and port are not passed to bind() the method will bind the Socket to the "all interfaces" address on a random port\n
 	The bound address and port can be retrieved using address().address and address().port.
-	\param options <Object>\n
+	\param options <String|Object> Either 'udp4' or 'udp6', or an object with these properties:\n
 	<b>type</b> \<String\> Required. The family of socket. Must be either 'udp4' or 'udp6'.\n
 	<b>reuseAddr</b> <boolean> Optional If specified, will set the reuseAddr flag appropriately.
+	\param callback <func> Optional. Added as a listener for the 'message' event.
 	\return New Socket instance.
 	*/
 	static Socket createSocket(options[, callback]);
