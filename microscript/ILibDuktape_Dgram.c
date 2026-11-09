@@ -465,19 +465,28 @@ duk_ret_t ILibDuktape_DGram_createSocket(duk_context *ctx)
 	ILibDuktape_DGRAM_Config config = ILibDuktape_DGRAM_Config_NONE;
 	ILibDuktape_DGRAM_DATA *ptrs;
 	void *chain;
-	char *typ = duk_is_string(ctx, 0) ? (char*)duk_require_string(ctx, 0) : Duktape_GetStringPropertyValue(ctx, 0, "type", "udp4");
+	char *typ = NULL;
 	void *dgram;
+
+	if (duk_is_string(ctx, 0)) { typ = (char*)duk_require_string(ctx, 0); }
+	else if (duk_is_object(ctx, 0)) { typ = Duktape_GetStringPropertyValue(ctx, 0, "type", NULL); }
 
 	duk_push_this(ctx);													// [dgram]
 	dgram = duk_get_heapptr(ctx, -1);
 	duk_get_prop_string(ctx, -1, ILibDuktape_DGRAM_CHAIN);				// [dgram][chain]
 	chain = duk_get_pointer(ctx, -1);
 
-	if (strncmp(typ, "udp4", 4) == 0) { config |= ILibDuktape_DGRAM_Config_IPv4; }
-	else if (strncmp(typ, "udp6", 4) == 0) { config |= ILibDuktape_DGRAM_Config_IPv6; }
-	else { return ILibDuktape_Error(ctx, "dgram.createSocket(): Invalid 'type' specified: %s", typ); }
+	if (typ != NULL && strcmp(typ, "udp4") == 0) { config |= ILibDuktape_DGRAM_Config_IPv4; }
+	else if (typ != NULL && strcmp(typ, "udp6") == 0) { config |= ILibDuktape_DGRAM_Config_IPv6; }
+	else
+	{
+		duk_push_error_object(ctx, DUK_ERR_TYPE_ERROR, "dgram.createSocket(): Invalid 'type' specified: %s", typ != NULL ? typ : "(none)");
+		duk_push_string(ctx, "ERR_SOCKET_BAD_TYPE");
+		duk_put_prop_string(ctx, -2, "code");
+		return duk_throw(ctx);
+	}
 
-	if (!duk_is_string(ctx, 0)) { if (Duktape_GetBooleanProperty(ctx, 0, "reuseAddr", 0) != 0) { config |= ILibDuktape_DGRAM_Config_ReuseAddr; } }
+	if (duk_is_object(ctx, 0)) { if (Duktape_GetBooleanProperty(ctx, 0, "reuseAddr", 0) != 0) { config |= ILibDuktape_DGRAM_Config_ReuseAddr; } }
 
 	/**************************************************************************************/
 	duk_push_object(ctx);												// [socket]
