@@ -1017,7 +1017,9 @@ function testKVM()
         }
     }
 
-    if (require('MeshAgent').hasKVM != 0)
+    // In IPC mode the agent under test is the one that counts, not the local one
+    var hasKVM = localmode ? require('MeshAgent').hasKVM : promise.wait(this.agentQueryValue("require('MeshAgent').hasKVM"));
+    if (hasKVM != 0)
     {
         if (process.platform == 'linux' || process.platform == 'freebsd')
         {
@@ -1389,10 +1391,11 @@ function getRandom(min, max)
 // Started as a program by the agent: ./meshagent test/agent-selftest.js --script-connect=2 [--serviceName=xxx]
 // With --script-connect=2 the agent starts in this same heap after this file returns and runs the core from the .db,
 // so the test waits one turn of the event loop. With --serviceName the test talks to another agent over its DAIPC pipe.
+// Both modes need the local agent, because the test parses the reports with modules that only the core brings, like smbios.
+try { require('MeshAgent'); }
+catch (e) { console.log('The self test needs --script-connect=2 on the command line'); process.exit(1); }
 if (process.argv.getParameter('serviceName') == null)
 {
-    try { require('MeshAgent'); }
-    catch (e) { console.log('Stand-alone mode needs --script-connect=2 on the command line'); process.exit(1); }
     setTimeout(function () { setup(); }, 0);
 }
 else

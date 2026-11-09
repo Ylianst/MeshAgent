@@ -164,10 +164,10 @@ To verify if this flag has been enabled, from the console tab for the agent, run
 eval debugConsole
 ```
 If this returns 'true', then you are ready to run the self test in IPC Mode.
-To start the self test in IPC Mode, run the script from an elevated console without --script-connect=2, and pass the service name of the agent
+To start the self test in IPC Mode, start it from an elevated console the same way as the Stand Alone test, and add the service name of the agent
 you are trying to test:
 ```
-./MeshAgent /path/to/MeshAgent/test/agent-selftest.js --serviceName="xxx"
+./MeshAgent /path/to/MeshAgent/test/agent-selftest.js --script-connect=2 --serviceName="xxx"
 ```
 If you do not know the service name, you can navigate to the folder
 that contains the agent, and run the the agent from the command line with the following command line switch:
