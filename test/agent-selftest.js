@@ -334,10 +334,26 @@ function WebRTC_Test()
     console.log('   => Testing WebRTC');
     process.stdout.write('       => In progress, please wait...');
     var ret = new promise(function (r, j) { this._res = r; this._rej = j; });
+    var expected = 6665535, received = 0;
     ret.factory = require('ILibWebRTC').createNewFactory();
     ret.serverConnection = ret.factory.createConnection();
     ret.clientConnection = require('ILibWebRTC').createConnection();
-    ret.clientConnection.on('dataChannel', function (rtcchannel) { rtcchannel.write(Buffer.alloc(6665535)); });
+    ret.clientConnection.on('dataChannel', function (rtcchannel) { rtcchannel.write(Buffer.alloc(expected)); });
+
+    // The data channel stalls now and then (intermittent in the engine, not understood yet), so bound the step instead of hanging the suite
+    ret.timeout = setTimeout(function ()
+    {
+        process.stdout.write('\r');
+        console.log('       => WebRTC Data Channel Test........[FAILED] ' + received + ' of ' + expected + ' bytes after 60 s');
+        ret._rej('WebRTC data channel stalled');
+    }, 60000);
+
+    ret.finally(function ()
+    {
+        clearTimeout(ret.timeout);
+        try { ret.clientConnection.closeDataChannels(); } catch (e) { }
+        try { ret.serverConnection.closeDataChannels(); } catch (e) { }
+    });
 
     var offer = ret.clientConnection.generateOffer()
     var counter = ret.serverConnection.setOffer(offer);
@@ -348,7 +364,9 @@ function WebRTC_Test()
         this.dc = this.createDataChannel('Test Data Channel');
         this.dc.on('data', function (b)
         {
-            if (b.length == 6665535)
+            // Count bytes, the payload is not promised to arrive as one chunk
+            received += b.length;
+            if (received >= expected)
             {
                 process.stdout.write('\r');
                 console.log('       => WebRTC Data Channel Test........[OK]');
