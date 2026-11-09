@@ -1333,7 +1333,8 @@ function setup()
     this.start = start;
 
     console.log('   -> Setting up Mesh Agent Self Test.....[OK]');
-    require('MeshAgent').SendCommand = this.toServer;
+    // Stand-alone mode runs inside the agent (--script-connect=2) and takes over its SendCommand. IPC mode has no local agent
+    if (process.argv.getParameter('serviceName') == null) { require('MeshAgent').SendCommand = this.toServer; }
     this.consoletext = '';
     this.logs = '';
     this.on('command', function (j)
@@ -1367,5 +1368,16 @@ function getRandom(min, max)
     return (Math.floor(val));
 }
 
-
-module.exports = setup;
+// Started as a program by the agent: ./meshagent test/agent-selftest.js --script-connect=2 [--serviceName=xxx]
+// With --script-connect=2 the agent starts in this same heap after this file returns and runs the core from the .db,
+// so the test waits one turn of the event loop. With --serviceName the test talks to another agent over its DAIPC pipe.
+if (process.argv.getParameter('serviceName') == null)
+{
+    try { require('MeshAgent'); }
+    catch (e) { console.log('Stand-alone mode needs --script-connect=2 on the command line'); process.exit(1); }
+    setTimeout(function () { setup(); }, 0);
+}
+else
+{
+    setup();
+}

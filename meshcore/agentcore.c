@@ -4442,60 +4442,6 @@ void MeshServer_DbWarning(ILibSimpleDataStore db, uint64_t size, void *user)
 }
 
 
-void MeshServer_Agent_SelfTest(MeshAgentHostContainer *agent)
-{
-	int CoreModuleLen = ILibSimpleDataStore_Get(agent->masterDb, "CoreModule", NULL, 0);
-	char *CoreModule;
-	//int CoreModuleTesterLen = ILibSimpleDataStore_Get(agent->masterDb, "CoreModuleTester", NULL, 0);
-	//char *CoreModule, *CoreModuleTester;
-
-	duk_push_heapptr(agent->meshCoreCtx, ILibDuktape_GetProcessObject(agent->meshCoreCtx));		// [process]
-	ILibDuktape_SimpleDataStore_raw_GetCachedValues_Array(agent->meshCoreCtx, agent->masterDb);	// [process][array]
-	duk_put_prop_string(agent->meshCoreCtx, -2, "\xFF_argArray");								// [process]
-	duk_pop(agent->meshCoreCtx);
-
-	printf("Agent Self Test...\n");
-	if (agent->coreTimeout != 0)
-	{
-		duk_push_global_object(agent->meshCoreCtx);								// [g]
-		duk_get_prop_string(agent->meshCoreCtx, -1, "clearTimeout");			// [g][clearTimeout]
-		duk_swap_top(agent->meshCoreCtx, -2);									// [clearTimeout][this]
-		duk_push_heapptr(agent->meshCoreCtx, agent->coreTimeout);				// [clearTimeout][this][timeout]
-		duk_pcall_method(agent->meshCoreCtx, 1); duk_pop(agent->meshCoreCtx);	// ...
-		agent->coreTimeout = NULL;
-	}
-	printf("   -> Loading meshcore.js from db ........");
-
-	if (CoreModuleLen <= 4 	&& ILibSimpleDataStore_Get(agent->masterDb, "serviceName", NULL, 0) == 0)
-	{
-		printf("[NOT FOUND]\n");
-		return;
-	}
-	else
-	{
-		printf("[OK]\n");
-		agent->serverAuthState = 3;
-		ILibMemory_AllocateRaw(CoreModule, CoreModuleLen);
-		ILibSimpleDataStore_Get(agent->masterDb, "CoreModule", CoreModule, CoreModuleLen);
-
-		if (ILibDuktape_ScriptContainer_CompileJavaScriptEx(agent->meshCoreCtx, CoreModule + 4, CoreModuleLen - 4, "CoreModule.js", 13) != 0 ||
-			ILibDuktape_ScriptContainer_ExecuteByteCode(agent->meshCoreCtx) != 0)
-		{
-			ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint,
-				ILibRemoteLogging_Flags_VerbosityLevel_1, "Error Executing MeshCore: %s", duk_safe_to_string(agent->meshCoreCtx, -1));
-			duk_pop(agent->meshCoreCtx);
-		}
-		free(CoreModule);
-	}
-
-	if (duk_peval_string(agent->meshCoreCtx, "require('agent-selftest')();") != 0)
-	{
-		printf("   -> Loading Test Script.................[FAILED] %s\n", duk_safe_to_string(agent->meshCoreCtx, -1));
-		exit(1);
-	}
-	duk_pop(agent->meshCoreCtx);
-}
-
 #ifdef WIN32
 static void MeshServer_CheckAuthenticode(MeshAgentHostContainer *agent)
 {
@@ -4535,12 +4481,6 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 
 	// If this is called while we are in any connection state, just leave now.
 	if (agent->serverConnectionState != 0) return;
-
-	if (ILibSimpleDataStore_Get(agent->masterDb, "selfTest", NULL, 0) != 0)
-	{
-		MeshServer_Agent_SelfTest(agent);
-		return;
-	}
 
 #ifdef WIN32
 	MeshServer_CheckAuthenticode(agent);
@@ -5767,7 +5707,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		}
 #endif
 
-		if (ILibSimpleDataStore_Get(agentHost->masterDb, "selfTest", NULL, 0) == 0)
+		if (agentHost->localdebugmode == 0)
 		{
 			ILibIPAddressMonitor_Create(agentHost->chain, MeshAgent_AgentMode_IPAddressChanged_Handler, agentHost);
 		}
@@ -5791,6 +5731,8 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 				free(CoreModule);
 			}
 
+			// No server here, but the core only sends its reports (smbios and friends) while isControlChannelConnected is true, so claim the authenticated state before 'Connected'
+			agentHost->serverAuthState = 3;
 			duk_peval_string_noresult(agentHost->meshCoreCtx, "console.log('Agent running in Local Debug Mode');require('MeshAgent').emit('Connected',1);");
 		}
 		// We are acting as a mesh agent

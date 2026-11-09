@@ -135,21 +135,21 @@ will simulate a server connection with the agent, so the agent will need to be r
 stored in the db. If the agent has not yet connected with a server, or the meshcore is missing from the .db, the self test will error out 
 with a message stating that the meshcore could not be loaded.
 
-Once the agent has successfully connected at least once, simply exit/stop the agent. Make sure that you have placed a copy of the agent-selftest.js
-file from the modules folder of the agent repository to the folder where the agent that you wish to test is located. 
-By default only a debug build of the agent loads a module from a file next to the binary, so the self test needs a debug build, or a special release build with MESHAGENT_ALLOW_DISK_MODULES.
+Once the agent has successfully connected at least once, simply exit/stop the agent. The self test is the script test/agent-selftest.js in the
+agent repository. The agent runs a script as a program when its path is the first argument, and --script-connect=2 makes the agent start inside
+that script and run the meshcore from the .db without connecting to the server.
 
-To start the test on Windows, from a command prompt, simply run the agent from the command line, with the --selfTest=1 switch:
+To start the test on Windows, from a command prompt in the folder of the agent that you wish to test:
 ```
-MeshAgent --selfTest=1
+MeshAgent C:\path\to\MeshAgent\test\agent-selftest.js --script-connect=2
 ```
 The self test does not explicitly need an elevated command prompt to run, but some tests, such as the AMT tests require elevated permissions.
 
-To start the test on other platforms, simply run the agent from a console session. It will run best from a GUI capable console session, so that
-it can test features such as user consent. If you use SU to elevate the self test, it is best to pass in the -p flag, to preserve the envionment
-variables. To start the test, simply run the agent with the --selfTest=1 switch:
+To start the test on other platforms, run the agent from a console session in its own folder. It will run best from a GUI capable console session,
+so that it can test features such as user consent. If you use SU to elevate the self test, it is best to pass in the -p flag, to preserve the
+envionment variables:
 ```
-./MeshAgent --selfTest=1
+./MeshAgent /path/to/MeshAgent/test/agent-selftest.js --script-connect=2
 ```
 
 To run the self test in IPC Mode, requires a little more preparation. For security reasons, by default the agent does not allow running 'eval' 
@@ -164,12 +164,12 @@ To verify if this flag has been enabled, from the console tab for the agent, run
 eval debugConsole
 ```
 If this returns 'true', then you are ready to run the self test in IPC Mode.
-To start the self test in IPC Mode, start the self test similarly to how you launch the Stand Alone test, from an elevated console, but add the
-following command line switch:
+To start the self test in IPC Mode, run the script from an elevated console without --script-connect=2, and pass the service name of the agent
+you are trying to test:
 ```
---serviceName="xxx"
+./MeshAgent /path/to/MeshAgent/test/agent-selftest.js --serviceName="xxx"
 ```
-substituting xxx, with the service name of the agent you are trying to test. If you do not know the service name, you can navigate to the folder
+If you do not know the service name, you can navigate to the folder
 that contains the agent, and run the the agent from the command line with the following command line switch:
 ```
 -name
