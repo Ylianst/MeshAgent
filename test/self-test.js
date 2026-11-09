@@ -224,6 +224,7 @@ if (process.argv.getParameter('RemoteDebug') != null)
 var promises =
     {
         amt: null,
+        haskvm: null,
         conpty: null,
         delay: null,
         coreinfo: null,
@@ -1394,6 +1395,23 @@ function KVM_Test()
 {
     process.stdout.write('   KVM Test\n');
 
+    // A NOKVM agent returns null from getRemoteDesktopStream(), so the tunnel would never send a frame
+    addTimeout(promises.haskvm);
+    sendEval("selfTestResponse('haskvm', true, require('MeshAgent').hasKVM);");
+    return (promises.haskvm.then(function (j)
+    {
+        if (j.reason != 1)
+        {
+            process.stdout.write('      => Not built into this agent\n');
+            promises.kvm.resolve();
+            return (promises.kvm);
+        }
+        return (KVM_Test_Run());
+    }));
+}
+
+function KVM_Test_Run()
+{
     if (process.platform == 'linux' || process.platform == 'freebsd')
     {
         if (require('monitor-info').kvm_x11_support == false)
