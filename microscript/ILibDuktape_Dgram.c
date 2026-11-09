@@ -91,8 +91,11 @@ void ILibDuktape_Dgram_Socket_OnData(ILibAsyncUDPSocket_SocketModule socketModul
 		duk_get_prop_string(ptrs->ctx, -1, "emit");															// [this][emit]
 		duk_swap_top(ptrs->ctx, -2);																		// [emit][this]
 		duk_push_string(ptrs->ctx, "message");																// [emit][this][message]
-		duk_push_external_buffer(ptrs->ctx);
-		duk_config_buffer(ptrs->ctx, -1, buffer, (duk_size_t)bufferLength);									// [emit][this][message][buffer]
+		// Copied into a Node Buffer, because a plain buffer has no Buffer toString() and points into the socket's receive buffer, which the next datagram overwrites
+		char *msg = (char*)duk_push_fixed_buffer(ptrs->ctx, (duk_size_t)bufferLength);						// [emit][this][message][fixed]
+		if (bufferLength > 0) { memcpy_s(msg, (size_t)bufferLength, buffer, (size_t)bufferLength); }
+		duk_push_buffer_object(ptrs->ctx, -1, 0, (duk_size_t)bufferLength, DUK_BUFOBJ_NODEJS_BUFFER);		// [emit][this][message][fixed][buffer]
+		duk_remove(ptrs->ctx, -2);																			// [emit][this][message][buffer]
 		duk_push_object(ptrs->ctx);																			// [emit][this][message][buffer][rinfo]
 		duk_push_string(ptrs->ctx, remoteInterface->sin6_family == AF_INET ? "IPv4" : "IPv6");				// [emit][this][message][buffer][rinfo][family]
 		duk_put_prop_string(ptrs->ctx, -2, "family");														// [emit][this][message][buffer][rinfo]
@@ -465,19 +468,28 @@ duk_ret_t ILibDuktape_DGram_createSocket(duk_context *ctx)
 	ILibDuktape_DGRAM_Config config = ILibDuktape_DGRAM_Config_NONE;
 	ILibDuktape_DGRAM_DATA *ptrs;
 	void *chain;
-	char *typ = duk_is_string(ctx, 0) ? (char*)duk_require_string : Duktape_GetStringPropertyValue(ctx, 0, "type", "udp4");
+	char *typ = NULL;
 	void *dgram;
+
+	if (duk_is_string(ctx, 0)) { typ = (char*)duk_require_string(ctx, 0); }
+	else if (duk_is_object(ctx, 0)) { typ = Duktape_GetStringPropertyValue(ctx, 0, "type", NULL); }
 
 	duk_push_this(ctx);													// [dgram]
 	dgram = duk_get_heapptr(ctx, -1);
 	duk_get_prop_string(ctx, -1, ILibDuktape_DGRAM_CHAIN);				// [dgram][chain]
 	chain = duk_get_pointer(ctx, -1);
 
-	if (strncmp(typ, "udp4", 4) == 0) { config |= ILibDuktape_DGRAM_Config_IPv4; }
-	else if (strncmp(typ, "udp6", 4) == 0) { config |= ILibDuktape_DGRAM_Config_IPv6; }
-	else { return ILibDuktape_Error(ctx, "dgram.createSocket(): Invalid 'type' specified: %s", typ); }
+	if (typ != NULL && strcmp(typ, "udp4") == 0) { config |= ILibDuktape_DGRAM_Config_IPv4; }
+	else if (typ != NULL && strcmp(typ, "udp6") == 0) { config |= ILibDuktape_DGRAM_Config_IPv6; }
+	else
+	{
+		duk_push_error_object(ctx, DUK_ERR_TYPE_ERROR, "dgram.createSocket(): Invalid 'type' specified: %s", typ != NULL ? typ : "(none)");
+		duk_push_string(ctx, "ERR_SOCKET_BAD_TYPE");
+		duk_put_prop_string(ctx, -2, "code");
+		return duk_throw(ctx);
+	}
 
-	if (!duk_is_string(ctx, 0)) { if (Duktape_GetBooleanProperty(ctx, 0, "reuseAddr", 0) != 0) { config |= ILibDuktape_DGRAM_Config_ReuseAddr; } }
+	if (duk_is_object(ctx, 0)) { if (Duktape_GetBooleanProperty(ctx, 0, "reuseAddr", 0) != 0) { config |= ILibDuktape_DGRAM_Config_ReuseAddr; } }
 
 	/**************************************************************************************/
 	duk_push_object(ctx);												// [socket]
@@ -498,6 +510,8 @@ duk_ret_t ILibDuktape_DGram_createSocket(duk_context *ctx)
 	ILibDuktape_EventEmitter_CreateEventEx(ptrs->emitter, "listening");
 	ILibDuktape_EventEmitter_CreateEventEx(ptrs->emitter, "message");
 	ILibDuktape_EventEmitter_CreateEventEx(ptrs->emitter, "flushed");
+
+	if (duk_is_function(ctx, 1)) { ILibDuktape_EventEmitter_AddOn(ptrs->emitter, "message", duk_require_heapptr(ctx, 1)); }
 
 	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "config", config, "bind", ILibDuktape_DGram_Socket_bind, DUK_VARARGS);
 
@@ -546,9 +560,10 @@ public:
 	Once the socket is created, calling bind() will instruct the Socket to begin listening for datagram messages.\n
 	When address and port are not passed to bind() the method will bind the Socket to the "all interfaces" address on a random port\n
 	The bound address and port can be retrieved using address().address and address().port.
-	\param options <Object>\n
+	\param options <String|Object> Either 'udp4' or 'udp6', or an object with these properties:\n
 	<b>type</b> \<String\> Required. The family of socket. Must be either 'udp4' or 'udp6'.\n
 	<b>reuseAddr</b> <boolean> Optional If specified, will set the reuseAddr flag appropriately.
+	\param callback <func> Optional. Added as a listener for the 'message' event.
 	\return New Socket instance.
 	*/
 	static Socket createSocket(options[, callback]);
