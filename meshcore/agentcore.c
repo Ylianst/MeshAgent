@@ -5917,6 +5917,9 @@ void MeshAgent_ScriptMode_ZipSink_Run(duk_context *ctx, void ** args, int argsLe
 		{
 			// Error
 			ILibRemoteLogging_printf(ILibChainGetLogger(duk_ctx_chain(ctx)), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "Script Error: %s", duk_safe_to_string(ctx, -1));
+			// Nothing else ends the chain in script mode, so end the process the way Node does after an uncaught error
+			// process.exit() refuses in agent mode, so this is a no-op when the script runs with --script-connect
+			duk_peval_string_noresult(ctx, "process.exit(1);");
 		}
 	}
 
@@ -6097,6 +6100,7 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 	char *jsPath = NULL;
 	int sx = 1;
 	int connectAgent = 0;
+	int scriptExited = 0;
 	int pathLen = 0;
 
 	if (agentHost->meshCoreCtx_embeddedScript == NULL)
@@ -6231,6 +6235,18 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 			{
 				// Error
 				ILibRemoteLogging_printf(ILibChainGetLogger(agentHost->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "Script Error: %s", duk_safe_to_string(agentHost->meshCoreCtx, -1));
+				if (connectAgent == 0)
+				{
+					// Nothing else ends the chain in script mode, so end the process the way Node does after an uncaught error
+					duk_peval_string_noresult(agentHost->meshCoreCtx, "process.exit(1);");
+				}
+			}
+			else
+			{
+				// The script called process.exit(), which already scheduled this heap for destruction, so the agent must not be started in it.
+				// Without the agent nothing would end the chain or clear meshCoreCtx, so give this heap the finalizer a plain script run gets.
+				scriptExited = 1;
+				ILibDuktape_Helper_AddHeapFinalizer(agentHost->meshCoreCtx, MeshAgent_RunScriptOnly_Finalizer, agentHost);
 			}
 			duk_pop(agentHost->meshCoreCtx);
 		}
@@ -6291,7 +6307,7 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 	free(scriptArgs);
 
 	// If in agent mode, setup the chain to be a mesh agent
-	if (connectAgent != 0) 
+	if (connectAgent != 0 && scriptExited == 0)
 	{
 		agentHost->localdebugmode = (connectAgent == 2);
 		if (MeshAgent_AgentMode(agentHost, argc, argv, 0) == 0) 
