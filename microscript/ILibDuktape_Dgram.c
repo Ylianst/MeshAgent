@@ -91,8 +91,11 @@ void ILibDuktape_Dgram_Socket_OnData(ILibAsyncUDPSocket_SocketModule socketModul
 		duk_get_prop_string(ptrs->ctx, -1, "emit");															// [this][emit]
 		duk_swap_top(ptrs->ctx, -2);																		// [emit][this]
 		duk_push_string(ptrs->ctx, "message");																// [emit][this][message]
-		duk_push_external_buffer(ptrs->ctx);
-		duk_config_buffer(ptrs->ctx, -1, buffer, (duk_size_t)bufferLength);									// [emit][this][message][buffer]
+		// Copied into a Node Buffer, because a plain buffer has no Buffer toString() and points into the socket's receive buffer, which the next datagram overwrites
+		char *msg = (char*)duk_push_fixed_buffer(ptrs->ctx, (duk_size_t)bufferLength);						// [emit][this][message][fixed]
+		if (bufferLength > 0) { memcpy_s(msg, (size_t)bufferLength, buffer, (size_t)bufferLength); }
+		duk_push_buffer_object(ptrs->ctx, -1, 0, (duk_size_t)bufferLength, DUK_BUFOBJ_NODEJS_BUFFER);		// [emit][this][message][fixed][buffer]
+		duk_remove(ptrs->ctx, -2);																			// [emit][this][message][buffer]
 		duk_push_object(ptrs->ctx);																			// [emit][this][message][buffer][rinfo]
 		duk_push_string(ptrs->ctx, remoteInterface->sin6_family == AF_INET ? "IPv4" : "IPv6");				// [emit][this][message][buffer][rinfo][family]
 		duk_put_prop_string(ptrs->ctx, -2, "family");														// [emit][this][message][buffer][rinfo]
