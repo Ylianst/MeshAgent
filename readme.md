@@ -137,6 +137,7 @@ with a message stating that the meshcore could not be loaded.
 
 Once the agent has successfully connected at least once, simply exit/stop the agent. Make sure that you have placed a copy of the agent-selftest.js
 file from the modules folder of the agent repository to the folder where the agent that you wish to test is located. 
+By default only a debug build of the agent loads a module from a file next to the binary, so the self test needs a debug build, or a special release build with MESHAGENT_ALLOW_DISK_MODULES.
 
 To start the test on Windows, from a command prompt, simply run the agent from the command line, with the --selfTest=1 switch:
 ```
