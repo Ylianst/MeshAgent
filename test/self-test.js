@@ -104,6 +104,7 @@ const MNG_KVM_GET_DISPLAYS = 11;
 const MNG_KVM_SET_DISPLAY = 12;
 const MNG_KVM_KEYSTATE = 18;
 const MNG_JUMBO = 27;
+const MNG_ERROR = 65;
 const MNG_KVM_DISPLAY_INFO = 82;
 const MNG_KVM_MOUSE_CURSOR = 88;
 
@@ -1503,6 +1504,11 @@ function KVM_Test_Run()
                     break;
                 case MNG_KVM_SET_DISPLAY:
                     promises.kvm.Set.resolve(buf[5]);
+                    break;
+                case MNG_ERROR:
+                    process.stdout.write('\n         => KVM error: ' + buf.slice(4, sz).toString() + '\n');
+                    promises.kvm.reject('KVM error');
+                    this.end();
                     break;
                 default:
                     process.stdout.write('         => Received KVM PACKET TYPE: ' + type + ' (' + sz + ' bytes)\n');
