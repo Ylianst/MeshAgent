@@ -104,6 +104,7 @@ const MNG_KVM_GET_DISPLAYS = 11;
 const MNG_KVM_SET_DISPLAY = 12;
 const MNG_KVM_KEYSTATE = 18;
 const MNG_JUMBO = 27;
+const MNG_ERROR = 65;
 const MNG_KVM_DISPLAY_INFO = 82;
 const MNG_KVM_MOUSE_CURSOR = 88;
 
@@ -224,6 +225,7 @@ if (process.argv.getParameter('RemoteDebug') != null)
 var promises =
     {
         amt: null,
+        haskvm: null,
         conpty: null,
         delay: null,
         coreinfo: null,
@@ -1316,7 +1318,9 @@ function AMT_Detection()
     process.stdout.write('   AMT Detection\n');
     var ret = new promise(promise.defaultInit);
 
-    sendEval(" var amtMeiModule=null,amtMei=null; try { amtMeiModule = require('amt-mei'); amtMei = new amtMeiModule(); } catch (ex) { selfTestResponse('amt', false); }")
+    // With a HECI driver but no reachable AMT client, amt-mei gives up after 20 retries and only emits 'error', and getVersion() never calls back
+    addTimeout(promises.amt);
+    sendEval(" var amtMeiModule=null,amtMei=null; try { amtMeiModule = require('amt-mei'); amtMei = new amtMeiModule(); amtMei.on('error', function (e) { selfTestResponse('amt', false, e); }); } catch (ex) { selfTestResponse('amt', false); }")
     sendEval("\
     try\
     {\
@@ -1360,6 +1364,7 @@ function AMT_Detection()
                     }\
                 });\
             }\
+            else { selfTestResponse('amt', false); }\
         });\
     }\
     catch(ex)\
@@ -1391,6 +1396,23 @@ function KVM_Test()
 {
     process.stdout.write('   KVM Test\n');
 
+    // A NOKVM agent returns null from getRemoteDesktopStream(), so the tunnel would never send a frame
+    addTimeout(promises.haskvm);
+    sendEval("selfTestResponse('haskvm', true, require('MeshAgent').hasKVM);");
+    return (promises.haskvm.then(function (j)
+    {
+        if (j.reason != 1)
+        {
+            process.stdout.write('      => Not built into this agent\n');
+            promises.kvm.resolve();
+            return (promises.kvm);
+        }
+        return (KVM_Test_Run());
+    }));
+}
+
+function KVM_Test_Run()
+{
     if (process.platform == 'linux' || process.platform == 'freebsd')
     {
         if (require('monitor-info').kvm_x11_support == false)
@@ -1483,6 +1505,11 @@ function KVM_Test()
                 case MNG_KVM_SET_DISPLAY:
                     promises.kvm.Set.resolve(buf[5]);
                     break;
+                case MNG_ERROR:
+                    process.stdout.write('\n         => KVM error: ' + buf.slice(4, sz).toString() + '\n');
+                    promises.kvm.reject('KVM error');
+                    this.end();
+                    break;
                 default:
                     process.stdout.write('         => Received KVM PACKET TYPE: ' + type + ' (' + sz + ' bytes)\n');
                     break;
@@ -1557,7 +1584,7 @@ function Digest_Test()
     sendEval("var options = { protocol: 'https:', host: '127.0.0.1', port: " + server.address().port + ", path: '/', method: 'POST', rejectUnauthorized: false };");
     sendEval("var req = digest.request(options);");
     sendEval("req.on('error', function (e) { selfTestResponse('digest', false, JSON.stringify(e)); req = null; });");
-    sendEval("req.on('response', function (imsg) { selfTestResponse('digest', true); });");
+    sendEval("req.on('response', function (imsg) { imsg.on('end', function () { selfTestResponse('digest', true); }); });");
     sendEval("req.end('TestData');");
 
     promises.digest.then(function (v)
@@ -1574,7 +1601,7 @@ function Digest_Test()
         sendEval("var options = { protocol: 'https:', host: '127.0.0.1', port: " + server.address().port + ", path: '/auth', method: 'POST', rejectUnauthorized: false };");
         sendEval("var req = digest.request(options);");
         sendEval("req.on('error', function (e) { selfTestResponse('digest_auth', false, JSON.stringify(e)); req = null; });");
-        sendEval("req.on('response', function (imsg) { selfTestResponse('digest_auth', true); });");
+        sendEval("req.on('response', function (imsg) { imsg.on('end', function () { selfTestResponse('digest_auth', true); }); });");
         sendEval("req.end('TestData');");
     });
 
@@ -1592,7 +1619,7 @@ function Digest_Test()
         sendEval("var options = { protocol: 'https:', host: '127.0.0.1', port: " + server.address().port + ", path: '/auth-int', method: 'POST', rejectUnauthorized: false };");
         sendEval("var req = digest.request(options);");
         sendEval("req.on('error', function (e) { selfTestResponse('digest_authint', false, JSON.stringify(e)); req = null; });");
-        sendEval("req.on('response', function (imsg) { selfTestResponse('digest_authint', true); });");
+        sendEval("req.on('response', function (imsg) { imsg.on('end', function () { selfTestResponse('digest_authint', true); }); });");
         sendEval("req.end('TestData');");
     });
 

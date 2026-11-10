@@ -334,10 +334,26 @@ function WebRTC_Test()
     console.log('   => Testing WebRTC');
     process.stdout.write('       => In progress, please wait...');
     var ret = new promise(function (r, j) { this._res = r; this._rej = j; });
+    var expected = 6665535, received = 0;
     ret.factory = require('ILibWebRTC').createNewFactory();
     ret.serverConnection = ret.factory.createConnection();
     ret.clientConnection = require('ILibWebRTC').createConnection();
-    ret.clientConnection.on('dataChannel', function (rtcchannel) { rtcchannel.write(Buffer.alloc(6665535)); });
+    ret.clientConnection.on('dataChannel', function (rtcchannel) { rtcchannel.write(Buffer.alloc(expected)); });
+
+    // The data channel stalls now and then (intermittent in the engine, not understood yet), so bound the step instead of hanging the suite
+    ret.timeout = setTimeout(function ()
+    {
+        process.stdout.write('\r');
+        console.log('       => WebRTC Data Channel Test........[FAILED] ' + received + ' of ' + expected + ' bytes after 60 s');
+        ret._rej('WebRTC data channel stalled');
+    }, 60000);
+
+    ret.finally(function ()
+    {
+        clearTimeout(ret.timeout);
+        try { ret.clientConnection.closeDataChannels(); } catch (e) { }
+        try { ret.serverConnection.closeDataChannels(); } catch (e) { }
+    });
 
     var offer = ret.clientConnection.generateOffer()
     var counter = ret.serverConnection.setOffer(offer);
@@ -348,7 +364,9 @@ function WebRTC_Test()
         this.dc = this.createDataChannel('Test Data Channel');
         this.dc.on('data', function (b)
         {
-            if (b.length == 6665535)
+            // Count bytes, the payload is not promised to arrive as one chunk
+            received += b.length;
+            if (received >= expected)
             {
                 process.stdout.write('\r');
                 console.log('       => WebRTC Data Channel Test........[OK]');
@@ -999,7 +1017,9 @@ function testKVM()
         }
     }
 
-    if (require('MeshAgent').hasKVM != 0)
+    // In IPC mode the agent under test is the one that counts, not the local one
+    var hasKVM = localmode ? require('MeshAgent').hasKVM : promise.wait(this.agentQueryValue("require('MeshAgent').hasKVM"));
+    if (hasKVM != 0)
     {
         if (process.platform == 'linux' || process.platform == 'freebsd')
         {
@@ -1190,6 +1210,7 @@ function testDialogBox_UTF8()
             {
                 console.log('   => Dialog Test.........................[N/A]');
                 ret._res();
+                break;
             }
             process.stdout.write('   => Dialog Test... Press any button...');
             var r = require('message-box').create('示例標題 (Example Title)', '示例標題 (Example Caption)', 10, ['按鈕_1', '按鈕_2']);
@@ -1201,10 +1222,10 @@ function testDialogBox_UTF8()
                     console.log('   => Dialog Test.........................[OK]');
                     this.promise._res();
                 },
-                function ()
+                function (e)
                 {
                     process.stdout.write('\r');
-                    this.promise._rej('   => Dialog Test.........................[FAILED]');
+                    this.promise._rej('   => Dialog Test.........................[FAILED] ' + e);
                 });
             break;
     }
@@ -1333,7 +1354,8 @@ function setup()
     this.start = start;
 
     console.log('   -> Setting up Mesh Agent Self Test.....[OK]');
-    require('MeshAgent').SendCommand = this.toServer;
+    // Stand-alone mode runs inside the agent (--script-connect=2) and takes over its SendCommand. IPC mode has no local agent
+    if (process.argv.getParameter('serviceName') == null) { require('MeshAgent').SendCommand = this.toServer; }
     this.consoletext = '';
     this.logs = '';
     this.on('command', function (j)
@@ -1367,5 +1389,17 @@ function getRandom(min, max)
     return (Math.floor(val));
 }
 
-
-module.exports = setup;
+// Started as a program by the agent: ./meshagent test/agent-selftest.js --script-connect=2 [--serviceName=xxx]
+// With --script-connect=2 the agent starts in this same heap after this file returns and runs the core from the .db,
+// so the test waits one turn of the event loop. With --serviceName the test talks to another agent over its DAIPC pipe.
+// Both modes need the local agent, because the test parses the reports with modules that only the core brings, like smbios.
+try { require('MeshAgent'); }
+catch (e) { console.log('The self test needs --script-connect=2 on the command line'); process.exit(1); }
+if (process.argv.getParameter('serviceName') == null)
+{
+    setTimeout(function () { setup(); }, 0);
+}
+else
+{
+    setup();
+}

@@ -38,6 +38,8 @@ limitations under the License.
 
 #define ILibDuktape_ModSearch_JSInclude			"\xFF_ModSearch_JSINCLUDE"
 #define ILibDuktape_ModSearch_ModulePath		"\xFF_ModSearch_Path"
+// A .js next to the binary, or under setModulePath(), replaces the built-in module of that name, unsigned, and runs as the agent.
+// That is a debugging aid, so only debug builds define MESHAGENT_ALLOW_DISK_MODULES and a default release build never reads a module from disk.
 
 int ILibDuktape_ModSearch_ShowNames = 0;
 
@@ -77,6 +79,7 @@ duk_ret_t ModSearchTable_Put(duk_context *ctx, duk_idx_t table, char *key, char 
 
 uint32_t ILibDuktape_ModSearch_GetJSModuleDate(duk_context *ctx, char *id)
 {
+#if defined(MESHAGENT_ALLOW_DISK_MODULES)
 	uint32_t retVal;
 	char *mpath;
 	duk_size_t mpathLen;
@@ -114,6 +117,19 @@ uint32_t ILibDuktape_ModSearch_GetJSModuleDate(duk_context *ctx, char *id)
 	
 	duk_set_top(ctx, top);
 	return(retVal);
+#else
+	uint32_t retVal = 0;
+	int top = duk_get_top(ctx);
+
+	duk_push_heap_stash(ctx);										// [stash]
+	duk_get_prop_string(ctx, -1, "ModSearchTable");					// [stash][table]
+	if (ModSearchTable_Get(ctx, -1, ILibDuktape_ModSearch_ModuleFileDate, id) > 0)
+	{
+		retVal = (uint32_t)duk_get_uint(ctx, -1);
+	}
+	duk_set_top(ctx, top);
+	return(retVal);
+#endif
 }
 int ILibDuktape_ModSearch_IsRequired(duk_context *ctx, char *id, size_t idLen)
 {
@@ -132,6 +148,7 @@ int ILibDuktape_ModSearch_IsRequired(duk_context *ctx, char *id, size_t idLen)
 }
 duk_ret_t ILibDuktape_ModSearch_GetJSModule(duk_context *ctx, char *id)
 {
+#if defined(MESHAGENT_ALLOW_DISK_MODULES)
 	char *retVal = NULL;
 	char *fileName;
 	char *mpath;
@@ -168,6 +185,11 @@ duk_ret_t ILibDuktape_ModSearch_GetJSModule(duk_context *ctx, char *id)
 			return(0);
 		}
 	}
+#else
+	duk_push_heap_stash(ctx);										// [stash]
+	duk_get_prop_string(ctx, -1, "ModSearchTable");					// [stash][table]
+	return(ModSearchTable_Get(ctx, -1, ILibDuktape_ModSearch_ModuleFile, id) > 0 ? 1 : 0);
+#endif
 }
 void ILibDuktape_ModSearch_AddModuleObject(duk_context *ctx, char *id, void *heapptr)
 {
@@ -204,6 +226,7 @@ int ILibDuktape_ModSearch_AddHandler(duk_context *ctx, char *id, ILibDuktape_Mod
 
 duk_ret_t mod_Search_Files(duk_context *ctx, char* id)
 {
+#if defined(MESHAGENT_ALLOW_DISK_MODULES)
 	char fileName[255];
 	char *data;
 	int dataLen;
@@ -232,6 +255,11 @@ duk_ret_t mod_Search_Files(duk_context *ctx, char* id)
 	{
 		return(0);
 	}
+#else
+	UNREFERENCED_PARAMETER(ctx);
+	UNREFERENCED_PARAMETER(id);
+	return(0);
+#endif
 }
 void ILibDuktape_ModSearch_AddHandler_AlsoIncludeJS(duk_context *ctx, char *js, size_t jsLen)
 {
