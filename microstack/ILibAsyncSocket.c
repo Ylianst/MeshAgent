@@ -1584,6 +1584,8 @@ void ILibAsyncSocket_PreSelect(void* socketModule,fd_set *readset, fd_set *write
 						ILibSpinLock_UnLock(&(module->SendLock));
 						h(module, module->user);
 						ILibSpinLock_Lock(&(module->SendLock));
+						// The handler can close the socket, and FD_SET below aborts on -1 in a _FORTIFY_SOURCE build
+						if (module->internalSocket == -1) { ILibSpinLock_UnLock(&(module->SendLock)); return; }
 						if (module->timeout_milliSeconds != 0) 
 						{ 
 							*blocktime = module->timeout_milliSeconds; 
