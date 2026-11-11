@@ -529,12 +529,12 @@ int kvm_server_inputdata(char *block, int blocklen, ILibKVM_WriteHandler writeHa
 
 		break;
 	}
-	case MNG_KVM_CTRLALTDEL: // Key
+	case MNG_KVM_CTRLALTDEL: // CtrlAltDel
 	{
 		if (size != 4)
 			break;
-		Handle ht = CreateThread(NULL, 0, kvm_ctrlaltdel, 0, 0, 0);
-		if(ht != NULL){
+		HANDLE ht = CreateThread(NULL, 0, kvm_ctrlaltdel, 0, 0, 0);
+		if (ht != NULL){
 			CloseHandle(ht);
 		}
 		break;
