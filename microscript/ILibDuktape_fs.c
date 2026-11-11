@@ -1213,6 +1213,24 @@ void ILibDuktape_fs_readStream_Resume(struct ILibDuktape_readableStream *sender,
 			data->unshiftedBytes = 0;
 			if (data->bytesLeft == 0) { data->bytesRead = 0; }
 		}
+		else if (ferror(data->fPtr))
+		{
+			clearerr(data->fPtr);
+
+			if (data->ctx != NULL && data->ReadStreamObject != NULL)
+			{
+				duk_push_heapptr(data->ctx, data->ReadStreamObject); // [this]
+				duk_get_prop_string(data->ctx, -1, "emit");          // [this][emit]
+				duk_swap_top(data->ctx, -2);                         // [emit][this]
+				duk_push_string(data->ctx, "error");                 // [emit][this][error]
+				duk_push_string(data->ctx, "File read error / file locked"); // [emit][this][error][msg]
+				if (duk_pcall_method(data->ctx, 2) != 0) { ILibDuktape_Process_UncaughtException(data->ctx); }
+				duk_pop(data->ctx);
+			}
+
+			sender->paused = 1;
+			break;
+		}
 	}
 	if (sender->paused == 0 && data->bytesRead == 0)
 	{
