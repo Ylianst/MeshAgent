@@ -527,6 +527,16 @@ int kvm_server_inputdata(char *block, int blocklen, ILibKVM_WriteHandler writeHa
 		}
 
 		break;
+	case MNG_CTRLALTDEL: // CtrlAltDel
+	{
+		if (size != 4)
+			break;
+		HANDLE ht = CreateThread(NULL, 0, kvm_ctrlaltdel, 0, 0, 0);
+		if (ht != NULL){
+			CloseHandle(ht);
+		}
+		break;
+	}
 	case MNG_KVM_KEY: // Key
 	{
 		if (size != 6)
@@ -732,12 +742,6 @@ int kvm_relay_feeddata(char *buf, int len, ILibKVM_WriteHandler writeHandler, vo
 {
 	if (gChildProcess != NULL)
 	{
-		if (len >= 2 && ntohs(((unsigned short *)buf)[0]) == MNG_CTRLALTDEL)
-		{
-			HANDLE ht = CreateThread(NULL, 0, kvm_ctrlaltdel, 0, 0, 0);
-			if (ht != NULL)
-				CloseHandle(ht);
-		}
 		ILibProcessPipe_Process_WriteStdIn(gChildProcess, buf, len, ILibTransport_MemoryOwnership_USER);
 		ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_2, "KVM [Master]: Write Input [Type = %u]", ntohs(((unsigned short *)buf)[0]));
 		return len;
