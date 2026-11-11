@@ -496,7 +496,6 @@ int kvm_server_inputdata(char *block, int blocklen, ILibKVM_WriteHandler writeHa
 	switch (type)
 	{
 	case MNG_KVM_INPUT_LOCK:
-	{
 		// 0 = unlock
 		// 1 = lock
 		// 2 = query
@@ -528,8 +527,7 @@ int kvm_server_inputdata(char *block, int blocklen, ILibKVM_WriteHandler writeHa
 		}
 
 		break;
-	}
-	case MNG_KVM_CTRLALTDEL: // CtrlAltDel
+	case MNG_CTRLALTDEL: // CtrlAltDel
 	{
 		if (size != 4)
 			break;
