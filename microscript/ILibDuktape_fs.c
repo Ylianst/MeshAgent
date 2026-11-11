@@ -1216,19 +1216,19 @@ void ILibDuktape_fs_readStream_Resume(struct ILibDuktape_readableStream *sender,
 		else if (ferror(data->fPtr))
 		{
 			clearerr(data->fPtr);
+			data->bytesRead = 0; // Force loop termination
 
 			if (data->ctx != NULL && data->ReadStreamObject != NULL)
 			{
-				duk_push_heapptr(data->ctx, data->ReadStreamObject); // [this]
-				duk_get_prop_string(data->ctx, -1, "emit");          // [this][emit]
-				duk_swap_top(data->ctx, -2);                         // [emit][this]
-				duk_push_string(data->ctx, "error");                 // [emit][this][error]
-				duk_push_string(data->ctx, "File read error / file locked"); // [emit][this][error][msg]
+				// Emit error on JS stream
+				duk_push_heapptr(data->ctx, data->ReadStreamObject);
+				duk_get_prop_string(data->ctx, -1, "emit");
+				duk_swap_top(data->ctx, -2);
+				duk_push_string(data->ctx, "error");
+				duk_push_string(data->ctx, "EACCES: file locked or in use");
 				if (duk_pcall_method(data->ctx, 2) != 0) { ILibDuktape_Process_UncaughtException(data->ctx); }
 				duk_pop(data->ctx);
 			}
-
-			sender->paused = 1;
 			break;
 		}
 	}
