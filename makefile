@@ -547,6 +547,10 @@ endif
 # Official FreeBSD x86-64
 ifeq ($(ARCHID),30)
 ARCHNAME = freebsd_x86-64
+# OpenSSL 1.1.1w install prefix with include/ and lib/ inside. Its generated opensslconf.h must come before
+# the shared headers, and openssl/include is dropped so its own opensslconf.h is never found first.
+OSSLPREFIX = openssl/1.1.1w/freebsd-x86_64
+INCDIRS := -I$(OSSLPREFIX)/include -Iopenssl/1.1.1w/include $(filter-out -Iopenssl/include,$(INCDIRS))
 CC = clang
 CFLAGS += -I/usr/local/include
 KVM = 0
@@ -650,7 +654,8 @@ BSDSSL =
 else
 LINUXSSL = -Lopenssl/libstatic/linux/$(ARCHNAME)
 MACSSL = -Lopenssl/libstatic/macos/$(ARCHNAME)
-BSDSSL = -Lopenssl/libstatic/bsd/$(ARCHNAME)
+# A block that names an OSSLPREFIX links from it, the others still from openssl/libstatic/bsd
+BSDSSL = $(if $(OSSLPREFIX),-L$(OSSLPREFIX)/lib,-Lopenssl/libstatic/bsd/$(ARCHNAME))
 CFLAGS += -DMICROSTACK_TLS_DETECT
 LDEXTRA += -lssl -lcrypto
 endif

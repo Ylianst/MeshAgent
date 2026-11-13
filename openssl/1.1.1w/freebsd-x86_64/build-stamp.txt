@@ -1,0 +1,28 @@
+# Written by openssl/build/build.sh. The fields above 'stamp_key' decide whether a rebuild is needed.
+# The fields below it only describe the build that produced this prefix.
+target: freebsd-x86_64
+openssl_version: 1.1.1w
+source_sha256: cf3098950cb4d853ad95c0841f1f9c6d3dc102dccfcacd521d93925208b76ac8
+configure_target: BSD-x86_64
+configure_args: --prefix=/ --libdir=lib --openssldir=/usr/local/ssl no-weak-ssl-ciphers no-srp no-psk no-comp no-zlib no-zlib-dynamic no-hw no-dso no-shared no-rc5 no-idea no-md4 no-rmd160 no-ssl no-ssl3 no-seed no-camellia no-bf no-cast no-md2 no-mdc2 no-engine no-async no-ocsp no-cms enable-ec_nistp_64_gcc_128 -fPIC -std=gnu11 -ffunction-sections -fdata-sections
+make_target: build_libs
+cc: gcc
+cc_version: gcc (Debian 14.2.0-19) 14.2.0
+cppflags: -U__linux__ -U__linux -Ulinux -U__gnu_linux__ -D__FreeBSD__=13 -D__FreeBSD_cc_version=1300000
+ar: ar
+ar_version: GNU ar (GNU Binutils for Debian) 2.44
+ranlib: ranlib
+sysroot: freebsd-13.0
+libc: bsd
+libc_version: freebsd 1300139
+asm: on
+stamp_key: 7a0105b2b711d711cd94e086ec09b0c1c87c401cad9aa71341a391345f8ceacc
+---
+built_at: 2026-11-11T22:34:30Z
+archive_platform: BSD-x86_64
+archive_compiler: gcc --sysroot=/opt/buildroot/sysroots/freebsd-13.0 -nostdinc -isystem /usr/lib/gcc/x86_64-linux-gnu/14/include -isystem /opt/buildroot/sysroots/freebsd-13.0/usr/include -U__linux__ -U__linux -Ulinux -U__gnu_linux__ -D__FreeBSD__=13 -D__FreeBSD_cc_version=1300000 -fPIC -pthread -Wa,--noexecstack -Wall -O3 -fPIC -std=gnu11 -ffunction-sections -fdata-sections -DL_ENDIAN -DOPENSSL_PIC -DOPENSSL_CPUID_OBJ -DOPENSSL_IA32_SSE2 -DOPENSSL_BN_ASM_MONT -DOPENSSL_BN_ASM_MONT5 -DOPENSSL_BN_ASM_GF2m -DSHA1_ASM -DSHA256_ASM -DSHA512_ASM -DKECCAK1600_ASM -DRC4_ASM -DMD5_ASM -DAESNI_ASM -DVPAES_ASM -DGHASH_ASM -DECP_NISTZ256_ASM -DX25519_ASM -DPOLY1305_ASM -D_THREAD_SAFE -D_REENTRANT -DNDEBUG
+objects: 576 (ELF/64 x86_64)
+glibc_only_refs: 0
+ucontext_refs: 0
+libcrypto_sha256: 91610c64b972f098e509b728bddc50ed741a9625e1128c0ab781d9c813408115
+libssl_sha256: db2179712ca0f60e2a45faef07290efbe23597a0a45da02097581a734fb0746d
