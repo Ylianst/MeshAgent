@@ -1280,19 +1280,9 @@ function UserSessions()
         };
         this.consoleUid = function consoleUid()
         {
-            var child = require('child_process').execFile('/bin/sh', ['sh']);
-            child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write("who | tr '\n' '\.' | awk '{ print $1 }'\nexit\n");
-            child.waitExit();
-
-            var ret = child.stdout.str.trim();
-            child = null;
-            if (ret != '')
-            {
-                return (this.getUid(ret));
-            }
-            throw ('nobody logged into console');     
+            var uid = require('fs').statSync('/dev/console').uid;
+            if (uid != 0) { return (uid); }
+            throw ('nobody logged into console');
         }
         this.getHomeFolder = function getHomeFolder(user)
         {
