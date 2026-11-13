@@ -319,7 +319,7 @@ int ILibDuktape_fs_openSyncEx(duk_context *ctx, char *path, char *flags, char *m
 		sprintf_s(binFlags, sizeof(binFlags), "%.6sb", flags);
 		flags = binFlags;
 	}
-	_wfopen_s(&f, (const wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, path), (const wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, flags));
+	f = _wfsopen((const wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, path), (const wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, flags), _SH_DENYNO);
 #else
 	f = fopen(path, flags);
 #endif
@@ -385,7 +385,7 @@ duk_ret_t ILibDuktape_fs_openSync(duk_context *ctx)
 	{
 		dwCreationMode = OPEN_EXISTING;
 	}
-	fd = CreateFileW((wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, path), dwDesiredAccess, 0, NULL, dwCreationMode, FILE_FLAG_OVERLAPPED, NULL);
+	fd = CreateFileW((wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, path), dwDesiredAccess, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, dwCreationMode, FILE_FLAG_OVERLAPPED, NULL);
 	if (fd == INVALID_HANDLE_VALUE)
 	{
 		DWORD err = GetLastError();
