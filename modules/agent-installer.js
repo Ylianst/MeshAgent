@@ -154,6 +154,28 @@ function checkParameters(parms)
     }
 }
 
+function macPs(format)
+{
+    var child = require('child_process').execFile('/bin/ps', ['ps', '-axo', format]);
+    child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+    child.on('exit', function () { this.exited = true; });
+    try { child.waitExit(10000); } catch (e) { }
+    if (!child.exited) { child.kill(); return (''); }
+    return (child.stdout.str);
+}
+
+// Every graphical login session has its own loginwindow process, so their owners are the users with a gui domain
+function macGuiSessionUids()
+{
+    var str = macPs('uid=,ucomm=');
+    var re = /^\s*([0-9]+)\s+loginwindow\s*$/gm, ret = [], m;
+    while ((m = re.exec(str)) != null)
+    {
+        if (m[1] != '0' && ret.indexOf(parseInt(m[1])) < 0) { ret.push(parseInt(m[1])); }
+    }
+    return (ret);
+}
+
 // This is the entry point for installing the service
 function installService(params)
 {
@@ -327,19 +349,18 @@ function installService(params)
                 });
             process.stdout.write(' [DONE]\n');
 
-            // Immediately bootstrap the LaunchAgent into the active console
+            // Immediately bootstrap the LaunchAgent into every logged in
             // user's domain so the agent comes up without needing a logout/
-            // login cycle. Best-effort: skip silently if no console user.
+            // login cycle. Best-effort: skip silently if nobody is logged in.
             try
             {
-                var consoleUid = require('user-sessions').consoleUid();
-                if (consoleUid && consoleUid !== 0)
+                var uids = macGuiSessionUids();
+                var launchagent = require('service-manager').manager.getLaunchAgent(options.name);
+                for (var u = 0; u < uids.length; ++u)
                 {
-                    process.stdout.write('   -> bootstrapping launch agent into gui/' + consoleUid + '...');
-                    var plistPath = '/Library/LaunchAgents/' + options.name + '-launchagent.plist';
-                    require('child_process').execFile('/bin/launchctl',
-                        ['bootstrap', 'gui/' + consoleUid, plistPath]);
-                    process.stdout.write(' [DONE]\n');
+                    process.stdout.write('   -> bootstrapping launch agent into gui/' + uids[u] + '...');
+                    launchagent.load(uids[u]);
+                    process.stdout.write(launchagent.isLoaded(uids[u]) ? ' [DONE]\n' : ' [FAILED — bootstrap on next login]\n');
                 }
             }
             catch (be)
@@ -404,7 +425,21 @@ function uninstallService3(params)
         try
         {
             var launchagent = require('service-manager').manager.getLaunchAgent(params.getParameter('meshServiceName', 'meshagent'));
-            launchagent.unload();
+            var uids = [];
+            try { uids = macGuiSessionUids(); } catch (ce) { }
+            for (var u = 0; u < uids.length; ++u)
+            {
+                try { launchagent.unload(uids[u]); } catch (ue) { }
+            }
+            // launchctl cannot reach the instance at the login window
+            var lines = macPs('pid=,args=').split('\n'), tail = ' ' + launchagent.parameters().join(' '), m;
+            for (var i = 0; i < lines.length; ++i)
+            {
+                if ((m = lines[i].match(/^\s*([0-9]+)\s/)) != null && lines[i].trim() == (m[1] + tail))
+                {
+                    process.kill(parseInt(m[1]));
+                }
+            }
             require('fs').unlinkSync(launchagent.plist);
             process.stdout.write(' [DONE]\n');
         }
