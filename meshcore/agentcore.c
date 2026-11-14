@@ -3894,6 +3894,8 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 			break;
 		}
 		case ILibWebClient_ReceiveStatus_Complete: // Disconnection
+			// A pong timer that outlives its connection ends the next one
+			ILibLifeTime_Remove(ILibGetBaseTimer(agent->chain), Agent2PingData(agent));
 			if (agent->controlChannelDebug != 0)
 			{
 				printf("Control Channel Disconnected [%d]...\n", ILibWebClient_GetDescriptorValue_FromStateObject(WebStateObject));
@@ -4871,6 +4873,48 @@ void MeshAgent_CoreModule_UncaughtException(duk_context *ctx, char *msg, void *u
 {
 	printf("UncaughtException: %s\n", msg);
 }
+// Returns 1 when the OS would now reach the server from another local address, so the connection's own address is gone or no longer used.
+// Returns 0 when it would use the same address, or when there is no route to the server, because the network can come back with the same address.
+// A route check and not an address list, because a virtual adapter such as the Hyper-V switch keeps an address while the real network is down.
+int MeshServer_ControlChannel_LocalAddressReplaced(MeshAgentHostContainer *agent)
+{
+	struct sockaddr_in6 local, remote, now;
+	int replaced = 0;
+#ifdef WIN32
+	SOCKET s;
+	int len = sizeof(now);
+#else
+	int s;
+	socklen_t len = sizeof(now);
+#endif
+
+	memset(&local, 0, sizeof(local));
+	memset(&remote, 0, sizeof(remote));
+	memset(&now, 0, sizeof(now));
+	if (agent->controlChannel == NULL || ILibWebClient_GetLocalInterface(agent->controlChannel, (struct sockaddr*)&local) == 0) { return(0); }
+	// The socket's own peer, because through a proxy the route that matters is the one to the proxy and not the one to the server
+	if (ILibWebClient_GetPeerInterface(agent->controlChannel, (struct sockaddr*)&remote) == 0 && ILibWebClient_GetRemoteInterface(agent->controlChannel, (struct sockaddr*)&remote) == 0) { return(0); }
+	if (local.sin6_family != remote.sin6_family || (remote.sin6_family != AF_INET && remote.sin6_family != AF_INET6)) { return(0); }
+
+	// A connected UDP socket sends nothing, it only makes the OS pick the route and the source address
+	s = socket(remote.sin6_family, SOCK_DGRAM, IPPROTO_UDP);
+#ifdef WIN32
+	if (s == INVALID_SOCKET) { return(0); }
+#else
+	if (s < 0) { return(0); }
+#endif
+	if (connect(s, (struct sockaddr*)&remote, remote.sin6_family == AF_INET6 ? sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in)) == 0 && getsockname(s, (struct sockaddr*)&now, &len) == 0)
+	{
+		if (now.sin6_family == AF_INET) { replaced = ((struct sockaddr_in*)&now)->sin_addr.s_addr != ((struct sockaddr_in*)&local)->sin_addr.s_addr; }
+		else { replaced = memcmp(&now.sin6_addr, &local.sin6_addr, sizeof(struct in6_addr)) != 0; }
+	}
+#ifdef WIN32
+	closesocket(s);
+#else
+	close(s);
+#endif
+	return(replaced);
+}
 void MeshAgent_AgentMode_IPAddressChanged_Handler(ILibIPAddressMonitor sender, void *user)
 {
 	MeshAgentHostContainer *agentHost = (MeshAgentHostContainer*)user;
@@ -4900,6 +4944,14 @@ void MeshAgent_AgentMode_IPAddressChanged_Handler(ILibIPAddressMonitor sender, v
 		ILibMulticastSocket_ResetMulticast(agentHost->multicastDiscovery2, 0);
 	}
 
+	// A connection over an address that was replaced is dead, but would only be found at the next keep-alive, up to controlChannel_idleTimeout_seconds later.
+	// The ping is sent now, so the usual pong timeout ends it within 5 s. A connection that still works just answers.
+	// A ping that already waits for its pong keeps its deadline, so a burst of address events cannot keep moving it.
+	if (agentHost->serverConnectionState == 2 && ILibLifeTime_GetExpiration(ILibGetBaseTimer(agentHost->chain), Agent2PingData(agentHost)) < 0 && MeshServer_ControlChannel_LocalAddressReplaced(agentHost))
+	{
+		ILibLifeTime_Remove(ILibGetBaseTimer(agentHost->chain), Agent2PingData(agentHost));
+		MeshServer_ControlChannel_IdleTimeout(agentHost->controlChannel, agentHost);
+	}
 
 	if (agentHost->serverConnectionState == 0)
 	{

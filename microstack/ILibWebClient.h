@@ -281,6 +281,7 @@ void ILibWebClient_Request_SetSNI(ILibWebClient_RequestToken reqToken, char *hos
 // Added methods
 int ILibWebClient_GetLocalInterface(void* socketModule, struct sockaddr *localAddress);
 int ILibWebClient_GetRemoteInterface(void* socketModule, struct sockaddr *remoteAddress);
+int ILibWebClient_GetPeerInterface(void* socketModule, struct sockaddr *peerAddress);
 int ILibWebClient_Digest_NeedAuthenticate(ILibWebClient_StateObject state);
 char* ILibWebClient_Digest_GetRealm(ILibWebClient_StateObject state);
 void ILibWebClient_GenerateAuthenticationHeader(ILibWebClient_StateObject state, ILibHTTPPacket *packet, char* username, char* password);

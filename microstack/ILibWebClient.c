@@ -3652,6 +3652,20 @@ int ILibWebClient_GetLocalInterface(void* socketModule, struct sockaddr *localAd
 	return ILibAsyncSocket_GetLocalInterface(wcdo->SOCK, localAddress);
 }
 
+// Writes the address the TCP connection really goes to, which is the proxy when one is used. Returns its length, or 0 when the socket has no peer.
+int ILibWebClient_GetPeerInterface(void* socketModule, struct sockaddr *peerAddress)
+{
+	struct ILibWebClientDataObject *wcdo = (struct ILibWebClientDataObject*)socketModule;
+#ifdef WIN32
+	int len = sizeof(struct sockaddr_in6);
+	if (wcdo->SOCK == NULL || getpeername(*((SOCKET*)ILibAsyncSocket_GetSocket(wcdo->SOCK)), peerAddress, &len) != 0) { return(0); }
+#else
+	socklen_t len = sizeof(struct sockaddr_in6);
+	if (wcdo->SOCK == NULL || getpeername(*((int*)ILibAsyncSocket_GetSocket(wcdo->SOCK)), peerAddress, &len) != 0) { return(0); }
+#endif
+	return((int)len);
+}
+
 int ILibWebClient_GetRemoteInterface(void* socketModule, struct sockaddr *remoteAddress)
 {
 	struct ILibWebClientDataObject *wcdo = (struct ILibWebClientDataObject*)socketModule;

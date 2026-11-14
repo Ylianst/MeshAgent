@@ -34,6 +34,11 @@ limitations under the License.
 #include <linux/rtnetlink.h>
 #include <net/if.h>
 #endif
+#if defined(__APPLE__) && !defined(NO_IPADDR_MONITOR)
+#include <sys/socket.h>
+#include <net/if.h>
+#include <net/route.h>
+#endif
 
 typedef void* ILibIPAddressMonitor;
 typedef void(*ILibIPAddressMonitor_Handler)(ILibIPAddressMonitor sender, void *user);
@@ -47,7 +52,9 @@ typedef struct _ILibIPAddressMonitor
 		SOCKET mSocket;
 		DWORD bytesReturned;
 		OVERLAPPED *reserved;
-	#elif defined (_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
+	#elif defined(__APPLE__)
+		int mSocket;
+	#elif defined (_POSIX) && !defined(_FREEBSD)
 		int mSocket;
 		struct sockaddr_nl addr;
 	#endif
@@ -88,7 +95,7 @@ void ILibIPAddressMonitor_MicrostackThreadDispatch(void *chain, void *user)
 #ifndef NO_IPADDR_MONITOR
 void ILibIPAddressMonitor_Destroy(void *object)
 {
-#ifndef __APPLE__
+#if !defined(_FREEBSD)
 	_ILibIPAddressMonitor *obj = (_ILibIPAddressMonitor*)object;
 #endif
 
@@ -96,11 +103,36 @@ void ILibIPAddressMonitor_Destroy(void *object)
 	obj->reserved->hEvent = NULL;
 	closesocket(obj->mSocket);
 	obj->mSocket = INVALID_SOCKET;
-#elif defined(_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
+#elif defined(__APPLE__) || (defined(_POSIX) && !defined(_FREEBSD))
 	close(obj->mSocket);
 	obj->mSocket = -1;
 #endif
 }
+
+#if defined(__APPLE__)
+void ILibIPAddressMonitor_PreSelect(void* object, fd_set *readset, fd_set *writeset, fd_set *errorset, int* blocktime)
+{
+	FD_SET(((_ILibIPAddressMonitor*)object)->mSocket, readset);
+}
+void ILibIPAddressMonitor_PostSelect(void* object, int slct, fd_set *readset, fd_set *writeset, fd_set *errorset)
+{
+	_ILibIPAddressMonitor *obj = (_ILibIPAddressMonitor*)object;
+	char buffer[2048];
+	ssize_t len;
+	int update = 0;
+
+	if (FD_ISSET(obj->mSocket, readset) == 0) { return; }
+	// One read returns one routing message, so all queued ones are drained to report a burst of changes once.
+	// Only the leading length, version and type fields are common to every message type. An address message (ifa_msghdr) is shorter than rt_msghdr.
+	// Checking the length against sizeof(struct rt_msghdr) dropped the 72 and 80 byte RTM_NEWADDR of the IPv4 address on macos 26, so the agent never saw it come back.
+	while ((len = recv(obj->mSocket, buffer, sizeof(buffer), 0)) > 0)
+	{
+		struct ifa_msghdr *ifam = (struct ifa_msghdr*)buffer;
+		if (len >= 4 && ifam->ifam_version == RTM_VERSION && (ifam->ifam_type == RTM_NEWADDR || ifam->ifam_type == RTM_DELADDR)) { update = 1; }
+	}
+	if (update != 0 && obj->onUpdate != NULL) { obj->onUpdate(obj, obj->user); }
+}
+#endif
 
 #if defined(_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
 void ILibIPAddressMonitor_PreSelect(void* object, fd_set *readset, fd_set *writeset, fd_set *errorset, int* blocktime)
@@ -148,7 +180,18 @@ ILibIPAddressMonitor ILibIPAddressMonitor_Create(void *chain, ILibIPAddressMonit
 	obj->reserved->hEvent = (HANDLE)obj;
 	obj->mSocket = socket(AF_INET, SOCK_DGRAM, 0);
 	WSAIoctl(obj->mSocket, SIO_ADDRESS_LIST_CHANGE, NULL, 0, NULL, 0, &(obj->bytesReturned), obj->reserved, ILibIPAddressMonitor_dispatch);
-#elif defined (_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
+#elif defined(__APPLE__)
+	if ((obj->mSocket = socket(PF_ROUTE, SOCK_RAW, AF_UNSPEC)) < 0)
+	{
+		ILibMemory_Free(obj->chainLink.MetaData);
+		free(obj);
+		return(NULL);
+	}
+	fcntl(obj->mSocket, F_SETFL, O_NONBLOCK | fcntl(obj->mSocket, F_GETFL, 0));
+	fcntl(obj->mSocket, F_SETFD, FD_CLOEXEC);
+	obj->chainLink.PreSelectHandler = ILibIPAddressMonitor_PreSelect;
+	obj->chainLink.PostSelectHandler = ILibIPAddressMonitor_PostSelect;
+#elif defined (_POSIX) && !defined(_FREEBSD)
 	obj->mSocket = socket(AF_NETLINK, SOCK_DGRAM, NETLINK_ROUTE);
 	int flags = fcntl(obj->mSocket, F_GETFL, 0);
 	fcntl(obj->mSocket, F_SETFL, O_NONBLOCK | flags);
