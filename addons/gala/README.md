@@ -21,10 +21,9 @@ installer offers Later or Sign Out. Sign Out requests normal logout and respects
 application inhibitors. Automatic updates and remote connections do not request
 logout. Classic sessions can activate the addition on their next Secure sign-in.
 
-Run focused checks with:
+Verify the embedded installer modules with:
 
 ```sh
-make linux-gala-tests
 node addons/gnome-shell/generate-installer-modules.mjs --check
 ```
 

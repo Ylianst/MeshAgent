@@ -11,7 +11,7 @@
 typedef struct kvm_capture_broker kvm_capture_broker;
 /**
  * @file linux_kvm_capture_helper.h
- * Capture-only connection broker shared by the Agent and boundary tests.
+ * Capture-only connection broker for the Agent's protected capture worker.
  *
  * The privileged parent owns the broker; the nondumpable desktop-UID worker
  * owns the worker API. Neither channel carries input or Agent identity data.

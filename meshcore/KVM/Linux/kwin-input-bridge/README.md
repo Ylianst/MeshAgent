@@ -29,14 +29,6 @@ selection pending rather than claiming readiness.
 ```sh
 node meshcore/KVM/Linux/kwin-input-bridge/generate-assets.mjs
 node addons/gnome-shell/generate-installer-modules.mjs
-node test/kwin-wire-assets-test.mjs
 ```
 
-Both generators accept `--check`. Python bridge/session regressions require
-Linux Unix credentials, `/proc` and root access for their isolated registration
-fixtures; Windows Python cannot run these suites:
-
-```sh
-python3 test/kwin-ime-wire-bridge-test.py
-python3 test/kwin-wire-session-test.py
-```
+Both generators accept `--check` to verify generated data matches source.

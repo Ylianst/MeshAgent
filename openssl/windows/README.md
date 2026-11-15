@@ -27,12 +27,6 @@ enough local disk space for the dependency cache are required. The recipe hash
 isolates changed build recipes and records completed installs. Do not commit
 the cache or generated binaries.
 
-`test/windows-crypto-tests.cmd` checks AES-128/256-GCM known answers, bad tags,
-TLS 1.2/1.3 certificate/hostname/record rejection, full multi-record writes,
-legacy/modern identity imports, and CPU-dispatch fallback. Run it from an x64 or
-x86 Visual Studio developer environment. It masks CPU features only in its own
-process tree. The tests generate synthetic certificates in memory.
-
 See [the upstream release](https://www.openssl-library.org/source/) and
 [Windows build notes](https://github.com/openssl/openssl/blob/openssl-3.5.9/NOTES-WINDOWS.md).
 The upstream OpenSSL license is included beside this file.

@@ -45,7 +45,7 @@ int kvm_wayland_active_console_session(kvm_wayland_console_session *session);
 int kvm_wayland_console_session_equal(const kvm_wayland_console_session *a,
 	const kvm_wayland_console_session *b);
 
-// File-backed fallback exposed for the native regression harness. runRoot is normally "/run".
+// Read the active console session through the file-backed fallback; runRoot is normally "/run".
 int kvm_wayland_read_console_session_files(const char *runRoot, kvm_wayland_console_session *session);
 
 // Uid of seat0's active logind session (greeters included); -1 when unknown. Lets the DRM capture

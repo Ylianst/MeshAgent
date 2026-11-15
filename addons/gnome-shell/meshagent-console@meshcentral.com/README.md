@@ -11,7 +11,6 @@ them, regenerate the payload and embedded installer modules:
 ```sh
 node addons/gnome-shell/generate-assets.mjs
 node addons/gnome-shell/generate-installer-modules.mjs
-make linux-kvm-gnome-assets-tests
 ```
 
 The ordinary Agent installer installs and activates owned companion files.
@@ -32,5 +31,4 @@ replacement GNOME/Mutter package is required. Keep the Agent and its generated
 companion payload on matching versions. Do not enable the component inside a
 nested or headless Shell as a substitute for the attached console.
 
-Both generators accept `--check` to reject stale generated data. Additional
-focused regression targets are listed with the Linux GNOME targets in `makefile`.
+Both generators accept `--check` to verify generated data matches source.
