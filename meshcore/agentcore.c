@@ -27,9 +27,6 @@ limitations under the License.
 #include "agentcore.h"
 #include "meshdefines.h"
 #include "meshinfo.h"
-#if defined(__linux__) && defined(_LINKVM)
-#include "KVM/Linux/linux_gnome_update.h"
-#endif
 #include "microscript/ILibDuktape_Commit.h"
 #include "microscript/ILibDuktape_Polyfills.h"
 #include "microscript/ILibDuktape_Helpers.h"
@@ -1903,7 +1900,6 @@ duk_ret_t ILibDuktape_MeshAgent_forceExit(duk_context *ctx)
 		code = (int)duk_require_int(ctx, 0);
 	}
 
-	printf("Agent MeshAgent.forceExit invoked with code %d\n", code);
 	exit(code);
 	return(0);
 }
@@ -4929,7 +4925,6 @@ void MeshAgent_AgentMost_dbRetryCallback(void *object)
 
 	if (MeshAgent_AgentMode(agentHost, paramLen, param, parseCommands) == 0)
 	{
-		printf("Agent stopping chain: deferred AgentMode initialization returned 0\n");
 		ILibStopChain(agentHost->chain);
 	}
 	ILibMemory_Free(object);
@@ -4971,7 +4966,6 @@ void MeshAgent_AgentInstallerCTX_Finalizer(duk_context *ctx, void *user)
 {
 	if (ILibIsChainBeingDestroyed(user) == 0)
 	{
-		printf("Agent stopping chain: Agent installer engine finalized\n");
 		ILibStopChain(user);
 	}
 }
@@ -4979,7 +4973,6 @@ void MeshAgent_AgentInstallerCTX_Finalizer(duk_context *ctx, void *user)
 #ifdef WIN32
 BOOL MeshAgent_PidWaiter(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, void* user)
 {
-	printf("Agent stopping chain: PID waiter completed\n");
 	ILibStopChain(chain);
 	return(FALSE);
 }
@@ -5899,7 +5892,6 @@ duk_ret_t MeshAgent_ScriptMode_StartAgent(duk_context *ctx)
 
 	if (MeshAgent_AgentMode(agent, paramLength, params, 0) == 0)
 	{
-		printf("Agent stopping chain: script requested AgentMode initialization returned 0\n");
 		duk_eval_string_noresult(ctx, "process.exit();"); // Agent Error, exit
 	}
 
@@ -6304,7 +6296,6 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 		agentHost->localdebugmode = (connectAgent == 2);
 		if (MeshAgent_AgentMode(agentHost, argc, argv, 0) == 0) 
 		{
-			printf("Agent stopping chain: startup AgentMode initialization returned 0\n");
 			ILibStopChain(agentHost->chain); // Agent Error, stop the chain
 		}
 	}
@@ -6318,7 +6309,6 @@ void MeshAgent_AgentMode_Dispatched(void *chain, void *user)
 {
 	if (MeshAgent_AgentMode((MeshAgentHostContainer*)((void**)user)[0], ((int*)((void**)user)[1])[0], (char**)((void**)user)[2], 1) == 0)
 	{
-		printf("Agent stopping chain: dispatched AgentMode initialization returned 0\n");
 		ILibStopChain(((MeshAgentHostContainer*)((void**)user)[0])->chain);
 	}
 }
@@ -6576,12 +6566,6 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 
 				sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "mv \"%s\" \"%s\"", updateFilePath, agentHost->exePath); // Move the update over our own executable
 				if (system(ILibScratchPad)) {}
-#if defined(__linux__) && defined(_LINKVM)
-				else if (mesh_gnome_after_update(agentHost->exePath, agentHost->meshServiceName ? agentHost->meshServiceName : "meshagent") != 0)
-				{
-					fprintf(stderr, "MeshAgent: GNOME companion update incomplete (errno=%d); continuing service restart\n", errno);
-				}
-#endif
 				switch (agentHost->platformType)
 				{
 				case MeshAgent_Posix_PlatformTypes_BSD:

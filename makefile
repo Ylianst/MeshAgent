@@ -9,7 +9,7 @@
 #
 # To build MeshAgent2 on Linux you first got to download the dev libraries to compile the agent, we need x11, xtst, ext, xrandr, egl, glesv2, drm, wayland-client and jpeg. To install, do this:
 #	Using APT:
-#		sudo apt-get install libx11-dev libxtst-dev libxext-dev libjpeg62-dev libxrandr-dev libegl1-mesa-dev libgles2-mesa-dev libdrm-dev libwayland-dev libpipewire-0.3-dev libspa-0.2-dev pkg-config
+#		sudo apt-get install libx11-dev libxtst-dev libxext-dev libjpeg62-dev libxrandr-dev libegl1-mesa-dev libgles2-mesa-dev libdrm-dev libwayland-dev pkg-config
 #
 #	Using YUM:
 #		sudo yum install libX11-devel libXtst-devel libXext-devel libjpeg-devel libXrandr-devel mesa-libEGL-devel mesa-libGLES-devel libdrm-devel wayland-devel pkgconf
@@ -67,11 +67,13 @@
 #		so that you can execute the installer from there.
 #
 #
-# Special Note about KVM Support on Linux:
-#    Wayland physical-console capture uses DRM/EGL for video and uinput/libevdev for input. Keep the
-#    display manager and desktop in their installed Wayland configuration. See
-#    docs/Wayland-Unattended-Console.md for runtime dependencies, service permissions, diagnostics,
-#    capability limits, and the physical-console qualification procedure.
+# Special Note about KVM Support on Linux: 
+#    If you get an error stating that an Xauthority cannot be found, and asking if your DM is configured to use X, 
+#    or if you get a black screen when connecting to the login screen, you may need to: 
+#    1. Open /etc/gdm/custom.conf or /etc/gdm3/custom.conf
+#    2. Uncomment: WaylandEnable=false.
+#    3. Add the following line to the [daemon] section:
+#       DefaultSession=gnome-xorg.desktop
 #
 #
 # Special note about running on FreeBSD systems:
@@ -299,6 +301,7 @@ KVM = 0
 LMS = 0
 endif
 
+
 ifeq ($(ARCHID),35)
 ARCHNAME = linux-armada370-hf
 export PATH := $(PATH_ARMADA370_HF)bin:$(PATH_ARMADA370_HF)libexec/gcc/arm-unknown-linux-gnueabi/7.5.0:$(PATH_ARMADA370_HF)arm-unknown-linux-gnueabi/bin:$(PATH)
@@ -310,6 +313,8 @@ INCDIRS += -I$(PATH_AARCH64_CORTEXA53)include
 KVM = 0
 LMS = 0
 endif
+
+
 
 # Official Linux x86 32bit
 ifeq ($(ARCHID),5)
@@ -344,6 +349,7 @@ MACOSARCH = -target arm64-apple-macos11
 CC = gcc -arch arm64
 endif
 
+
 # Official Linux MIPSEL
 ifeq ($(ARCHID),7)
 ARCHNAME = mips
@@ -356,6 +362,7 @@ IFADDR_DISABLE = 1
 KVM = 0
 LMS = 0
 endif
+
 
 # Official OpenWRT X86_64
 ifeq ($(ARCHID),36)
@@ -370,6 +377,7 @@ INCDIRS += -I$(PATH_OPENWRT_X86_64)include
 KVM = 0
 LMS = 0
 endif
+
 
 # Official Linux MIPS24KC (OpenWRT)
 ifeq ($(ARCHID),28)
@@ -554,6 +562,7 @@ KVM = 0
 LMS = 0
 endif
 
+
 ifeq ($(WEBLOG),1)
 ifneq ($(DEBUG),1)
 $(error WEBLOG=1 needs DEBUG=1)
@@ -563,8 +572,7 @@ endif
 
 ifeq ($(KVM),1)
 # Mesh Agent KVM, this is only included in builds that have KVM support
-LINUXKVMSOURCES = meshcore/KVM/Linux/linux_kvm.c meshcore/KVM/Linux/linux_kvm_capture_helper.c meshcore/KVM/Linux/linux_kvm_wayland.c meshcore/KVM/Linux/linux_kvm_recovery.c meshcore/KVM/Linux/linux_kvm_capture.c meshcore/KVM/Linux/linux_kvm_dmabuf_sync.c meshcore/KVM/Linux/linux_kvm_input_state.c meshcore/KVM/Linux/linux_kvm_drm.c meshcore/KVM/Linux/linux_kvm_drm_egl.c meshcore/KVM/Linux/linux_kvm_rotated.c meshcore/KVM/Linux/linux_kvm_xkb.c meshcore/KVM/Linux/linux_kvm_eis.c meshcore/KVM/Linux/linux_kvm_cinnamon.c meshcore/KVM/Linux/linux_kvm_pipewire.c meshcore/KVM/Linux/linux_kvm_gnome.c meshcore/KVM/Linux/linux_kvm_gala.c meshcore/KVM/Linux/linux_gala_assets.c meshcore/KVM/Linux/linux_gala_consent.c meshcore/KVM/Linux/linux_gnome_assets.c microscript/ILibDuktape_GnomeCompanion.c meshcore/KVM/Linux/linux_events.c meshcore/KVM/Linux/linux_events_evdev.c meshcore/KVM/Linux/linux_tile.c meshcore/KVM/Linux/linux_compression.c
-LINUXKVMSOURCES += meshcore/KVM/Linux/linux_gnome_autostart.c
+LINUXKVMSOURCES = meshcore/KVM/Linux/linux_kvm.c meshcore/KVM/Linux/linux_kvm_wayland.c meshcore/KVM/Linux/linux_kvm_drm.c meshcore/KVM/Linux/linux_kvm_drm_egl.c meshcore/KVM/Linux/linux_kvm_rotated.c meshcore/KVM/Linux/linux_kvm_xkb.c meshcore/KVM/Linux/linux_events.c meshcore/KVM/Linux/linux_events_evdev.c meshcore/KVM/Linux/linux_tile.c meshcore/KVM/Linux/linux_compression.c
 MACOSKVMSOURCES = meshcore/KVM/MacOS/mac_kvm.c meshcore/KVM/MacOS/mac_events.c meshcore/KVM/MacOS/mac_tile.c meshcore/KVM/Linux/linux_compression.c
 CFLAGS += -D_LINKVM
 DRMLIBS =
@@ -584,12 +592,6 @@ ifneq (,$(filter linux pi,$(MAKECMDGOALS)))
         $(error Linux KVM builds require the wayland-client development package)
     endif
     CFLAGS += $(shell pkg-config --cflags wayland-client)
-    # PipeWire/SPA headers are build dependencies only; libpipewire remains dlopen-only.
-    PIPEWIRECFLAGS ?= $(shell pkg-config --cflags libpipewire-0.3 2>/dev/null)
-    ifeq ($(strip $(PIPEWIRECFLAGS)),)
-        $(error Linux KVM builds require the PipeWire and SPA development headers)
-    endif
-    CFLAGS += $(PIPEWIRECFLAGS)
     # libwayland-client is dlopen'd at runtime (linux_kvm_drm.c), not linked — headers only.
     # If the system headers are jpeg8 (JPEG_LIB_VERSION >= 80) and a v80 lib exists, default to it
     # so the linked lib matches the headers, else libjpeg aborts at runtime ("Wrong JPEG library
@@ -746,23 +748,6 @@ endif
 
 all: $(EXENAME) $(LIBNAME)
 
-# Rebuild the compiled identity when the generated commit header changes.
-meshconsole/main.o meshcore/agentcore.o microscript/ILibDuktape_ScriptContainer.o meshservice/ServiceMain.o: microscript/ILibDuktape_Commit.h
-
-# Track the shared integration include when rebuilding the DRM translation unit.
-meshcore/KVM/Linux/linux_kvm.o meshcore/KVM/Linux/linux_kvm_eis.o: meshcore/KVM/Linux/linux_kvm_bridge_auth.h
-meshcore/KVM/Linux/linux_kvm_gnome.o meshcore/KVM/Linux/linux_kvm_gala.o addons/gala/activate: meshcore/KVM/Linux/linux_kvm_peer_message.h
-meshconsole/main.o meshcore/KVM/Linux/linux_kvm.o meshcore/KVM/Linux/linux_kvm_drm.o meshcore/KVM/Linux/linux_kvm_capture_helper.o: meshcore/KVM/Linux/linux_kvm_capture_helper.h
-meshcore/KVM/Linux/linux_kvm_capture_helper.o: meshcore/KVM/Linux/linux_kvm_bridge_auth.h meshcore/KVM/Linux/linux_kvm_wayland.h
-meshcore/KVM/Linux/linux_kvm.o meshcore/KVM/Linux/linux_kvm_eis.o meshcore/KVM/Linux/linux_kvm_capture_helper.o: meshcore/KVM/Linux/linux_kvm_syscall_compat.h
-
-meshcore/KVM/Linux/linux_kvm_drm.o: meshcore/KVM/Linux/linux_kvm_kwin_capture.inc meshcore/KVM/Linux/linux_kvm_pipewire.h
-meshcore/KVM/Linux/linux_kvm_xkb.o: meshcore/KVM/Linux/linux_kvm_virtual_keyboard.inc
-meshcore/KVM/Linux/linux_kvm_pipewire.o: meshcore/KVM/Linux/linux_kvm_pipewire.h meshcore/KVM/Linux/linux_kvm_capture.h
-meshcore/KVM/Linux/linux_tile.o meshcore/KVM/Linux/linux_kvm_drm.o meshcore/KVM/Linux/linux_compression.o: meshcore/KVM/Linux/linux_tile.h meshcore/KVM/Linux/linux_compression.h
-meshcore/KVM/Linux/linux_tile.o: meshcore/KVM/Linux/linux_kvm_capture.h
-meshcore/KVM/MacOS/mac_tile.o: meshcore/KVM/Linux/linux_compression.h
-
 $(EXENAME): $(OBJECTS)
 ifeq ($(SKIPFLAGS), 1)
 	$(V)$(CC) $^ $(LDFLAGS) -lrt -o $@
@@ -772,6 +757,7 @@ endif
 sign:
 	strip ./$(EXENAME)
 	./agent/signer/signer_linux $(EXENAME) $(shell ./$(EXENAME) -v)
+
 
 clean:
 	rm -f meshconsole/*.o
@@ -839,6 +825,7 @@ cleanbin:
 	rm -f DEBUG_$(EXENAME)_x86-64
 	rm -f DEBUG_$(EXENAME)_x86-64_nokvm
 
+
 depend: $(SOURCES)
 	$(CC) -M $(CFLAGS) $(SOURCES) $(HEADERS) > depend
 
@@ -886,24 +873,3 @@ openbsd:
 	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)"  AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_OPENBSD -D_NOHECI -D_NOILIBSTACKDEBUG -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) $(BSDFLAGS) -L. -lpthread -lz $(filter-out -lutil,$(LDFLAGS)) $(LDEXTRA)"
 	$(SYMBOLCP)
 	$(STRIP)
-
-# The store and Duktape binding must agree on opaque token buffer capacity.
-meshcore/KVM/Linux/linux_gnome_assets.o microscript/ILibDuktape_GnomeCompanion.o: meshcore/KVM/Linux/linux_gnome_assets.h
-meshcore/KVM/Linux/linux_gnome_autostart.o microscript/ILibDuktape_GnomeCompanion.o: meshcore/KVM/Linux/linux_gnome_autostart.h
-
-meshcore/agentcore.o: meshcore/KVM/Linux/linux_gnome_update.h
-
-# Agent-owned Gala addition and installer choice. Both images are built for the
-# same architecture as the Agent, with no GLib/Gtk SDK dependency.
-ifneq ($(shell $(CC) -dM -E -x c /dev/null 2>/dev/null | sed -n '/define __linux__/p'),)
-addons/gala/console.so: addons/gala/console.c addons/gala/glib-abi.h meshcore/KVM/Linux/linux_gala_assets.h
-	$(CC) $(CFLAGS) -std=gnu99 -Os -s -shared -fPIC -fvisibility=hidden -Wl,--build-id=none -Wl,-z,relro,-z,now $< -o $@ -ldl
-addons/gala/activate: addons/gala/activate.c addons/gala/glib-abi.h meshcore/KVM/Linux/linux_kvm_gala.h meshcore/KVM/Linux/linux_gala_assets.h meshcore/KVM/Linux/linux_kvm_gala.c meshcore/KVM/Linux/linux_kvm_wayland.c
-	$(CC) $(CFLAGS) -std=gnu99 -Os -s -ffunction-sections -fdata-sections -Wl,--gc-sections -Wl,--build-id=none -I. addons/gala/activate.c meshcore/KVM/Linux/linux_kvm_gala.c meshcore/KVM/Linux/linux_kvm_wayland.c -o $@ -ldl
-meshcore/KVM/Linux/linux_gala_assets.o: addons/gala/console.so meshcore/KVM/Linux/linux_gala_assets.h
-meshcore/KVM/Linux/linux_gala_consent.o: addons/gala/activate meshcore/KVM/Linux/linux_gala_consent.h
-endif
-meshcore/KVM/Linux/linux_kvm_gala.o microscript/ILibDuktape_GnomeCompanion.o: meshcore/KVM/Linux/linux_gala_assets.h meshcore/KVM/Linux/linux_kvm_gala.h meshcore/KVM/Linux/linux_gala_consent.h
-
-meshcore/KVM/Linux/linux_kvm_cinnamon.o: meshcore/KVM/Linux/linux_kvm_cinnamon_source.h meshcore/KVM/Linux/linux_kvm_cinnamon.h
-
