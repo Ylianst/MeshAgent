@@ -1,74 +1,60 @@
-/* jconfig.h.  Generated from jconfig.h.in by configure.  */
 /* Version ID for the JPEG library.
  * Might be useful for tests like "#if JPEG_LIB_VERSION >= 60".
  */
-#define JPEG_LIB_VERSION 62
+#define JPEG_LIB_VERSION  62
 
 /* libjpeg-turbo version */
-#define LIBJPEG_TURBO_VERSION 1.5.2
+#define LIBJPEG_TURBO_VERSION  3.2.1
 
 /* libjpeg-turbo version in integer form */
-#define LIBJPEG_TURBO_VERSION_NUMBER 1005002
+#define LIBJPEG_TURBO_VERSION_NUMBER  3002001
 
-/* Support arithmetic encoding */
-#define C_ARITH_CODING_SUPPORTED 1
+/* Support arithmetic encoding when using 8-bit samples */
+/* #undef C_ARITH_CODING_SUPPORTED */
 
-/* Support arithmetic decoding */
-#define D_ARITH_CODING_SUPPORTED 1
-
-/*
- * Define BITS_IN_JSAMPLE as either
- *   8   for 8-bit sample values (the usual setting)
- *   12  for 12-bit sample values
- * Only 8 and 12 are legal data precisions for lossy JPEG according to the
- * JPEG standard, and the IJG code does not support anything else!
- * We do not support run-time selection of data precision, sorry.
- */
-
-#define BITS_IN_JSAMPLE  8      /* use 8 or 12 */
-
-/* Define to 1 if you have the <locale.h> header file. */
-#define HAVE_LOCALE_H 1
-
-/* Define to 1 if you have the <stddef.h> header file. */
-#define HAVE_STDDEF_H 1
-
-/* Define to 1 if you have the <stdlib.h> header file. */
-#define HAVE_STDLIB_H 1
-
-/* Define to 1 if the system has the type `unsigned char'. */
-#define HAVE_UNSIGNED_CHAR 1
-
-/* Define to 1 if the system has the type `unsigned short'. */
-#define HAVE_UNSIGNED_SHORT 1
-
-/* Compiler does not support pointers to undefined structures. */
-/* #undef INCOMPLETE_TYPES_BROKEN */
+/* Support arithmetic decoding when using 8-bit samples */
+/* #undef D_ARITH_CODING_SUPPORTED */
 
 /* Support in-memory source/destination managers */
-#define MEM_SRCDST_SUPPORTED 1
+#define MEM_SRCDST_SUPPORTED  1
 
-/* Define if you have BSD-like bzero and bcopy in <strings.h> rather than
-   memset/memcpy in <string.h>. */
-/* #undef NEED_BSD_STRINGS */
+/* Use accelerated SIMD routines when using 8-bit samples */
+#define WITH_SIMD 1
 
-/* Define if you need to include <sys/types.h> to get size_t. */
-#define NEED_SYS_TYPES_H 1
+/* This version of libjpeg-turbo supports run-time selection of data precision,
+ * so BITS_IN_JSAMPLE is no longer used to specify the data precision at build
+ * time.  However, some downstream software expects the macro to be defined.
+ * Since 12-bit data precision is an opt-in feature that requires explicitly
+ * calling 12-bit-specific libjpeg API functions and using 12-bit-specific data
+ * types, the unmodified portion of the libjpeg API still behaves as if it were
+ * built for 8-bit precision, and JSAMPLE is still literally an 8-bit data
+ * type.  Thus, it is correct to define BITS_IN_JSAMPLE to 8 here.
+ */
+#ifndef BITS_IN_JSAMPLE
+#define BITS_IN_JSAMPLE  8
+#endif
+
+#ifdef _WIN32
+
+#undef RIGHT_SHIFT_IS_UNSIGNED
+
+/* Define "boolean" as unsigned char, not int, per Windows custom */
+#ifndef __RPCNDR_H__            /* don't conflict if rpcndr.h already read */
+typedef unsigned char boolean;
+#endif
+#define HAVE_BOOLEAN            /* prevent jmorecfg.h from redefining it */
+
+/* Define "INT32" as int, not long, per Windows custom */
+#if !(defined(_BASETSD_H_) || defined(_BASETSD_H))   /* don't conflict if basetsd.h already read */
+typedef short INT16;
+typedef signed int INT32;
+#endif
+#define XMD_H                   /* prevent jmorecfg.h from redefining it */
+
+#else
 
 /* Define if your (broken) compiler shifts signed values as if they were
    unsigned. */
 /* #undef RIGHT_SHIFT_IS_UNSIGNED */
 
-/* Use accelerated SIMD routines. */
-#define WITH_SIMD 1
-
-/* Define to 1 if type `char' is unsigned and you are not using gcc.  */
-#ifndef __CHAR_UNSIGNED__
-/* # undef __CHAR_UNSIGNED__ */
 #endif
-
-/* Define to empty if `const' does not conform to ANSI C. */
-/* #undef const */
-
-/* Define to `unsigned int' if <sys/types.h> does not define. */
-/* #undef size_t */
