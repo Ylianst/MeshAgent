@@ -42,6 +42,18 @@ extern int adjust_screen_size(int pixles);
 extern int getTileAt(int x, int y, void** buffer, long long *bufferSize, void *desktop, long long desktopsize, int row, int col);
 extern int getScreenBuffer(char **desktop, long long *desktopsize, XImage *image);
 extern void set_tile_compression(int type, int level);
+extern int update_tile_checksums(void *desktop, long long desktopsize);
+
+/* A borrowed, validated private RGB32 image including zeroed bottom tile rows.
+ * The caller retains ownership until all synchronous tile writes complete. */
+typedef struct {
+    unsigned char *pixels;
+    size_t capacity, stride;
+    jpeg_pixel_format format;
+} linux_tile_rgb32_frame;
+extern int update_tile_checksums_rgb32(const linux_tile_rgb32_frame *frame);
+extern int getTileAt_rgb32(int x, int y, void **buffer, long long *bufferSize,
+    const linux_tile_rgb32_frame *frame, int row, int col);
 
 
 #endif /* LINUX_TILE_H_ */

@@ -1078,8 +1078,14 @@ int __fastcall util_to_p12(struct util_cert cert, char *password, char** data)
 	return len;
 }
 
+#if defined(WIN32) && OPENSSL_VERSION_NUMBER >= 0x30000000L
+#include "windows_legacy_pkcs12.h"
+#endif
 int __fastcall util_from_p12(char* data, int datalen, char* password, struct util_cert* cert)
 {
+#if defined(WIN32) && OPENSSL_VERSION_NUMBER >= 0x30000000L
+	return MeshWindowsParsePKCS12((const unsigned char*)data, datalen, password, &(cert->pkey), &(cert->x509));
+#else
 	int r = 0;
 	PKCS12 *p12 = NULL;
 	if (data == NULL || datalen == 0) return 0;
@@ -1089,6 +1095,7 @@ int __fastcall util_from_p12(char* data, int datalen, char* password, struct uti
 	r = PKCS12_parse(p12, password, &(cert->pkey), &(cert->x509), NULL);
 	PKCS12_free(p12);
 	return r;
+#endif
 }
 void __fastcall util_printcert(struct util_cert cert)
 {
@@ -1120,7 +1127,9 @@ int __fastcall util_mkCertEx(struct util_cert *rootcert, struct util_cert* cert,
 	char nameStr[(UTIL_SHA384_HASHSIZE * 2) + 2];
 	BIGNUM *oBigNbr;
 
+#if OPENSSL_VERSION_NUMBER < 0x30000000L
 	CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
+#endif
 
 	if (initialcert != NULL)
 	{

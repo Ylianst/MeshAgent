@@ -77,6 +77,9 @@ void WebClient_TrackUnLock(const char* MethodName, int Occurance, void *data)
 #include "ILibAsyncSocket.h"
 #include "ILibRemoteLogging.h"
 #include "ILibCrypto.h"
+#ifndef MICROSTACK_NOTLS
+#include "microstack/ILibTLSContext.h"
+#endif
 
 extern ILibSpinLock *ILibAsyncSocket_GetSpinLock(ILibAsyncSocket_SocketModule socketModule);
 
@@ -3606,7 +3609,7 @@ int ILibWebClient_EnableHTTPS(ILibWebClient_RequestManager manager, struct util_
 		return 1;
 	}
 
-	SSL_CTX_set_options(ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER | SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1);
+	ILibSSL_CTX_SetProtocolOptions(ctx, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1);
 	if (leafCert != NULL)
 	{
 		SSL_CTX_use_certificate(ctx, leafCert->x509);

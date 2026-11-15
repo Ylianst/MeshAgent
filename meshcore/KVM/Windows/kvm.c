@@ -599,6 +599,7 @@ int kvm_server_inputdata(char *block, int blocklen, ILibKVM_WriteHandler writeHa
 		char buffer[8];
 		if (size != 4)
 			break;
+        invalidate_desktop_capture();
 
 		((unsigned short *)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_SCREEN); // Write the type
 		((unsigned short *)buffer)[1] = (unsigned short)htons((unsigned short)8);			   // Write the size
@@ -627,6 +628,7 @@ int kvm_server_inputdata(char *block, int blocklen, ILibKVM_WriteHandler writeHa
 			{
 				tileInfo[row][col].crc = 0xFF;
 				tileInfo[row][col].flags = 0;
+				tileInfo[row][col].pending = 1;
 			}
 		}
 
@@ -637,6 +639,7 @@ int kvm_server_inputdata(char *block, int blocklen, ILibKVM_WriteHandler writeHa
 		if (size != 5)
 			break;
 		g_remotepause = block[4];
+        invalidate_desktop_capture();
 		break;
 	}
 	case MNG_KVM_FRAME_RATE_TIMER:
@@ -780,6 +783,7 @@ void kvm_pause(int pause)
 
 void kvm_server_SetResolution(ILibKVM_WriteHandler writeHandler, void *reserved)
 {
+    invalidate_desktop_capture();
 	char buffer[8];
 	int row, col;
 
@@ -829,6 +833,7 @@ void kvm_server_SetResolution(ILibKVM_WriteHandler writeHandler, void *reserved)
 		{
 			tileInfo[row][col].crc = 0xFF;
 			tileInfo[row][col].flags = 0;
+			tileInfo[row][col].pending = 1;
 		}
 	}
 }
@@ -923,6 +928,7 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	long mouseMove[3] = {0, 0, 0};
 	int sentHideCursor = 0;
 	long long captureFailedSince = 0;
+	int captureStatus;
 
 	gPendingPackets = ILibQueue_Create();
 	KVM_InitMouseCursors(gPendingPackets);
@@ -996,6 +1002,7 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 		for (col = 0; col < TILE_WIDTH_COUNT; col++)
 		{
 			tileInfo[row][col].crc = 0xFF;
+			tileInfo[row][col].pending = 1;
 		}
 	}
 
@@ -1018,6 +1025,7 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 				tileInfo[row][col].flags = (char)TILE_TODO;
 #ifdef KVM_ALL_TILES
 				tileInfo[row][col].crc = 0xFF;
+				tileInfo[row][col].pending = 1;
 #endif
 			}
 		}
@@ -1103,7 +1111,8 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 		}
 
 		// Scan the desktop
-		if (get_desktop_buffer(&desktop, &desktopsize, mouseMove) == 1 || desktop == NULL)
+        captureStatus = get_desktop_buffer(&desktop, &desktopsize, mouseMove);
+		if (captureStatus == WIN_CAPTURE_FAILED || (captureStatus != WIN_CAPTURE_UNCHANGED && desktop == NULL))
 		{
 #ifdef _WINSERVICE
 			if (!kvmConsoleMode)
@@ -1120,9 +1129,11 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 				g_shutdown = 1;
 			}
 		}
+        else if (captureStatus == WIN_CAPTURE_UNCHANGED) { captureFailedSince = 0; }
 		else
 		{
 			captureFailedSince = 0;
+			prepare_tile_checksums(desktop);
 			bmpInfo = get_bmp_info(TILE_WIDTH, TILE_HEIGHT);
 			for (row = 0; row < TILE_HEIGHT_COUNT; row++)
 			{
@@ -1149,10 +1160,11 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 						continue;
 					}
 
-					if (get_tile_at(width, height, &buf, &tilesize, desktop, row, col) == 1)
+					if (get_tile_at(width, height, &buf, &tilesize, desktop, row, col) < 0)
 					{
-						// GetTileAt failed, lets not send the tile
-						continue;
+						// Retry pending tiles next frame at the normal frame cadence.
+						row = TILE_HEIGHT_COUNT;
+						break;
 					}
 					if (buf && !g_shutdown)
 					{
@@ -1178,8 +1190,7 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 
 			KVMDEBUG("kvm_server_mainloop / loop2", (int)GetCurrentThreadId());
 
-			if (desktop)
-				free(desktop);
+			// The capture DIB is borrowed; tile encoding completes before reuse.
 			desktop = NULL;
 			desktopsize = 0;
 		}

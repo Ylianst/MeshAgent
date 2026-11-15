@@ -17,15 +17,27 @@ limitations under the License.
 #include "linux_kvm.h"
 #include "linux_kvm_wayland.h"
 #include "linux_kvm_drm.h"
+#include "linux_kvm_recovery.h"
 #include "meshcore/meshdefines.h"
 #include "microstack/ILibParsers.h"
 #include "microstack/ILibAsyncSocket.h"
 #include "microstack/ILibAsyncServerSocket.h"
 #include "microstack/ILibProcessPipe.h"
 #include <sys/wait.h>
+#include <errno.h>
 #include <limits.h>
 #include <stdint.h>
 #include <time.h>
+#include "linux_kvm_bridge_auth.h"
+#include "linux_kvm_capture.h"
+#if defined(__linux__)
+#include "linux_kvm_capture_helper.h"
+#include <sys/socket.h>
+#endif
+
+// The process-pipe implementation exposes this lifecycle operation internally but its public
+// header does not currently declare it; agentcore.c uses the same declaration for viewer teardown.
+extern void ILibProcessPipe_FreePipe(ILibProcessPipe_Pipe pipeObject);
 #include <pwd.h>
 #include <grp.h>
 
@@ -119,6 +131,9 @@ int TILE_HEIGHT = 0;
 int TILE_WIDTH_COUNT = 0;
 int TILE_HEIGHT_COUNT = 0;
 int COMPRESSION_RATIO = 0;
+int KVM_OUTPUT_WIDTH = 0, KVM_OUTPUT_HEIGHT = 0;
+int kvm_force_refresh = 1;
+int kvm_registered_uid = -1;
 int SCALING_FACTOR = 1024;		// Scaling factor, 1024 = 100%
 int SCALING_FACTOR_NEW = 1024;	// Desired scaling factor, 1024 = 100%
 int FRAME_RATE_TIMER = 0;
@@ -127,7 +142,7 @@ pthread_t kvmthread = (pthread_t)NULL;
 Display *eventdisplay = NULL;
 int g_remotepause = 0;
 int g_pause = 0;
-int g_restartcount = 0;
+uint32_t g_restartcount = 0;
 int g_totalRestartCount = 0;
 int g_shutdown = 0;
 int change_display = 0;
@@ -315,7 +330,7 @@ void kvm_send_error(char *msg)
 	char buffer[512];
 
 	// Otherwise this only reaches the MeshCentral viewer, so the error never shows in the agent's own log.
-	fprintf(stderr, "KVM error: %s\n", msg); fflush(stderr);
+	if (msgLen > 0) { fprintf(stderr, "KVM error: %s\n", msg); fflush(stderr); }
 
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_ERROR);	// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)(msgLen + 4));	// Write the size
@@ -457,8 +472,8 @@ void kvm_send_resolution()
 	char buffer[8];
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_SCREEN);	// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)8);				// Write the size
-	((unsigned short*)buffer)[2] = (unsigned short)htons((unsigned short)SCREEN_WIDTH);		// X position
-	((unsigned short*)buffer)[3] = (unsigned short)htons((unsigned short)SCREEN_HEIGHT);	// Y position
+	((unsigned short*)buffer)[2] = (unsigned short)htons((unsigned short)(g_kvmBackendDRM && KVM_OUTPUT_WIDTH ? KVM_OUTPUT_WIDTH : SCREEN_WIDTH));		// X position
+	((unsigned short*)buffer)[3] = (unsigned short)htons((unsigned short)(g_kvmBackendDRM && KVM_OUTPUT_HEIGHT ? KVM_OUTPUT_HEIGHT : SCREEN_HEIGHT));	// Y position
 
 	kvm_slave_send(buffer, sizeof(buffer));
 }
@@ -666,6 +681,19 @@ void kvm_set_x11_locations(char *libx11, char *libx11tst, char *libx11ext, char 
 	strcpy_s(Location_X11RANDR, sizeof(Location_X11RANDR), "libXrandr.so");
 }
 
+// Runtime installations need not contain the unversioned linker names from -dev packages.
+// Keep discovered/custom paths first, and use the ABI soname when discovery is unavailable.
+static void *kvm_x11_open_library(const char *configuredPath, const char *runtimeName)
+{
+	void *library = NULL;
+	if (configuredPath != NULL && configuredPath[0] != 0)
+	{
+		library = dlopen(configuredPath, RTLD_NOW);
+	}
+	if (library == NULL) { library = dlopen(runtimeName, RTLD_NOW); }
+	return library;
+}
+
 int kvm_init(int displayNo)
 {
 	if (logFile) { fprintf(logFile, "kvm_init(%d) called\n", displayNo); fflush(logFile); }
@@ -677,7 +705,7 @@ int kvm_init(int displayNo)
 	if (x11ext_exports == NULL)
 	{
 		x11ext_exports = ILibMemory_SmartAllocate(sizeof(x11ext_struct));
-		x11ext_exports->xext_lib = dlopen(Location_X11EXT, RTLD_NOW);
+		x11ext_exports->xext_lib = kvm_x11_open_library(Location_X11EXT, "libXext.so.6");
 		if (x11ext_exports->xext_lib)
 		{
 			((void**)x11ext_exports)[1] = (void*)dlsym(x11ext_exports->xext_lib, "XShmDetach");
@@ -689,7 +717,7 @@ int kvm_init(int displayNo)
 	if (x11tst_exports == NULL)
 	{
 		x11tst_exports = ILibMemory_SmartAllocate(sizeof(x11tst_struct));
-		x11tst_exports->x11tst_lib = dlopen(Location_X11TST, RTLD_NOW);
+		x11tst_exports->x11tst_lib = kvm_x11_open_library(Location_X11TST, "libXtst.so.6");
 		if (x11tst_exports->x11tst_lib)
 		{
 			((void**)x11tst_exports)[1] = (void*)dlsym(x11tst_exports->x11tst_lib, "XTestFakeMotionEvent");
@@ -700,7 +728,7 @@ int kvm_init(int displayNo)
 	if (x11_exports == NULL)
 	{
 		x11_exports = ILibMemory_SmartAllocate(sizeof(x11_struct));
-		x11_exports->x11_lib = dlopen(Location_X11LIB, RTLD_NOW);
+		x11_exports->x11_lib = kvm_x11_open_library(Location_X11LIB, "libX11.so.6");
 		if (x11_exports->x11_lib)
 		{
 			((void**)x11_exports)[1] = (void*)dlsym(x11_exports->x11_lib, "XOpenDisplay");
@@ -733,7 +761,7 @@ int kvm_init(int displayNo)
 	if (xfixes_exports == NULL)
 	{
 		xfixes_exports = ILibMemory_SmartAllocate(sizeof(xfixes_struct));
-		xfixes_exports->xfixes_lib = dlopen(Location_X11FIXES, RTLD_NOW);
+		xfixes_exports->xfixes_lib = kvm_x11_open_library(Location_X11FIXES, "libXfixes.so.3");
 		if (xfixes_exports->xfixes_lib)
 		{
 			((void**)xfixes_exports)[1] = (void*)dlsym(xfixes_exports->xfixes_lib, "XFixesSelectCursorInput");
@@ -745,7 +773,7 @@ int kvm_init(int displayNo)
 	if (xkb_exports == NULL)
 	{
 		xkb_exports = ILibMemory_SmartAllocate(sizeof(xkb_struct));
-		xkb_exports->xkb_lib = dlopen(Location_X11KB, RTLD_NOW);
+		xkb_exports->xkb_lib = kvm_x11_open_library(Location_X11KB, "libxkbfile.so.1");
 		if (xkb_exports->xkb_lib)
 		{
 			((void**)xkb_exports)[1] = (void*)dlsym(xkb_exports->xkb_lib, "XkbGetState");
@@ -769,6 +797,46 @@ int kvm_init(int displayNo)
 			((void**)xrandr_exports)[4] = (void*)dlsym(xrandr_exports->xrandr_lib, "XRRFreeCrtcInfo");
 		}
 	}
+
+	// Do not call through an unresolved runtime export: report the dependency failure to the viewer.
+#define KVM_REQUIRE_X11_EXPORT(table, symbol) \
+	if ((table)->symbol == NULL) { kvm_send_error("X11 runtime symbol unavailable: " #symbol); return -1; }
+	KVM_REQUIRE_X11_EXPORT(x11_exports, XOpenDisplay);
+	KVM_REQUIRE_X11_EXPORT(x11_exports, XCloseDisplay);
+	KVM_REQUIRE_X11_EXPORT(x11_exports, XFlush);
+	KVM_REQUIRE_X11_EXPORT(x11_exports, XKeysymToKeycode);
+	KVM_REQUIRE_X11_EXPORT(x11_exports, XQueryExtension);
+	KVM_REQUIRE_X11_EXPORT(x11_exports, XConnectionNumber);
+	KVM_REQUIRE_X11_EXPORT(x11_exports, XGetAtomName);
+	KVM_REQUIRE_X11_EXPORT(x11_exports, XNextEvent);
+	KVM_REQUIRE_X11_EXPORT(x11_exports, XPending);
+	KVM_REQUIRE_X11_EXPORT(x11_exports, XRootWindow);
+	KVM_REQUIRE_X11_EXPORT(x11_exports, XSync);
+	KVM_REQUIRE_X11_EXPORT(x11_exports, XFree);
+	KVM_REQUIRE_X11_EXPORT(x11_exports, XSelectInput);
+	KVM_REQUIRE_X11_EXPORT(x11_exports, XGetWindowAttributes);
+	KVM_REQUIRE_X11_EXPORT(x11_exports, XChangeWindowAttributes);
+	KVM_REQUIRE_X11_EXPORT(x11_exports, XQueryPointer);
+	KVM_REQUIRE_X11_EXPORT(x11_exports, XDisplayKeycodes);
+	KVM_REQUIRE_X11_EXPORT(x11_exports, XGetKeyboardMapping);
+	KVM_REQUIRE_X11_EXPORT(x11_exports, XStringToKeysym);
+	KVM_REQUIRE_X11_EXPORT(x11_exports, XChangeKeyboardMapping);
+	KVM_REQUIRE_X11_EXPORT(x11_exports, XScreenCount);
+	KVM_REQUIRE_X11_EXPORT(x11ext_exports, XShmDetach);
+	KVM_REQUIRE_X11_EXPORT(x11ext_exports, XShmGetImage);
+	KVM_REQUIRE_X11_EXPORT(x11ext_exports, XShmAttach);
+	KVM_REQUIRE_X11_EXPORT(x11ext_exports, XShmCreateImage);
+	KVM_REQUIRE_X11_EXPORT(x11tst_exports, XTestFakeMotionEvent);
+	KVM_REQUIRE_X11_EXPORT(x11tst_exports, XTestFakeButtonEvent);
+	KVM_REQUIRE_X11_EXPORT(x11tst_exports, XTestFakeKeyEvent);
+	KVM_REQUIRE_X11_EXPORT(xfixes_exports, XFixesSelectCursorInput);
+	KVM_REQUIRE_X11_EXPORT(xfixes_exports, XFixesQueryExtension);
+	KVM_REQUIRE_X11_EXPORT(xfixes_exports, XFixesGetCursorImage);
+	KVM_REQUIRE_X11_EXPORT(xkb_exports, XkbGetState);
+	KVM_REQUIRE_X11_EXPORT(xkb_exports, XkbLockModifiers);
+	KVM_REQUIRE_X11_EXPORT(xkb_exports, XkbQueryExtension);
+	KVM_REQUIRE_X11_EXPORT(xkb_exports, XkbSelectEvents);
+#undef KVM_REQUIRE_X11_EXPORT
 
 	sprintf_s(CURRENT_XDISPLAY, sizeof(CURRENT_XDISPLAY), ":%d", (int)displayNo);
 
@@ -900,6 +968,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 	if (blocklen < 4) return 0;
 	type = ntohs(ILibUnaligned_Read16(block));
 	size = ntohs(ILibUnaligned_Read16(block + 2));
+	if (size < 4) return 4;
 	if (size > blocklen) return 0;
 
 	switch (type)
@@ -927,9 +996,15 @@ int kvm_server_inputdata(char* block, int blocklen)
 			short w = 0;
 			if (size == 10 || size == 12)
 			{
-				// Client sends coords relative to the captured region; translate to absolute screen coords
-				x = ((int)ntohs(ILibUnaligned_Read16(block + 6))) + CAPTURE_X;
-				y = ((int)ntohs(ILibUnaligned_Read16(block + 8))) + CAPTURE_Y;
+				// Translate transmitted coordinates back to the selected source desktop.
+				x = (int)ntohs(ILibUnaligned_Read16(block + 6));
+                if (g_kvmBackendDRM && KVM_OUTPUT_WIDTH) x = (int)kvm_capture_source_coordinate(x, SCREEN_WIDTH, KVM_OUTPUT_WIDTH);
+                if (g_kvmBackendDRM && x >= SCREEN_WIDTH) x = SCREEN_WIDTH-1;
+                x += CAPTURE_X;
+				y = (int)ntohs(ILibUnaligned_Read16(block + 8));
+                if (g_kvmBackendDRM && KVM_OUTPUT_HEIGHT) y = (int)kvm_capture_source_coordinate(y, SCREEN_HEIGHT, KVM_OUTPUT_HEIGHT);
+                if (g_kvmBackendDRM && y >= SCREEN_HEIGHT) y = SCREEN_HEIGHT-1;
+                y += CAPTURE_Y;
 				if (size == 12) w = ((short)ntohs(ILibUnaligned_Read16(block + 10)));
 				if (logFile) { fprintf(logFile, "RemoteMouseMove: (%d, %d)\n", x, y); }
 				// printf("x:%d, y:%d, b:%d, w:%d\n", x, y, block[5], w);
@@ -947,14 +1022,15 @@ int kvm_server_inputdata(char* block, int blocklen)
 			if (size >= 8) { int ns = ((int)ntohs(ILibUnaligned_Read16(block + 6))); if (ns >= 64 && ns <= 4096) SCALING_FACTOR_NEW = ns; }
 			if (size >= 6) { set_tile_compression((int)block[4], (int)block[5]); }
 			COMPRESSION_RATIO = 100;
+            kvm_force_refresh = 1;
 			break;
 		}
 	case MNG_KVM_REFRESH: // Refresh
 		{
-			kvm_send_resolution();
-
 			int row, col;
 			if (size != 4) break;
+            kvm_force_refresh = 1;
+			kvm_send_resolution();
 			if (g_tileInfo == NULL) {
 				if ((g_tileInfo = (struct tileInfo_t **) malloc(TILE_HEIGHT_COUNT * sizeof(struct tileInfo_t *))) == NULL) ILIBCRITICALEXIT(254);
 				for (row = 0; row < TILE_HEIGHT_COUNT; row++) {
@@ -973,21 +1049,25 @@ int kvm_server_inputdata(char* block, int blocklen)
 		{
 			if (size != 5) break;
 			g_remotepause = block[4];
+            if (!g_remotepause) kvm_force_refresh = 1;
 			break;
 		}
 	case MNG_KVM_FRAME_RATE_TIMER:
 		{
+			if (size != 6) break;
 			int fr = ((int)ntohs(ILibUnaligned_Read16(block + 4)));
 			if (fr >= 20 && fr <= 5000) FRAME_RATE_TIMER = fr;
 			break;
 		}
 	case MNG_KVM_GET_DISPLAYS:
 		{
+			if (size != 4) break;
 			kvm_send_display_list();
 			break;
 		}
 	case MNG_KVM_SET_DISPLAY:
 		{
+			if (size != 6) break;
 			unsigned short newval = ntohs(ILibUnaligned_Read16(block + 4));
 			if (g_monitor_count > 0)
 			{
@@ -1015,7 +1095,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 int kvm_relay_feeddata(char* buf, int len)
 {
 	ssize_t written = 0;
-	if (g_slavekvm <= 0 || master2slave[1] < 0) { return 0; }
+	if (g_slavekvm <= 0 || master2slave[1] < 0 || buf == NULL || len <= 0) { return 0; }
 
 	// Write the reply to the pipe.
 	//fprintf(logFile, "Writing to slave in kvm_relay_feeddata\n");
@@ -1535,6 +1615,7 @@ void* kvm_server_mainloop_x11(void* parm)
 				}
 			}
 			getScreenBuffer((char **)&desktop, &desktopsize, image);
+			(void)update_tile_checksums(desktop, desktopsize);
 
 			for (y = 0; y < TILE_HEIGHT_COUNT; y++) {
 				for (x = 0; x < TILE_WIDTH_COUNT; x++) {
@@ -1547,7 +1628,8 @@ void* kvm_server_mainloop_x11(void* parm)
 						continue;
 					}
 
-					getTileAt(width, height, &buf, &tilesize, desktop, desktopsize, y, x);
+					if (getTileAt(width, height, &buf, &tilesize, desktop, desktopsize, y, x) < 0)
+                    { x = TILE_WIDTH_COUNT; y = TILE_HEIGHT_COUNT; break; }
 
 					if (buf && !g_shutdown)
 					{
@@ -1617,6 +1699,7 @@ void* kvm_server_mainloop_x11(void* parm)
 		free(g_tileInfo);
 		g_tileInfo = NULL;
 	}
+	jpeg_encoder_cleanup();
 	if(tilebuffer != NULL) { free(tilebuffer); tilebuffer = NULL; }
 	return (void*)0;
 }
@@ -1676,8 +1759,6 @@ void kvm_relay_readSink(ILibProcessPipe_Pipe sender, char *buffer, size_t buffer
 // it never runs then). Instead of only telling the viewer the child died, we ask the agent to
 // re-derive the CURRENT console session uid and re-fork. Rate-limited so a genuinely unrecoverable
 // child cannot storm-fork.
-#define KVM_AUTORECOVER_DELAY_MS   1500		// let the session settle before re-deriving the uid
-#define KVM_AUTORECOVER_MAX_BURST  5		// consecutive quick re-forks before we give up
 #define KVM_AUTORECOVER_RESET_MS   30000	// a child that ran at least this long was healthy: reset the burst
 #define KVM_FORK_RETRY_DELAY_MS     2000
 #define KVM_FORK_RETRY_MAX          10
@@ -1730,8 +1811,86 @@ static void kvm_relay_reap(void *object)
 	free(child);
 }
 
+#if defined(__linux__)
+typedef struct kvm_capture_chain_link
+{
+    ILibChain_Link link;
+    kvm_capture_broker *broker;
+} kvm_capture_chain_link;
+static kvm_capture_chain_link *g_captureLink;
+static uint64_t g_captureGeneration;
+typedef struct kvm_capture_reaper {void *chain;int pin;} kvm_capture_reaper;
+static void kvm_capture_reap_shutdown(void *object)
+{
+    kvm_capture_reaper *child=object;
+    kvm_capture_helper_reap(child->pin);close(child->pin);free(child);
+}
+static void kvm_capture_reap(void *object)
+{
+    kvm_capture_reaper *child=object;
+    if(kvm_capture_helper_reap(child->pin)){close(child->pin);free(child);return;}
+    ILibLifeTime_AddEx(ILibGetBaseTimer(child->chain),child,100,kvm_capture_reap,kvm_capture_reap_shutdown);
+}
+static void kvm_capture_link_stop(kvm_capture_chain_link *link)
+{
+    if (link == NULL || link->broker == NULL) return;
+    int pin = kvm_capture_broker_free(link->broker);
+    link->broker = NULL;
+    if (pin >= 0)
+    {
+        kvm_capture_reaper *child = calloc(1, sizeof(*child));
+        if (child == NULL) { ILIBCRITICALEXIT(254); }
+        child->chain = g_kvmChain; child->pin = pin;
+        if (child->chain == NULL || ILibIsChainBeingDestroyed(child->chain)) kvm_capture_reap_shutdown(child);
+        else kvm_capture_reap(child);
+    }
+}
+static void kvm_capture_link_pre(void *object, fd_set *readset, fd_set *writeset, fd_set *errorset, int *blocktime)
+{
+    kvm_capture_chain_link *link = object;
+    if(!kvm_capture_broker_select(link->broker,readset,writeset,errorset)){kvm_capture_link_stop(link);return;}
+    uint64_t deadline = kvm_capture_broker_deadline(link->broker), now = kvm_relay_now_ms();
+    if (deadline)
+    {
+        uint64_t remaining = deadline > now ? deadline-now : 0;
+        if (remaining < (uint64_t)*blocktime) *blocktime = (int)remaining;
+    }
+}
+static void kvm_capture_link_post(void *object, int selected, fd_set *readset, fd_set *writeset, fd_set *errorset)
+{
+    (void)selected; (void)writeset;
+    kvm_capture_chain_link *link=object;int fds[6];
+    int count=kvm_capture_broker_fds(link->broker,fds),ready=0;
+    for(int i=0;i<count;++i) if(fds[i]<FD_SETSIZE&&(FD_ISSET(fds[i],readset)||FD_ISSET(fds[i],errorset)))ready=1;
+    int writefd=kvm_capture_broker_write_fd(link->broker);
+    if(writefd>=0&&writefd<FD_SETSIZE&&FD_ISSET(writefd,writeset))ready=1;
+    uint64_t deadline=kvm_capture_broker_deadline(link->broker);
+    if(ready||(deadline&&kvm_relay_now_ms()>=deadline))kvm_capture_broker_step(link->broker);
+}
+static void kvm_capture_link_destroy(void *object)
+{
+    kvm_capture_link_stop(object); g_captureLink = NULL;
+}
+static void kvm_capture_link_start(int fd, pid_t worker, uid_t uid, uint64_t generation)
+{
+    if (g_captureLink == NULL)
+    {
+        g_captureLink = (kvm_capture_chain_link*)ILibChain_Link_Allocate(sizeof(*g_captureLink), 0);
+        if (g_captureLink == NULL) { close(fd); return; }
+        g_captureLink->link.PreSelectHandler = kvm_capture_link_pre;
+        g_captureLink->link.PostSelectHandler = kvm_capture_link_post;
+        g_captureLink->link.DestroyHandler = kvm_capture_link_destroy;
+        ILibChain_SafeAdd(g_kvmChain, g_captureLink);
+    }
+    g_captureLink->broker = kvm_capture_broker_new(fd, worker, uid, generation);
+}
+#endif
+
 static void kvm_relay_stop_child(int signalNumber)
 {
+#if defined(__linux__)
+    kvm_capture_link_stop(g_captureLink);
+#endif
 	if (master2slave[1] >= 0) { close(master2slave[1]); master2slave[1] = -1; }
 	if (g_slavekvm > 0)
 	{
@@ -1739,6 +1898,9 @@ static void kvm_relay_stop_child(int signalNumber)
 		if (child == NULL) { ILIBCRITICALEXIT(254); }
 		child->chain = g_kvmChain;
 		child->pid = g_slavekvm;
+#if defined(__linux__)
+        kvm_bridge_worker_record(g_slavekvm, 0, 1);
+#endif
 		child->killDeadline = kvm_relay_now_ms() + 1000;
 		g_slavekvm = 0;
 		if (signalNumber != 0) { kill(child->pid, signalNumber); }
@@ -1747,19 +1909,14 @@ static void kvm_relay_stop_child(int signalNumber)
 	}
 }
 
-// Decide whether an unexpected child exit should trigger an automatic re-fork. Reuses g_restartcount
-// as a burst gate, cleared whenever the previous child ran long enough to be considered healthy.
-static int kvm_relay_should_autorecover(void)
+// A short-failure burst progressively opens the circuit breaker, but never permanently disables
+// access. A later healthy console therefore recovers without requiring someone to act locally.
+static uint32_t kvm_relay_autorecover_delay_ms(void)
 {
 	uint64_t now = kvm_relay_now_ms();
-	if (g_lastKvmForkMs != 0 && (now - g_lastKvmForkMs) >= KVM_AUTORECOVER_RESET_MS)
-	{
-		g_restartcount = 0;
-	}
-	if (g_restartcount >= KVM_AUTORECOVER_MAX_BURST) { return 0; }	// give up; fall back to the viewer notice
-	g_restartcount++;
-	g_totalRestartCount++;
-	return 1;
+	uint32_t delay = kvm_recovery_next_delay_ms(&g_restartcount, g_lastKvmForkMs, now, KVM_AUTORECOVER_RESET_MS);
+	if (g_totalRestartCount < INT_MAX) { ++g_totalRestartCount; }
+	return delay;
 }
 
 // Deferred off the broken-pipe callback (so we don't re-enter pipe teardown) to perform the recovery.
@@ -1797,15 +1954,21 @@ void kvm_relay_brokenPipeSink_2(void *sender)
 void kvm_relay_brokenPipeSink(ILibProcessPipe_Pipe sender)
 {
 	void *chain = ((void**)ILibMemory_Extra(sender))[2];
+	uint32_t recoveryDelay;
 	kvm_relay_stop_child(0);
 
 	// The child exited without a deliberate teardown (teardown clears this handler first). Try to
 	// auto-recover the session (logout / user-switch) rather than just reporting the child death.
-	// Gated by g_shutdown and a burst limit so an unrecoverable child can't fork-storm; on giving up
-	// we fall through to the original "child unexpectedly exited" viewer notice.
-	if (!g_shutdown && kvm_relay_should_autorecover())
+	// Deliberate teardown clears this handler and its timer. Unexpected failures always retain a
+	// bounded delayed probe; the increasing delay prevents a process storm without making the fifth
+	// transient failure terminal for the rest of the viewer session.
+	if (!g_shutdown)
 	{
-		ILibLifeTime_AddEx(ILibGetBaseTimer(chain), sender, KVM_AUTORECOVER_DELAY_MS, kvm_relay_autoRecoverSink, NULL);
+		recoveryDelay = kvm_relay_autorecover_delay_ms();
+		fprintf(stderr, "MeshAgent: KVM capture worker exited; recovery attempt=%u in %u ms\n",
+			(unsigned int)g_restartcount, (unsigned int)recoveryDelay);
+		fflush(stderr);
+		ILibLifeTime_AddEx(ILibGetBaseTimer(chain), sender, recoveryDelay, kvm_relay_autoRecoverSink, NULL);
 		return;
 	}
 
@@ -1835,13 +1998,45 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 	fcntl(master2slave[1], F_SETFD, FD_CLOEXEC);
 
 	slave_out = ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(processPipeMgr, slave2master[0], 3 * sizeof(void*));	
+	if (slave_out == NULL)
+	{
+		close(slave2master[0]);
+		close(slave2master[1]);
+		close(master2slave[0]);
+		close(master2slave[1]);
+		slave2master[0] = slave2master[1] = -1;
+		master2slave[0] = master2slave[1] = -1;
+		return NULL;
+	}
 	((void**)ILibMemory_Extra(slave_out))[0] = writeHandler;
 	((void**)ILibMemory_Extra(slave_out))[1] = reserved;
 	((void**)ILibMemory_Extra(slave_out))[2] = ((ILibChain_Link*)processPipeMgr)->ParentChain;
 
-	g_slavekvm = fork();
+	int registrationGate[2];
+    if (pipe(registrationGate) != 0) { ILibProcessPipe_FreePipe(slave_out); return NULL; }
+    int registrationUid = uid;
+#if defined(__linux__)
+    kvm_wayland_console_session registrationSession;
+    int haveCaptureSession = kvm_wayland_active_console_session(&registrationSession);
+    if (haveCaptureSession) registrationUid = registrationSession.uid;
+    int capturePair[2] = {-1, -1};
+    pid_t captureParent = getpid();
+    uint64_t captureGeneration = ++g_captureGeneration;
+    if (!captureGeneration) captureGeneration = ++g_captureGeneration;
+    if (geteuid() == 0 && haveCaptureSession && registrationUid > 0 && !strcmp(registrationSession.type, "wayland"))
+    {
+        if (socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, capturePair) != 0)
+            capturePair[0] = capturePair[1] = -1;
+    }
+#endif
+    g_slavekvm = fork();
 	if (g_slavekvm < 0)
 	{
+#if defined(__linux__)
+        if (capturePair[0] >= 0) close(capturePair[0]);
+        if (capturePair[1] >= 0) close(capturePair[1]);
+#endif
+        close(registrationGate[0]); close(registrationGate[1]);
 		close(slave2master[1]);
 		close(master2slave[0]); close(master2slave[1]);
 		slave2master[0] = slave2master[1] = master2slave[0] = master2slave[1] = -1;
@@ -1857,7 +2052,17 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 	}
 
 	if (g_slavekvm == 0) //slave
-	{
+    {
+#if defined(__linux__)
+        if (capturePair[0] >= 0) close(capturePair[0]);
+        if (capturePair[1] >= 0) kvm_capture_worker_attach(capturePair[1], captureParent, captureGeneration);
+#endif
+        char registered;
+        close(registrationGate[1]);
+        ssize_t gateRead;
+        do { gateRead = read(registrationGate[0], &registered, 1); } while (gateRead < 0 && errno == EINTR);
+        close(registrationGate[0]);
+        if (gateRead != 1) _exit(1);
 		close(slave2master[0]);
 		close(master2slave[1]);
 
@@ -1880,12 +2085,23 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 		if (authToken != NULL) { setenv("XAUTHORITY", authToken, 1); }
 		if (dispid != NULL) { setenv("DISPLAY", dispid, 1); }
 
-		kvm_server_mainloop((void*)(intptr_t)uid);
+		kvm_registered_uid = registrationUid;
+        kvm_server_mainloop((void*)(intptr_t)uid);
 		_exit(0);
 		return(NULL);
 	}
 	else
 	{ //master
+#if defined(__linux__)
+        if (capturePair[1] >= 0) close(capturePair[1]);
+        if (capturePair[0] >= 0) kvm_capture_link_start(capturePair[0], g_slavekvm, registrationUid, captureGeneration);
+#endif
+        close(registrationGate[0]);
+#if defined(__linux__)
+        kvm_bridge_worker_record(g_slavekvm, (uid_t)registrationUid, 0);
+#endif
+        ignore_result(write(registrationGate[1], "1", 1));
+        close(registrationGate[1]);
 		// A child is (re)running now: clear any stale shutdown flag left by kvm_cleanup() on a restart
 		// path, and stamp the fork time so the auto-recovery burst gate can tell a healthy child (ran a
 		// while) from a fork storm (dies immediately).

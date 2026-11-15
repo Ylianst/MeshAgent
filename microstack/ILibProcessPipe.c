@@ -30,6 +30,12 @@ limitations under the License.
 #include "ILibParsers.h"
 #include "ILibRemoteLogging.h"
 #include "ILibProcessPipe.h"
+#ifdef WIN32
+static int ILibProcessPipe_CompareEnvironmentEntries(const void *left, const void *right)
+{
+	return CompareStringOrdinal(*(LPCWSTR*)left, -1, *(LPCWSTR*)right, -1, TRUE) - CSTR_EQUAL;
+}
+#endif
 #ifndef WIN32
 #include <fcntl.h>              /* Obtain O_* constant definitions */
 #include <unistd.h>
@@ -778,15 +784,46 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 	if (envvars != NULL)
 	{
 		WCHAR *wideEnv;
+		WCHAR systemRoot[MAX_PATH];
+		DWORD systemRootLength = 0;
+		int hasSystemRoot = 0;
 		int tmpCnt;
-		int envCount = 0;
+		size_t envCount = 1; // Final NUL, in addition to each entry's terminator.
+		size_t entryCount = 0;
 		void *envCurrent = envvars;
 		while (envCurrent != NULL && ((char**)envCurrent)[0] != NULL)
 		{
-			envCount += (ILibUTF8ToWideCount(((char**)envCurrent)[0]) + ILibUTF8ToWideCount(((char**)envCurrent)[1]) + ILibUTF8ToWideCount("="));
+			int keyCount = ILibUTF8ToWideCount(((char**)envCurrent)[0]);
+			int valueCount = ILibUTF8ToWideCount(((char**)envCurrent)[1]);
+			if (keyCount <= 0 || valueCount <= 0 || (size_t)keyCount > INT_MAX / sizeof(WCHAR) - envCount ||
+				(size_t)valueCount > INT_MAX / sizeof(WCHAR) - envCount - (size_t)keyCount || entryCount >= INT_MAX / sizeof(WCHAR*) - 1)
+			{
+				envvars = NULL; // Still the caller's array, not an owned environment block.
+				SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+				goto processSpawnFailed;
+			}
+			envCount += (size_t)keyCount + (size_t)valueCount; // '=' replaces the key's NUL.
+			++entryCount;
+			if (_stricmp(((char**)envCurrent)[0], "SystemRoot") == 0) { hasSystemRoot = 1; }
 			envCurrent = (void*)((char*)envCurrent + 2 * sizeof(char*));
 		}
-		wideEnv = (WCHAR*)ILibMemory_SmartAllocate(2* envCount);
+		if (hasSystemRoot == 0)
+		{
+			// DLL activation needs SystemRoot even for an isolated environment.
+			// Supply this one trusted default without inheriting secrets, PATH or
+			// DLL-search overrides from the parent's environment.
+			systemRootLength = GetSystemWindowsDirectoryW(systemRoot, MAX_PATH);
+			if (systemRootLength == 0 || systemRootLength >= MAX_PATH || envCount + 12 + systemRootLength > INT_MAX / sizeof(WCHAR))
+			{
+				envvars = NULL;
+				if (systemRootLength >= MAX_PATH) { SetLastError(ERROR_INSUFFICIENT_BUFFER); }
+				else if (systemRootLength != 0) { SetLastError(ERROR_NOT_ENOUGH_MEMORY); }
+				goto processSpawnFailed;
+			}
+			envCount += 12 + systemRootLength; // SystemRoot=, directory and entry NUL.
+			++entryCount;
+		}
+		wideEnv = (WCHAR*)ILibMemory_SmartAllocate(sizeof(WCHAR) * envCount);
 		tmpCnt = 0;
 
 		envCurrent = envvars;
@@ -797,6 +834,34 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 			tmpCnt += ILibUTF8ToWideCountEx(((char**)envCurrent)[1], wideEnv + tmpCnt, ((int)ILibMemory_Size(wideEnv) / 2) - tmpCnt);
 			envCurrent = (void*)((char*)envCurrent + 2 * sizeof(char*));
 		}
+		if (hasSystemRoot == 0)
+		{
+			memcpy_s(wideEnv + tmpCnt, (envCount - tmpCnt) * sizeof(WCHAR), L"SystemRoot=", 11 * sizeof(WCHAR));
+			tmpCnt += 11;
+			memcpy_s(wideEnv + tmpCnt, (envCount - tmpCnt) * sizeof(WCHAR), systemRoot, (systemRootLength + 1) * sizeof(WCHAR));
+			tmpCnt += systemRootLength + 1;
+		}
+		wideEnv[tmpCnt] = 0;
+		{
+			// Windows requires a case-insensitive ordinal sort, including the
+			// supplied default. Never sort or modify the caller's key/value array.
+			WCHAR **entries = (WCHAR**)ILibMemory_SmartAllocate(entryCount * sizeof(WCHAR*));
+			WCHAR *sorted = (WCHAR*)ILibMemory_SmartAllocate(envCount * sizeof(WCHAR));
+			WCHAR *cursor = wideEnv;
+			size_t i, offset = 0;
+			for (i = 0; i < entryCount; ++i) { entries[i] = cursor; cursor += wcslen(cursor) + 1; }
+			qsort(entries, entryCount, sizeof(WCHAR*), ILibProcessPipe_CompareEnvironmentEntries);
+			for (i = 0; i < entryCount; ++i)
+			{
+				size_t length = wcslen(entries[i]) + 1;
+				memcpy_s(sorted + offset, (envCount - offset) * sizeof(WCHAR), entries[i], length * sizeof(WCHAR));
+				offset += length;
+			}
+			sorted[offset] = 0;
+			ILibMemory_Free(entries);
+			ILibMemory_Free(wideEnv);
+			wideEnv = sorted;
+		}
 		envvars = wideEnv;
 	}
 
@@ -804,6 +869,7 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 	if (((spawnType == ILibProcessPipe_SpawnTypes_DEFAULT || spawnType == ILibProcessPipe_SpawnTypes_DETACHED) && !CreateProcessW(ILibUTF8ToWideEx(target, -1, tmp1, (int)sizeof(tmp1)/2), ILibUTF8ToWideEx(parms, -1, tmp2, (int)sizeof(tmp2)/2), NULL, NULL, spawnType == ILibProcessPipe_SpawnTypes_DETACHED ? FALSE: TRUE, CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW | (needSetSid !=0? (DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP) : 0x00), envvars, NULL, &info, &processInfo)) ||
 		(spawnType != ILibProcessPipe_SpawnTypes_DEFAULT && !CreateProcessAsUserW(userToken, ILibUTF8ToWideEx(target, -1, tmp1, (int)sizeof(tmp1)/2), ILibUTF8ToWideEx(parms, -1, tmp2, (int)sizeof(tmp2)/2), NULL, NULL, TRUE, CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW | (needSetSid != 0 ? (DETACHED_PROCESS| CREATE_NEW_PROCESS_GROUP) : 0x00), envvars, NULL, &info, &processInfo)))
 	{
+	processSpawnFailed: ;
 		int ll = GetLastError();
 		if (spawnType != ILibProcessPipe_SpawnTypes_DETACHED)
 		{

@@ -107,6 +107,27 @@ try
 catch(x)
 { }
 
+// Keep technical failure details in installer stderr, not connection-time UI.
+function gnomeCompanionResult(result)
+{
+    if (result.state === 'error')
+    {
+        process.stdout.write('   -> GNOME remote control setup is incomplete.\n');
+        process.stderr.write('GNOME companion: ' + JSON.stringify(result) + '\n');
+    }
+    else if (result.state === 'files-ready')
+    {
+        if (result.currentSessions && result.currentSessions.state === 'current-sessions-active')
+        {
+            process.stdout.write('   -> GNOME remote control is active in current sessions.\n');
+        }
+        else { process.stdout.write('   -> GNOME companion files are ready; desktop activation is pending.\n'); }
+        if (result.startup === 'ready') { process.stdout.write('   -> GNOME activation is configured for future sign-ins.\n'); }
+        if (result.currentSessions) { process.stderr.write('GNOME activation: ' + JSON.stringify(result.currentSessions) + '\n'); }
+        if (result.greeter) { process.stderr.write('GNOME greeter: ' + JSON.stringify(result.greeter) + '\n'); }
+    }
+}
+
 // This function performs some checks on the parameter structure, to make sure the minimum set of requried elements are present
 function checkParameters(parms)
 {
@@ -284,6 +305,9 @@ function installService(params)
 
     if (global.gOptions != null && global.gOptions.noParams === true) { options.parameters = []; }
 
+    // Linux service-manager mutates options.name to its escaped systemd unit
+    // name. Ownership must use the same logical identity as explicit uninstall.
+    var companionServiceName = options.name;
     try
     {
         // Let's actually install the service
@@ -375,15 +399,76 @@ function installService(params)
     }
 
     // Let's try to start the service that we just installed
+    var serviceStarted = false;
     process.stdout.write('   -> Starting service...');
     try
     {
         svc.start();
+        serviceStarted = process.platform !== 'linux' || typeof svc.isRunning !== 'function' || svc.isRunning();
+        if (!serviceStarted) { throw new Error('Installed service did not start'); }
         process.stdout.write(' [OK]\n');
     }
     catch(ee)
     {
         process.stdout.write(' [ERROR]\n');
+    }
+
+    if (process.platform === 'linux' && serviceStarted)
+    {
+        try {
+            var gala = require('linux-gala-companion');
+            var galaResult = gala.install({ name: companionServiceName, path: svc.appLocation() }, params._gnomePreviousService);
+            if (galaResult.state !== 'not-applicable') {
+                process.stderr.write('Gala companion: ' + JSON.stringify(galaResult) + '\n');
+                if (galaResult.state === 'files-ready' && galaResult.activation === 'next-wayland-sign-in')
+                    process.stdout.write('   -> Wayland keyboard setup activates at the next sign-in.\n');
+                if (galaResult.state === 'files-ready' && galaResult.activation === 'needs-sign-in') {
+                    var galaChoice = gala.offerSignOut(galaResult);
+                    process.stderr.write('Gala activation: ' + JSON.stringify(galaChoice) + '\n');
+                    if (galaChoice.state !== 'sign-out-requested' && galaChoice.state !== 'not-needed')
+                        process.stdout.write('   -> Some characters may not work until you sign out and sign back in.\n');
+                }
+            }
+        } catch (ga) { process.stderr.write('Gala companion setup failed: ' + String(ga) + '\n'); }
+        try {
+            var kwinResult = require('linux-kwin-companion').install(
+                { name: companionServiceName, path: svc.appLocation() }, params._gnomePreviousService);
+            if (kwinResult.state !== 'not-applicable') {
+                process.stderr.write('KWin companion: ' + JSON.stringify(kwinResult) + '\n');
+                if (kwinResult.state !== 'files-ready') { process.stdout.write('   -> Keyboard setup is pending; see the installer log.\n'); }
+            }
+        } catch (ke) { process.stderr.write('KWin companion setup failed: ' + String(ke) + '\n'); }
+    }
+
+    if (process.platform === 'linux' && serviceStarted)
+    {
+        try
+        {
+            var gnomeResult = require('linux-gnome-companion').install(
+                { name: companionServiceName, path: svc.appLocation() }, params._gnomePreviousService);
+            gnomeCompanionResult(gnomeResult);
+            if (gnomeResult.state === 'files-ready')
+            {
+                var choices = require('linux-gnome-session').offerSignOut(gnomeResult.currentSessions);
+                for (var choice = 0; choice < choices.length; ++choice)
+                {
+                    var state = choices[choice].result.state;
+                    if (state === 'sign-out-requested') { process.stdout.write('   -> Sign-out requested. Setup finishes after you sign back in.\n'); }
+                    else if (state === 'declined') { process.stdout.write('   -> Remote control may not work until you sign out and sign back in.\n'); }
+                    else if (state !== 'not-needed') { process.stdout.write('   -> GNOME activation is pending; remote control may not work until the session restarts.\n'); }
+                }
+                if (choices.length) { process.stderr.write('GNOME sign-out choice: ' + JSON.stringify(choices) + '\n'); }
+                var greeterChoices = require('linux-gnome-session').offerGreeterRefresh(gnomeResult.currentSessions);
+                for (var refresh = 0; refresh < greeterChoices.length; ++refresh)
+                {
+                    var refreshState = greeterChoices[refresh].result.state;
+                    if (refreshState === 'greeter-refresh-requested') { process.stdout.write('   -> Login-screen refresh requested.\n'); }
+                    else if (refreshState !== 'not-needed') { process.stdout.write('   -> Login-screen remote control may not work until the login screen restarts.\n'); }
+                }
+                if (greeterChoices.length) { process.stderr.write('GNOME greeter choice: ' + JSON.stringify(greeterChoices) + '\n'); }
+            }
+        }
+        catch (ge) { gnomeCompanionResult({ state: 'error', stage: 'installer-install', detail: String(ge) }); }
     }
 
     // On Windows we should explicitly close the service manager when we are done, instead of relying on the Garbage Collection, so the service object isn't unnecessarily locked
@@ -458,6 +543,16 @@ function uninstallService2(params, msh)
         // Let's actually try to uninstall the service
         require('service-manager').manager.uninstallService(serviceName, uninstallOptions);
         process.stdout.write(' [DONE]\n');
+        // An upgrade retains its lease until the replacement is started and acquired.
+        if (process.platform === 'linux' && params.includes('_stop') && params._gnomePreviousService)
+        {
+            try { var galaRemoved = require('linux-gala-companion').uninstall(params._gnomePreviousService); if (galaRemoved.state !== 'not-applicable') { process.stderr.write('Gala companion removal: ' + JSON.stringify(galaRemoved) + '\n'); } }
+            catch (ga) { process.stderr.write('Gala companion removal failed: ' + String(ga) + '\n'); }
+            try { var kwinRemoved = require('linux-kwin-companion').uninstall(params._gnomePreviousService); if (kwinRemoved.state !== 'not-owned') { process.stderr.write('KWin companion removal: ' + JSON.stringify(kwinRemoved) + '\n'); } }
+            catch (ke) { process.stderr.write('KWin companion removal failed: ' + String(ke) + '\n'); }
+            try { gnomeCompanionResult(require('linux-gnome-companion').uninstall(params._gnomePreviousService)); }
+            catch (ge) { gnomeCompanionResult({ state: 'error', stage: 'installer-uninstall', detail: String(ge) }); }
+        }
         if (process.platform == 'win32')
         {
             // For Windows, we can remove the entry to enable this service to be runnable from SafeModeWithNetworking
@@ -577,6 +672,14 @@ function uninstallService(params)
     // Before we uninstall, we need to fetch the service from service-manager.js
     var svc = require('service-manager').manager.getService(params.getParameter('meshServiceName', process.platform == 'win32' ? 'Mesh Agent' : 'meshagent'));
 
+    // Preserve the old identity across stop/remove/reinstall, including path changes.
+    if (process.platform === 'linux')
+    {
+        Object.defineProperty(params, '_gnomePreviousService', {
+            value: { name: params.getParameter('meshServiceName', 'meshagent'), path: svc.appLocation() },
+            writable: true, configurable: true, enumerable: false
+        });
+    }
     // We can calculate what the .msh file location is, based on the appLocation of the service
     var msh = svc.appLocation();
     if (process.platform == 'win32')

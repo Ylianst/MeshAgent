@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <MeshOpenSslArch Condition="'$(Platform)'=='Win32'">x86</MeshOpenSslArch>
+    <MeshOpenSslArch Condition="'$(Platform)'=='x64'">x64</MeshOpenSslArch>
+    <MeshOpenSslInstall>$(MSBuildProjectDirectory)\..\.build\windows-openssl\$(VCToolsVersion)\$(MeshOpenSslArch)\$(Configuration)\install</MeshOpenSslInstall>
+  </PropertyGroup>
+  <!-- ARM64 keeps its existing dependency until built and qualified separately. -->
+  <ItemDefinitionGroup Condition="'$(MeshOpenSslArch)'!=''">
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(MeshOpenSslInstall)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>$(MeshOpenSslInstall)\lib\libssl.lib;$(MeshOpenSslInstall)\lib\libcrypto.lib;Bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <Target Name="BuildWindowsOpenSsl" BeforeTargets="PrepareForBuild" Condition="'$(MeshOpenSslArch)'!=''"
+    Inputs="$(MSBuildThisFileDirectory)build.ps1;$(MSBuildThisFileDirectory)windows-openssl.props"
+    Outputs="$(MeshOpenSslInstall)\mesh-build-recipe.sha256;$(MeshOpenSslInstall)\lib\libcrypto.lib;$(MeshOpenSslInstall)\lib\libssl.lib;$(MeshOpenSslInstall)\include\openssl\configuration.h">
+    <Exec Command="powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)build.ps1&quot; -Architecture $(MeshOpenSslArch) -Configuration $(Configuration) -VisualStudioPath &quot;$(VSInstallDir).&quot; -VCToolsVersion $(VCToolsVersion)" />
+  </Target>
+</Project>

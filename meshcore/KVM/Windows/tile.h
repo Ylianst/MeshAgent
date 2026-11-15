@@ -27,6 +27,7 @@ extern "C"
 struct tileInfo_t {
 	int crc;
 	char flags; // See TILE_FLAGS_ENUM
+	char pending; // Retained across frames until an owned image packet is ready.
 };
 
 enum TILE_FLAGS_ENUM {
@@ -37,9 +38,14 @@ enum TILE_FLAGS_ENUM {
 	//TILE_SKIPPED			// CRC has been calculated, tile need not be sent, but was skipped to include a greater region
 };
 
+enum { WIN_CAPTURE_FRAME = 0, WIN_CAPTURE_FAILED = 1, WIN_CAPTURE_UNCHANGED = 2 };
+void invalidate_desktop_capture(void);
 short initialize_gdiplus();
 void teardown_gdiplus();
+// Negative means retryable encoding failure; no packet was submitted.
 int get_tile_at(int x, int y, void** buffer, long long *bufferSize, void *desktop, int row, int col);
+// Returns a borrowed private DIB, valid until the next capture or teardown.
+void prepare_tile_checksums(void *desktop);
 int get_desktop_buffer(void **buffer, long long *bufferSize, long*);
 BITMAPINFO get_bmp_info(int width, int height);
 void set_tile_compression(int type, int level);

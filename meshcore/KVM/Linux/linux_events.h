@@ -437,6 +437,7 @@ struct keymap_t {
 };
 
 extern int kvm_events_evdev_init();
+extern void kvm_events_evdev_release_all();
 extern void kvm_events_evdev_shutdown();
 extern int kvm_events_evdev_lock_state();
 extern int kvm_events_evdev_wait_lock_state(int maxWaitMs);

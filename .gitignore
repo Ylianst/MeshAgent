@@ -4,6 +4,7 @@
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
 # User-specific files
+/.lab/
 *.suo
 *.user
 *.userosscache
@@ -345,3 +346,6 @@ meshservice/MeshService.rc
 # compiled builds: meshagent_<arch>, DEBUG_meshagent_<arch>
 /meshagent_*
 /DEBUG_meshagent_*
+
+# Native dependency build cache
+/.build/

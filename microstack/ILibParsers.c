@@ -2012,6 +2012,8 @@ void *ILibCreateChainEx(int extraMemorySize)
 #if defined(WIN32) || defined(_WIN32_WCE)
 	RetVal->TerminateFlag = 1;
 	RetVal->ChainProcessHandle = GetCurrentProcess();
+	// Register modules now; load symbol data only when a diagnostic requests it.
+	SymSetOptions(SymGetOptions() | SYMOPT_DEFERRED_LOADS);
 	if (!SymInitialize(RetVal->ChainProcessHandle, NULL, TRUE)) { RetVal->ChainProcessHandle = NULL; }
 #endif
 
@@ -2946,6 +2948,7 @@ void ILibChain_DebugOffset(char *buffer, int bufferLen, uint64_t addrOffset)
 	psym->SizeOfStruct = sizeof(SYMBOL_INFO);
 	psym->MaxNameLen = MAX_SYM_NAME;
 	pimg->SizeOfStruct = sizeof(IMAGEHLP_LINE64);
+	SymSetOptions(SymGetOptions() | SYMOPT_DEFERRED_LOADS);
 	SymInitialize(GetCurrentProcess(), NULL, TRUE);
 
 #ifdef WIN64

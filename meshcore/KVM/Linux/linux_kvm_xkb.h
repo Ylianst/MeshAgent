@@ -38,6 +38,14 @@ int kvm_xkb_lookup_unicode(uint32_t codepoint, int capslockOn, kvm_xkb_match *ma
 // keymap event internally; exposed so tests can exercise the resolver without a Wayland session.
 int kvm_xkb_build_from_keymap_string(const char *keymapText);
 
+// Authenticated COSMIC/Sway/labwc advertised virtual keyboard; 0 unavailable, 1 delivered, -1 discard/no replay.
+int kvm_xkb_type_unicode_virtual(uint32_t codepoint, unsigned int leds);
+
+// Capture-child setup only: authenticate a capability-bearing Sway peer while
+// root can inspect its executable. No protocol replies are read before dropping
+// privileges; the exact authenticated connection is adopted afterward.
+void kvm_xkb_prepare_virtual_peer(int sessionUid);
+
 void kvm_xkb_shutdown(void);
 
 #endif

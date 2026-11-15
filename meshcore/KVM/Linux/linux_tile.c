@@ -15,8 +15,13 @@ limitations under the License.
 */
 
 #include "linux_tile.h"
+#include "linux_kvm_capture.h"
 #include "meshcore/meshdefines.h"
 #include "microstack/ILibParsers.h"
+
+#ifndef LINUX_TILE_MALLOC
+#define LINUX_TILE_MALLOC malloc
+#endif
 
 #if defined(JPEGMAXBUF)
 	#define MAX_TILE_SIZE JPEGMAXBUF
@@ -60,24 +65,32 @@ int get_tile_buffer(int x, int y, void **buffer, long long bufferSize, void *des
 }
 
 //This function returns 0 and *buffer != NULL if everything was good. retval = jpegsize if the captured image was too large.
-int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void* desktop, long long desktopsize, void ** buffer, long long *bufferSize)
+static int calc_opt_compr_send_pixels(int x, int y, int captureWidth, int captureHeight, void* desktop,
+    long long desktopsize, void **buffer, long long *bufferSize, const linux_tile_rgb32_frame *rgb32)
 {
 
 	*buffer = NULL;
 	*bufferSize = 0;
 
-	// Make sure a tile buffer is available. Most of the time, this is skipped.
-	if (tilebuffersize != captureWidth * captureHeight * 3)
-	{
-		if (tilebuffer != NULL) free(tilebuffer);
-		tilebuffersize = captureWidth * captureHeight * 3;
-		if ((tilebuffer = malloc(tilebuffersize)) == NULL) return 0;
-	}
-
-	//Get the final coalesced tile
-	get_tile_buffer(x, y, &tilebuffer, tilebuffersize, desktop, desktopsize, captureWidth, captureHeight);
-
-	write_JPEG_buffer(tilebuffer, captureWidth, captureHeight, COMPRESSION_QUALITY);
+	if (!desktop || desktopsize < 0 || SCREEN_WIDTH <= 0 || SCREEN_HEIGHT <= 0 ||
+		TILE_WIDTH <= 0 || SCREEN_WIDTH > INT32_MAX - TILE_WIDTH ||
+		SCREEN_HEIGHT > INT32_MAX - TILE_WIDTH || x < 0 || y < 0 ||
+		captureWidth <= 0 || captureHeight <= 0 ||
+		(uint64_t)x + captureWidth > (uint64_t)adjust_screen_size(SCREEN_WIDTH) ||
+		(uint64_t)y + captureHeight > (uint64_t)adjust_screen_size(SCREEN_HEIGHT))
+	{ jpeg_discard_output(); return -1; }
+	unsigned pixelSize = rgb32 ? 4u : 3u;
+	uint64_t rowStride = rgb32 ? rgb32->stride : (uint64_t)adjust_screen_size(SCREEN_WIDTH) * 3u;
+	if (rowStride > SIZE_MAX)
+	{ jpeg_discard_output(); return -1; }
+	size_t stride = (size_t)rowStride;
+	uint64_t offset = (uint64_t)y * stride + (uint64_t)x * pixelSize;
+	uint64_t end = offset + (uint64_t)(captureHeight - 1) * stride + (uint64_t)captureWidth * pixelSize;
+	if (end > (uint64_t)desktopsize || end > SIZE_MAX)
+	{ jpeg_discard_output(); return -1; }
+	if (write_JPEG_buffer_pixels((JSAMPLE *)desktop + (size_t)offset,
+		captureWidth, captureHeight, stride, COMPRESSION_QUALITY,
+        rgb32 ? rgb32->format : JPEG_RGB24) != 0) { return -1; }
 
 #if MAX_TILE_SIZE > 0
 	if (jpeg_buffer_length > MAX_TILE_SIZE)
@@ -89,6 +102,13 @@ int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void*
 	{
 		return 0;
 	}
+}
+
+int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void *desktop,
+    long long desktopsize, void **buffer, long long *bufferSize)
+{
+    return calc_opt_compr_send_pixels(x, y, captureWidth, captureHeight, desktop,
+        desktopsize, buffer, bufferSize, NULL);
 }
 
 #if 0
@@ -140,9 +160,17 @@ void dump32bit (const XImage * input)
 #endif
 
 // Really fast CRC-like method. Used for the KVM.
+static uint32_t tile_tail(const unsigned char *row, size_t bytes)
+{
+	uint32_t tail = 0;
+	size_t count = bytes < 3u ? bytes : 3u;
+	memcpy(&tail, row + bytes - count, count);
+	return tail;
+}
+
 int util_crc(int x, int y, long long bufferSize, void *desktop, long long desktopsize, int tilewidth, int tileheight)
 {
-    int hval = 0;
+    uint32_t hval = 0;
     char *bp = NULL;
     char *be = NULL;
     int height = 0;
@@ -160,13 +188,138 @@ int util_crc(int x, int y, long long bufferSize, void *desktop, long long deskto
 			bp += 4;
 		}
 
-    	if (be - bp >= 0) {
-    		hval += (hval << 1) + (hval << 4) + (hval << 7) + (hval << 8) + (hval << 24);
-    		hval ^= (int)ILibUnaligned_Read32(be - 3);
-    	}
+        // The legacy four-byte read at be-3 included a neighbouring byte and
+        // read past the final desktop allocation. Hash only this row's bytes.
+        hval = (hval * 0x01000193u) ^ tile_tail((const unsigned char *)desktop +
+            3u * ((size_t)height * adjust_screen_size(SCREEN_WIDTH) + x), (size_t)tilewidth * 3u);
     }
 
-    return hval;
+    return (int)hval;
+}
+
+static void set_tile_checksum(int row, int col, uint32_t checksum)
+{
+	struct tileInfo_t *tile = &g_tileInfo[row][col];
+	// 0xff is reset_tile_info's refresh sentinel, never an unchanged proof.
+	tile->flag = tile->crc == 0xff || (uint32_t)tile->crc != checksum ? TILE_MARKED_NOT_SENT : TILE_DONT_SEND;
+	tile->crc = (int)checksum;
+}
+
+// Four independent FNV chains hide multiply latency without changing image
+// quality, capture cadence or the checksum width. All word reads are unaligned
+// safe, and the scalar remainder uses the same bounded row-tail operation.
+int update_tile_checksums(void *desktop, long long desktopsize)
+{
+	if (!desktop || !g_tileInfo || SCREEN_WIDTH <= 0 || SCREEN_HEIGHT <= 0 ||
+		SCREEN_WIDTH > 32768 || SCREEN_HEIGHT > 32768 || TILE_WIDTH <= 0 || TILE_WIDTH > 32768 ||
+		TILE_HEIGHT != TILE_WIDTH) { return -1; }
+	size_t stride = (size_t)adjust_screen_size(SCREEN_WIDTH) * 3u;
+	size_t height = (size_t)adjust_screen_size(SCREEN_HEIGHT);
+	uint64_t required = (uint64_t)stride * height;
+	if (desktopsize < 0 || required > SIZE_MAX || required > (uint64_t)desktopsize ||
+		TILE_WIDTH_COUNT != adjust_screen_size(SCREEN_WIDTH) / TILE_WIDTH ||
+		TILE_HEIGHT_COUNT != (int)height / TILE_HEIGHT) { return -1; }
+	size_t bytes = (size_t)TILE_WIDTH * 3u;
+	for (int row = 0; row < TILE_HEIGHT_COUNT; ++row)
+	{
+		int col = 0;
+		for (; col + 3 < TILE_WIDTH_COUNT; col += 4)
+		{
+			uint32_t a = 0, b = 0, c = 0, d = 0;
+			for (int y = 0; y < TILE_HEIGHT; ++y)
+			{
+				const unsigned char *p = (const unsigned char *)desktop +
+					((size_t)row * TILE_HEIGHT + y) * stride + (size_t)col * bytes;
+				for (size_t x = 0; x + 4u <= bytes; x += 4u)
+				{
+					a = (a * 0x01000193u) ^ ILibUnaligned_Read32(p + x);
+					b = (b * 0x01000193u) ^ ILibUnaligned_Read32(p + bytes + x);
+					c = (c * 0x01000193u) ^ ILibUnaligned_Read32(p + 2u * bytes + x);
+					d = (d * 0x01000193u) ^ ILibUnaligned_Read32(p + 3u * bytes + x);
+				}
+				a = (a * 0x01000193u) ^ tile_tail(p, bytes);
+				b = (b * 0x01000193u) ^ tile_tail(p + bytes, bytes);
+				c = (c * 0x01000193u) ^ tile_tail(p + 2u * bytes, bytes);
+				d = (d * 0x01000193u) ^ tile_tail(p + 3u * bytes, bytes);
+			}
+			set_tile_checksum(row, col, a); set_tile_checksum(row, col + 1, b);
+			set_tile_checksum(row, col + 2, c); set_tile_checksum(row, col + 3, d);
+		}
+		for (; col < TILE_WIDTH_COUNT; ++col)
+		{
+			set_tile_checksum(row, col, (uint32_t)util_crc(col * TILE_WIDTH, row * TILE_HEIGHT,
+				0, desktop, desktopsize, TILE_WIDTH, TILE_HEIGHT));
+		}
+	}
+	return 0;
+}
+
+static int rgb32_frame_valid(const linux_tile_rgb32_frame *f)
+{
+    if (!f || !f->pixels || !jpeg_rgb32_supported(f->format) ||
+        SCREEN_WIDTH <= 0 || SCREEN_HEIGHT <= 0 || (unsigned)SCREEN_WIDTH > KVM_CAPTURE_MAX_DIMENSION ||
+        (unsigned)SCREEN_HEIGHT > KVM_CAPTURE_MAX_DIMENSION || TILE_WIDTH != 32 || TILE_HEIGHT != 32 ||
+        SCREEN_WIDTH % 32 || f->stride < (size_t)SCREEN_WIDTH * 4u ||
+        TILE_WIDTH_COUNT != SCREEN_WIDTH / 32 || TILE_HEIGHT_COUNT != adjust_screen_size(SCREEN_HEIGHT) / 32)
+        return 0;
+    size_t rows = (size_t)adjust_screen_size(SCREEN_HEIGHT);
+    return f->capacity <= KVM_CAPTURE_MAX_BUFFER_BYTES && f->stride <= SIZE_MAX / rows &&
+        f->stride * rows <= f->capacity;
+}
+
+static void rgb32_channels(jpeg_pixel_format format, unsigned *r, unsigned *g, unsigned *b)
+{
+    switch (format) {
+    case JPEG_BGRX32: *r=2; *g=1; *b=0; break;
+    case JPEG_RGBX32: *r=0; *g=1; *b=2; break;
+    case JPEG_XBGR32: *r=3; *g=2; *b=1; break;
+    default: *r=1; *g=2; *b=3; break; /* validated JPEG_XRGB32 */
+    }
+}
+
+/* Keep the exact RGB24 hash and coalescing decisions. A small stack row replaces
+ * the full RGB image; the X/alpha channel and source pitch padding are excluded. */
+static uint32_t rgb32_crc(const linux_tile_rgb32_frame *f, int x, int y)
+{
+    unsigned r,g,b; rgb32_channels(f->format,&r,&g,&b);
+    unsigned char rgb[32*3]; uint32_t hash=0;
+    for (int row=0; row<32; ++row) {
+        kvm_capture_rgb32_row(rgb,f->pixels+(size_t)(y+row)*f->stride+(size_t)x*4,32,r,g,b);
+        for (size_t i=0; i<sizeof(rgb); i+=4) hash=(hash*0x01000193u)^ILibUnaligned_Read32(rgb+i);
+        hash=(hash*0x01000193u)^tile_tail(rgb,sizeof(rgb));
+    }
+    return hash;
+}
+
+int update_tile_checksums_rgb32(const linux_tile_rgb32_frame *f)
+{
+    if (!g_tileInfo || !rgb32_frame_valid(f)) return -1;
+    unsigned red,green,blue; rgb32_channels(f->format,&red,&green,&blue);
+    unsigned char rgb[4*32*3];
+    for (int row=0; row<TILE_HEIGHT_COUNT; ++row) {
+        int col=0;
+        for (; col+3<TILE_WIDTH_COUNT; col+=4) {
+            uint32_t a=0,b=0,c=0,d=0;
+            for (int y=0; y<32; ++y) {
+                const unsigned char *source=f->pixels+((size_t)row*32+y)*f->stride+(size_t)col*32*4;
+                kvm_capture_rgb32_row(rgb,source,128,red,green,blue);
+                for (size_t i=0; i<96; i+=4) {
+                    a=(a*0x01000193u)^ILibUnaligned_Read32(rgb+i);
+                    b=(b*0x01000193u)^ILibUnaligned_Read32(rgb+96+i);
+                    c=(c*0x01000193u)^ILibUnaligned_Read32(rgb+192+i);
+                    d=(d*0x01000193u)^ILibUnaligned_Read32(rgb+288+i);
+                }
+                a=(a*0x01000193u)^tile_tail(rgb,96);
+                b=(b*0x01000193u)^tile_tail(rgb+96,96);
+                c=(c*0x01000193u)^tile_tail(rgb+192,96);
+                d=(d*0x01000193u)^tile_tail(rgb+288,96);
+            }
+            set_tile_checksum(row,col,a); set_tile_checksum(row,col+1,b);
+            set_tile_checksum(row,col+2,c); set_tile_checksum(row,col+3,d);
+        }
+        for (; col<TILE_WIDTH_COUNT; ++col) set_tile_checksum(row,col,rgb32_crc(f,col*32,row*32));
+    }
+    return 0;
 }
 
 /******************************************************************************
@@ -207,8 +360,17 @@ int reset_tile_info(int old_height_count) {
 	return 0;
 }
 
+static int tile_encode_failed(void)
+{
+    jpeg_discard_output();
+    for (int r = 0; r < TILE_HEIGHT_COUNT; ++r)
+        for (int c = 0; c < TILE_WIDTH_COUNT; ++c) g_tileInfo[r][c].crc = 0xff;
+    return -1;
+}
+
 //Fetches the encoded jpeg tile at the given location. The neighboring tiles are coalesced to form a larger jpeg before returning.
-int getTileAt(int x, int y, void** buffer, long long *bufferSize, void *desktop, long long desktopsize, int row, int col)
+static int getTileAt_pixels(int x, int y, void** buffer, long long *bufferSize, void *desktop,
+    long long desktopsize, int row, int col, const linux_tile_rgb32_frame *rgb32)
 {
 	int CRC, rcol, i, r, c;
 	int rightcol = col; //Used in coalescing. Indicates the rightmost column to be coalesced.
@@ -222,7 +384,7 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, void *desktop,
 	*bufferSize = 0;
 
 	if (g_tileInfo[row][col].flag == TILE_TODO) { //First check whether the tile-crc needs to be calculated or not.
-		if ((CRC = util_crc(x, y, TILE_HEIGHT * TILE_WIDTH * 3, desktop, desktopsize, TILE_WIDTH, TILE_HEIGHT)) == g_tileInfo[row][col].crc) return 0;
+		if ((CRC = rgb32 ? (int)rgb32_crc(rgb32,x,y) : util_crc(x, y, TILE_HEIGHT * TILE_WIDTH * 3, desktop, desktopsize, TILE_WIDTH, TILE_HEIGHT)) == g_tileInfo[row][col].crc) return 0;
 		g_tileInfo[row][col].crc = CRC; //Update the tile CRC in the global data structure.
 	}
 
@@ -238,7 +400,7 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, void *desktop,
 		CRC = g_tileInfo[row][rightcol].crc;
 
 		if (g_tileInfo[row][rightcol].flag == TILE_TODO) {
-			CRC = util_crc(r_x, y, TILE_HEIGHT * TILE_WIDTH * 3, desktop, desktopsize, TILE_WIDTH, TILE_HEIGHT);
+			CRC = rgb32 ? (int)rgb32_crc(rgb32,r_x,y) : util_crc(r_x, y, TILE_HEIGHT * TILE_WIDTH * 3, desktop, desktopsize, TILE_WIDTH, TILE_HEIGHT);
 		}
 
 		if (CRC != g_tileInfo[row][rightcol].crc || g_tileInfo[row][rightcol].flag == TILE_MARKED_NOT_SENT) { //If the tile has changed, increment the capturewidth.
@@ -284,7 +446,7 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, void *desktop,
 
 			CRC = g_tileInfo[botrow][rcol].crc;
 			if (g_tileInfo[botrow][rcol].flag == TILE_TODO) {
-				CRC = util_crc(r_x, r_y, TILE_HEIGHT * TILE_WIDTH * 3, desktop, desktopsize, TILE_WIDTH, TILE_HEIGHT);
+				CRC = rgb32 ? (int)rgb32_crc(rgb32,r_x,r_y) : util_crc(r_x, r_y, TILE_HEIGHT * TILE_WIDTH * 3, desktop, desktopsize, TILE_WIDTH, TILE_HEIGHT);
 			}
 
 			if (CRC != g_tileInfo[botrow][rcol].crc || g_tileInfo[botrow][rcol].flag == TILE_MARKED_NOT_SENT) {
@@ -335,14 +497,15 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, void *desktop,
 
 	int retval = 0;
 #if MAX_TILE_SIZE == 0
-	retval = calc_opt_compr_send(x, y, captureWidth, captureHeight, desktop, desktopsize, buffer, bufferSize);
+	retval = calc_opt_compr_send_pixels(x, y, captureWidth, captureHeight, desktop, desktopsize, buffer, bufferSize, rgb32);
 #else
 	int firstTime = 1;
 
 	//This loop is used to adjust the COMPRESSION_RATIO. This loop runs only once most of the time.
 	do {
 		//retval here is 0 if everything was good. It is > 0 if it contains the size of the jpeg that was created and not sent.
-		retval = calc_opt_compr_send(x, y, captureWidth, captureHeight, desktop, desktopsize, buffer, bufferSize);
+		retval = calc_opt_compr_send_pixels(x, y, captureWidth, captureHeight, desktop, desktopsize, buffer, bufferSize, rgb32);
+		if (retval < 0) { return tile_encode_failed(); }
 		if (retval != 0) {
 			if (firstTime) {
 				// Re-adjust the compression ratio.
@@ -352,27 +515,29 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, void *desktop,
 			}
 
 			if (botrow > row) { //First time, try reducing the height.
-				botrow = row + ((botrow - row + 1) / 2);
+				botrow = row + ((botrow - row) / 2);
 				captureHeight = (botrow - row + 1) * TILE_HEIGHT;
 			}
 			else if (rightcol > col){ //If it is not possible, reduce the width
-				rightcol = col + ((rightcol - col + 1) / 2);
+				rightcol = col + ((rightcol - col) / 2);
 				captureWidth = (rightcol - col + 1) * TILE_WIDTH;
 			}
-			else { //This never happens in any case.
-				retval = 0;
-				break;
+			else { // A configured limit can be smaller than one tile.
+				return tile_encode_failed();
 			}
 
 		}
 	} while (retval != 0);
 #endif
 
+	if (retval < 0) { return tile_encode_failed(); }
+
 	//Set the flags to TILE_SENT
-	if (jpeg_buffer != NULL) 
+	if (jpeg_buffer != NULL && jpeg_buffer_length > 0)
 	{
 		*bufferSize = jpeg_buffer_length + (jpeg_buffer_length > 65500 ? 16 : 8);
-		*buffer = malloc(*bufferSize);
+		*buffer = LINUX_TILE_MALLOC((size_t)*bufferSize);
+		if (*buffer == NULL) { *bufferSize = 0; return tile_encode_failed(); }
 
 		if (jpeg_buffer_length > 65500)
 		{
@@ -394,9 +559,7 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, void *desktop,
 			memcpy_s((char *)(*buffer) + 8, *bufferSize -8, jpeg_buffer, jpeg_buffer_length);
 		}
 
-		free(jpeg_buffer);
-		jpeg_buffer = NULL;
-		jpeg_buffer_length = 0;
+		jpeg_discard_output();
 
 		for (r = row; r <= botrow; r++) {
 			for (c = col; c <= rightcol; c++) {
@@ -406,6 +569,22 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, void *desktop,
 	}
 
 	return retval;
+}
+
+int getTileAt(int x, int y, void **buffer, long long *bufferSize, void *desktop,
+    long long desktopsize, int row, int col)
+{
+    return getTileAt_pixels(x,y,buffer,bufferSize,desktop,desktopsize,row,col,NULL);
+}
+
+int getTileAt_rgb32(int x, int y, void **buffer, long long *bufferSize,
+    const linux_tile_rgb32_frame *f, int row, int col)
+{
+    if (!buffer || !bufferSize) return -1;
+    *buffer=NULL; *bufferSize=0;
+    if (!g_tileInfo || !rgb32_frame_valid(f) || row<0 || col<0 ||
+        row>=TILE_HEIGHT_COUNT || col>=TILE_WIDTH_COUNT || x!=col*32 || y!=row*32) return -1;
+    return getTileAt_pixels(x,y,buffer,bufferSize,f->pixels,(long long)f->capacity,row,col,f);
 }
 
 

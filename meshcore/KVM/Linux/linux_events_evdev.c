@@ -15,7 +15,12 @@ limitations under the License.
 */
 
 #include "linux_events.h"
+#include "linux_kvm_input_state.h"
 #include "linux_kvm_xkb.h"
+#include "linux_kvm_eis.h"
+#include "linux_kvm_gnome.h"
+#include "linux_kvm_gala.h"
+#include "linux_kvm_cinnamon.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -25,10 +30,15 @@ limitations under the License.
 #include <dlfcn.h>
 #include <unistd.h>
 #include <poll.h>
+#include <time.h>
 
 #if defined(__linux__)
 
 #include <linux/input.h>
+
+#if KEY_MAX > KVM_INPUT_STATE_MAX_CODE
+#error KVM input state table must cover every Linux input key code
+#endif
 
 struct libevdev;
 struct libevdev_uinput;
@@ -65,10 +75,11 @@ typedef struct kvm_evdev_state
 	struct libevdev_uinput *uinput;
 	int uinputFd;	// only >= 0 on the explicit-open fallback; libevdev closes managed fds itself
 	int active;
+	kvm_input_state pressed;	// synthetic state only; never mirrors physical keyboards
 } kvm_evdev_state;
 
 static kvm_evdev_exports g_kvm_evdev_exports = {0};
-static kvm_evdev_state g_kvm_evdev_state = {0};
+static kvm_evdev_state g_kvm_evdev_state = { .uinputFd = -1 };
 static int g_kvm_evdev_capslock = 0;
 static int g_kvm_evdev_numlock = 0;
 static int g_kvm_evdev_scrolllock = 0;
@@ -388,7 +399,7 @@ static unsigned int kvm_events_evdev_vk_to_keycode(unsigned char vk)
 	}
 }
 
-static int kvm_events_evdev_ascii_to_keycode(uint16_t unicode, unsigned int *keycode, int *needsShift)
+static int kvm_events_evdev_ascii_to_keycode(uint32_t unicode, unsigned int *keycode, int *needsShift)
 {
 	*needsShift = 0;
 	*keycode = KEY_RESERVED;
@@ -559,6 +570,10 @@ static int kvm_events_evdev_write(unsigned int type, unsigned int code, int valu
 	if (r != 0)
 	{
 		kvm_events_evdev_shutdown();
+	}
+	else if (type == EV_KEY && code <= KEY_MAX)
+	{
+		kvm_input_state_set(&g_kvm_evdev_state.pressed, code, value != 0);
 	}
 	return r;
 }
@@ -823,15 +838,42 @@ error:
 	return 0;
 }
 
+static int kvm_events_evdev_release_one(void *context, unsigned int code)
+{
+	struct libevdev_uinput *uinput = (struct libevdev_uinput *)context;
+	return g_kvm_evdev_exports.libevdev_uinput_write_event(uinput, EV_KEY, code, 0);
+}
+
+void kvm_events_evdev_release_all()
+{
+	kvm_eis_release_keys();
+	kvm_cinnamon_shutdown();
+	int released;
+	// Release every key/button MeshAgent successfully pressed before destroying the device. This
+	// prevents a disconnect or session generation change from leaving a modifier/button logically
+	// held. Sending key-up for a lock key does not toggle the compositor's real lock state.
+	released = kvm_input_state_release_all(&g_kvm_evdev_state.pressed,
+		g_kvm_evdev_state.uinput != NULL ? kvm_events_evdev_release_one : NULL,
+		g_kvm_evdev_state.uinput);
+	if (released > 0 && g_kvm_evdev_state.uinput != NULL)
+	{
+		ignore_result(g_kvm_evdev_exports.libevdev_uinput_write_event(
+			g_kvm_evdev_state.uinput, EV_SYN, SYN_REPORT, 0));
+	}
+}
+
 void kvm_events_evdev_shutdown()
 {
+	kvm_events_evdev_release_all();
+	kvm_eis_shutdown();
+	kvm_gala_shutdown();
 	kvm_xkb_shutdown();
 	if (g_kvm_evdev_state.uinput != NULL)
 	{
 		g_kvm_evdev_exports.libevdev_uinput_destroy(g_kvm_evdev_state.uinput);
 		g_kvm_evdev_state.uinput = NULL;
 	}
-	if (g_kvm_evdev_state.uinputFd > 0)
+	if (g_kvm_evdev_state.uinputFd >= 0)
 	{
 		close(g_kvm_evdev_state.uinputFd);
 		g_kvm_evdev_state.uinputFd = -1;
@@ -842,6 +884,9 @@ void kvm_events_evdev_shutdown()
 		g_kvm_evdev_state.dev = NULL;
 	}
 	g_kvm_evdev_state.active = 0;
+	g_kvm_evdev_capslock = 0;
+	g_kvm_evdev_numlock = 0;
+	g_kvm_evdev_scrolllock = 0;
 }
 
 int kvm_events_evdev_is_active()
@@ -866,6 +911,7 @@ void kvm_events_evdev_mouse_action(double absX, double absY, int button, short w
 	{
 		return;
 	}
+	kvm_input_state_cancel_unicode(&g_kvm_evdev_state.pressed);
 
 	if (g_kvmBackendDRM != 0 && VSCREEN_WIDTH > 0 && VSCREEN_HEIGHT > 0)
 	{
@@ -943,6 +989,8 @@ void kvm_events_evdev_wake()
 	ignore_result(kvm_events_evdev_sync());
 }
 
+static long kvm_events_evdev_key_delay_us();
+
 void kvm_events_evdev_key_action(unsigned char vk, int up)
 {
 	unsigned int keycode = kvm_events_evdev_vk_to_keycode(vk);
@@ -952,6 +1000,7 @@ void kvm_events_evdev_key_action(unsigned char vk, int up)
 	{
 		return;
 	}
+	kvm_input_state_cancel_unicode(&g_kvm_evdev_state.pressed);
 	if (up == 4)
 	{
 		value = 1;
@@ -961,11 +1010,34 @@ void kvm_events_evdev_key_action(unsigned char vk, int up)
 		return;
 	}
 
+	// Do not split a held uinput chord across virtual keyboards. Once neutral,
+	// use the same EIS connection as native text where the compositor offers it.
+	int uinputKeysHeld = 0;
+	for (unsigned int i = 1; i <= KVM_INPUT_STATE_MAX_CODE; ++i)
+	{
+		if (g_kvm_evdev_state.pressed.down[i]) { uinputKeysHeld = 1; break; }
+	}
+	if (!uinputKeysHeld && kvm_gnome_key_action(keycode, value) != 0) { return; }
+	if (!uinputKeysHeld && kvm_cinnamon_key_action(keycode, value) != 0) { return; }
+	if (!uinputKeysHeld && kvm_eis_key_action(keycode, value) != 0) { return; }
 	if (kvm_events_evdev_write(EV_KEY, keycode, value) != 0)
 	{
 		return;
 	}
 	ignore_result(kvm_events_evdev_sync());
+	// Give the compositor time to publish a raw modifier before the next key.
+	// Plasma's lock screen can otherwise receive Ctrl+A as plain A even though
+	// the kernel events are correctly ordered. Releases stay immediate.
+	// Fast complete presses can be lost by newer GNOME/IBus. Keep the
+	// existing pacing for its uinput fallback; older compositor-key and
+	// other desktop routes retain their current behavior.
+	if (value == 1 && (kvm_gnome_uses_uinput_keys() || keycode == KEY_LEFTSHIFT || keycode == KEY_RIGHTSHIFT ||
+		keycode == KEY_LEFTCTRL || keycode == KEY_RIGHTCTRL || keycode == KEY_LEFTALT ||
+		keycode == KEY_RIGHTALT || keycode == KEY_LEFTMETA || keycode == KEY_RIGHTMETA))
+	{
+		long delayUs = kvm_events_evdev_key_delay_us();
+		if (delayUs > 0) { usleep(delayUs); }
+	}
 }
 
 // GNOME/IBus drops Shift when synthesized keys fire back-to-back; holding each key ~20ms (Shift still down) fixes it, same as ydotool.
@@ -993,7 +1065,10 @@ void kvm_events_evdev_key_action_unicode(uint16_t unicode, int up)
 	unsigned int keycode = KEY_RESERVED;
 	int needsShift = 0;
 	int needsAltGr = 0;
-	int isAlpha = (unicode >= 'a' && unicode <= 'z') || (unicode >= 'A' && unicode <= 'Z');
+	uint32_t codepoint;
+	struct timespec now;
+	uint64_t nowMs;
+	int isAlpha;
 	kvm_xkb_match xkbMatch;
 	long delayUs = 0;
 
@@ -1006,19 +1081,37 @@ void kvm_events_evdev_key_action_unicode(uint16_t unicode, int up)
 		return;
 	}
 
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+    {
+        kvm_input_state_cancel_unicode(&g_kvm_evdev_state.pressed);
+        if (unicode >= 0xd800 && unicode <= 0xdfff) { return; }
+        nowMs = 0;
+    }
+    else { nowMs = (uint64_t)now.tv_sec * 1000u + (uint64_t)now.tv_nsec / 1000000u; }
+    if (!kvm_input_state_unicode(&g_kvm_evdev_state.pressed, unicode, up, nowMs, &codepoint)) { return; }
+    isAlpha = (codepoint >= 'a' && codepoint <= 'z') || (codepoint >= 'A' && codepoint <= 'Z');
+
+	// Native text avoids layout dependence and synthetic-modifier races.
+	// Adapters return 0 only for a safe fallback; -1 must also stop this chain.
+	// Raw shortcuts prefer the matching compositor route above and otherwise
+	// retain uinput. Retrying uncertain text could duplicate a password/command.
+	if (kvm_gnome_type_unicode(codepoint) != 0) { return; }
+	if (kvm_cinnamon_type_unicode(codepoint) != 0) { return; }
+	if (kvm_eis_type_unicode(codepoint) != 0) { return; }
+
 	kvm_events_evdev_poll_leds();
 
 	// Resolve through the session's real XKB keymap first: it covers non-Latin and AltGr
 	// characters and remapped layouts (dvorak, azerty) that the fixed US-position table below
 	// cannot express, and its CapsLock interaction is exact. The ASCII table stays as the
 	// fallback whenever Wayland/libxkbcommon are unavailable or the codepoint isn't reachable.
-	if (kvm_xkb_lookup_unicode((uint32_t)unicode, g_kvm_evdev_capslock, &xkbMatch))
+	if (kvm_xkb_lookup_unicode(codepoint, g_kvm_evdev_capslock, &xkbMatch))
 	{
 		keycode = xkbMatch.keycode;
 		needsShift = xkbMatch.shift;
 		needsAltGr = xkbMatch.altgr;
 	}
-	else if (kvm_events_evdev_ascii_to_keycode(unicode, &keycode, &needsShift))
+	else if (kvm_events_evdev_ascii_to_keycode(codepoint, &keycode, &needsShift))
 	{
 		// An active CapsLock already swaps letter case, so flip the Shift decision to land on the requested case.
 		if (g_kvm_evdev_capslock && isAlpha)
@@ -1028,6 +1121,12 @@ void kvm_events_evdev_key_action_unicode(uint16_t unicode, int up)
 	}
 	else
 	{
+        /* Keep Gala's existing mapped keys and shortcuts on their original
+         * route. Only characters absent from that layout need the addition. */
+        if (kvm_gala_type_unicode(codepoint) != 0) { return; }
+        // Only authenticated supported compositors can offer this fallback.
+        // Nothing is replayed after an attempted virtual-keyboard delivery.
+        (void)kvm_xkb_type_unicode_virtual(codepoint, (unsigned int)kvm_events_evdev_lock_state());
 		return;
 	}
 
@@ -1042,6 +1141,8 @@ void kvm_events_evdev_key_action_unicode(uint16_t unicode, int up)
 		if (kvm_events_evdev_write(EV_KEY, KEY_LEFTSHIFT, 1) != 0) { return; }
 		ignore_result(kvm_events_evdev_sync());
 	}
+	// Let the compositor observe synthesized modifiers before the following key.
+	if ((needsShift || needsAltGr) && delayUs > 0) { usleep(delayUs); }
 	if (kvm_events_evdev_write(EV_KEY, keycode, 1) != 0) { return; }
 	ignore_result(kvm_events_evdev_sync());
 	if (delayUs > 0) { usleep(delayUs); }
@@ -1065,6 +1166,11 @@ void kvm_events_evdev_key_action_unicode(uint16_t unicode, int up)
 int kvm_events_evdev_init()
 {
 	return 0;
+}
+
+void kvm_events_evdev_release_all()
+{
+	kvm_eis_release_keys();
 }
 
 void kvm_events_evdev_shutdown()

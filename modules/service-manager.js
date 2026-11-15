@@ -3127,8 +3127,11 @@ function serviceManager()
                 case 'systemd':
                     this._update = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
                     this._update.stdout.on('data', function (chunk) { });
-                    this._update.stdin.write('systemctl stop ' + name + '.service\n');
-                    this._update.stdin.write('systemctl disable ' + name + '.service\n');
+                    // getService resolved the actual unit, including names that
+                    // systemd-escape encoded. Do not target a different raw name.
+                    var unitName = service.escname.split('\\').join('\\\\');
+                    this._update.stdin.write('systemctl stop ' + unitName + '.service\n');
+                    this._update.stdin.write('systemctl disable ' + unitName + '.service\n');
                     this._update.stdin.write('exit\n');
                     this._update.waitExit();
                     try
@@ -3142,11 +3145,17 @@ function serviceManager()
                         var escname = this.escape(name);
                         if (require('fs').existsSync('/lib/systemd/system/' + escname + '.service')) { require('fs').unlinkSync('/lib/systemd/system/' + escname + '.service'); }
                         if (require('fs').existsSync('/usr/lib/systemd/system/' + escname + '.service')) { require('fs').unlinkSync('/usr/lib/systemd/system/' + escname + '.service'); }
+                        this._reload = require('child_process').execFile('/bin/sh', ['sh']);
+                        this._reload.stdout.on('data', function () { });
+                        this._reload.stderr.on('data', function () { });
+                        this._reload.stdin.write('systemctl daemon-reload\nexit\n');
+                        this._reload.waitExit();
                         console.log(name + ' uninstalled');
                     }
                     catch (e)
                     {
-                        console.log(name + ' could not be uninstalled', e)
+                        // Installer ownership must survive an actual removal failure.
+                        throw e;
                     }
                     break;
                 default: // unknown platform service type

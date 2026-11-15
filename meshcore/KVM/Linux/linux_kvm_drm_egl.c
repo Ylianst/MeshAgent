@@ -16,6 +16,7 @@ limitations under the License.
 
 #include "linux_kvm_drm_egl.h"
 #include "linux_kvm_drm.h"
+#include "linux_kvm_capture.h"
 #include "meshcore/meshdefines.h"
 #include "microstack/ILibParsers.h"
 
@@ -610,6 +611,14 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 		kvm_drm_egl_copy_error_message(out_error, out_error_size, "Frame dimensions are too large");
 		return false;
 	}
+	size_t rgb_size = 0;
+	size_t rgba_size = 0;
+	if (!kvm_capture_checked_rgb_size(width, height, &rgb_size) ||
+		!kvm_capture_checked_pixel_size(width, height, 4, &rgba_size))
+	{
+		kvm_drm_egl_copy_error_message(out_error, out_error_size, "GPU readback allocation exceeds capture limits");
+		return false;
+	}
 
 	if (!kvm_drm_egl_init_gpu_readback(ctx, drm_fd, out_error, out_error_size)) { return false; }
 	// Each GPU has its own context; bind this one before any GL/EGL for this frame so a
@@ -645,6 +654,17 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 		// Export each plane's GEM handle to its own dma-buf fd. Render-compressed scanout (CCS)
 		// splits the image into a data plane + a metadata plane; every plane carries the same
 		// framebuffer modifier so EGL/Mesa can decompress it while sampling.
+		if (plane_handles[p] == 0 || plane_pitches[p] == 0 ||
+			plane_pitches[p] > (uint32_t)INT_MAX || plane_offsets[p] > (uint32_t)INT_MAX)
+		{
+			char msg[KVM_DRM_EGL_MAX_ERROR];
+			int q;
+			snprintf(msg, sizeof(msg), "Invalid DMA-BUF plane metadata (plane=%d handle=%u pitch=%u offset=%u)",
+				p, plane_handles[p], plane_pitches[p], plane_offsets[p]);
+			for (q = 0; q < p; ++q) { if (dmabuf_fd[q] >= 0) { close(dmabuf_fd[q]); } }
+			kvm_drm_egl_copy_error_message(out_error, out_error_size, msg);
+			return false;
+		}
 		if (kvm_drm_prime_handle_to_fd(drm_fd, plane_handles[p], KVM_DRM_EGL_CLOEXEC | DRM_RDWR, &dmabuf_fd[p]) != 0 || dmabuf_fd[p] < 0)
 		{
 			char msg[KVM_DRM_EGL_MAX_ERROR];
@@ -730,7 +750,6 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 		return false;
 	}
 
-	const size_t rgba_size = (size_t)width * (size_t)height * 4u;
 	if (ctx->rgba_readback_cap < rgba_size)
 	{
 		uint8_t *tmp = (uint8_t*)realloc(ctx->rgba_readback, rgba_size);
@@ -756,7 +775,6 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 	ctx->eglDestroyImageKHRFn(ctx->dpy, image);
 	glDeleteTextures(1, &src_tex);
 
-	const size_t rgb_size = (size_t)width * (size_t)height * 3u;
 	if (rgb == NULL)
 	{
 		kvm_drm_egl_copy_error_message(out_error, out_error_size, "Output RGB pointer is null");

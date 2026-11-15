@@ -614,7 +614,25 @@ function monitorinfo()
         this.getXInfo = function getXInfo(consoleuid)
         {
             var ret = null;
+            var consoleDisplay = null;
+            if (process.platform == 'linux')
+            {
+                var active = require('user-sessions').activeConsoleSession();
+                if (active && active.type == 'x11' && (consoleuid == 0 || consoleuid == active.uid) && /^:[0-9]+(\.[0-9]+)?$/.test(active.display))
+                {
+                    consoleDisplay = active.display.split('.')[0];
+                }
+            }
             var uname = require('user-sessions').getUsername(consoleuid);
+            // The capture process remains root, but SDDM's -displayfd X server
+            // keeps its cookie in the active greeter account, not root's home.
+            if (process.platform == 'linux' && active && active.type == 'x11' &&
+                active.sessionClass == 'greeter' && consoleuid == 0 && consoleDisplay &&
+                require('user-sessions').getUsername(active.uid) == 'sddm')
+            {
+                consoleuid = active.uid;
+                uname = 'sddm';
+            }
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
             child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
@@ -625,11 +643,19 @@ function monitorinfo()
             child.stdin.write('        {');
             child.stdin.write('           display=$4;');
             child.stdin.write('        }');
+            // LightDM puts -core before :N on Mint. Restrict alternate argv
+            // parsing to the validated active LightDM greeter; keep other routes.
+            if (process.platform == 'linux' && active && active.sessionClass == 'greeter' &&
+                active.type == 'x11' && consoleuid == 0 && consoleDisplay &&
+                require('user-sessions').getUsername(active.uid) == 'lightdm')
+            {
+                child.stdin.write('        if(display=="") { for(arg=4;arg<=NF;++arg) { if($arg~/^:[0-9]+(\\.[0-9]+)?$/) { display=$arg; break; } } }');
+            }
             child.stdin.write('        match($0, /-auth .+/);');
             child.stdin.write('       split(substr($0,RSTART+6,RLENGTH-6), _authtok, " ");');
             child.stdin.write('        _auth = _authtok[1];');
             //child.stdin.write('        _auth = substr($0,RSTART+6,RLENGTH-6);');
-            child.stdin.write('        if($1=="' + consoleuid + '" && _auth!="")');
+            child.stdin.write('        if($1=="' + consoleuid + '" && _auth!=""' + (consoleDisplay ? ' && display=="' + consoleDisplay + '"' : '') + ')');
             child.stdin.write("        {");
             child.stdin.write("           printf \"%s,%s,%s,%s\",$1,$2,_auth,display;");
             child.stdin.write("        }");
@@ -709,7 +735,7 @@ function monitorinfo()
                     child.stdin.write("}'\nexit\n");
                     child.waitExit();
 
-                    ret = { tty: '?', xauthority: (require('user-sessions').getHomeFolder(consoleuid) + '/.Xauthority').split('//').join('/'), display: child.stdout.str.trim(), exportEnv: exportEnv };
+                    ret = { tty: '?', xauthority: (require('user-sessions').getHomeFolder(consoleuid) + '/.Xauthority').split('//').join('/'), display: child.stdout.str.trim() || consoleDisplay || '', exportEnv: exportEnv };
                     if (!require('fs').existsSync(ret.xauthority))
                     {
                         console.info1(ret.xauthority + ' => DOES NOT EXIST');

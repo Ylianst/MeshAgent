@@ -1,0 +1,8 @@
+{
+    "uuid": "meshagent-console@meshcentral.com",
+    "name": "MeshAgent Console Prototype",
+    "description": "Agent-owned attached-console bridge for unattended lab qualification",
+  "shell-version": ["46", "48", "49", "50", "51"],
+    "session-modes": ["user", "unlock-dialog", "gdm"],
+    "version": 7
+}

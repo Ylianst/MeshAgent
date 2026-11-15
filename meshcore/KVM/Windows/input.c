@@ -407,9 +407,44 @@ void MouseAction(double absX, double absY, int button, short wheel)
 	SendInput(1, &mouse, sizeof(INPUT));
 }
 
+// Track only successfully injected remote Windows keys. Local Win key state
+// alone must not turn a remote plain L into a workstation-lock request.
+static unsigned int remoteWindowsKeys;
+static int suppressLockKeyUp;
 void KeyAction(unsigned char keycode, int up)
 {
-	INPUT key;
+    INPUT key;
+    const int keyUp = up == 1 || up == 3;
+    const unsigned int winBit = keycode == VK_LWIN ? 1u : keycode == VK_RWIN ? 2u : 0u;
+    if (keycode == 'L' && suppressLockKeyUp)
+    {
+        if (keyUp) suppressLockKeyUp = 0;
+        return; // Also discard autorepeat while the lock chord is held.
+    }
+    if (keycode == 'L' && !keyUp && remoteWindowsKeys &&
+        !(GetAsyncKeyState(VK_CONTROL) & 0x8000) && !(GetAsyncKeyState(VK_MENU) & 0x8000) &&
+        !(GetAsyncKeyState(VK_SHIFT) & 0x8000))
+    {
+        INPUT release[2] = { 0 };
+        UINT count = 0;
+        for (unsigned int bit = 1; bit <= 2; bit <<= 1)
+        {
+            if (!(remoteWindowsKeys & bit)) continue;
+            release[count].type = INPUT_KEYBOARD;
+            release[count].ki.wVk = bit == 1 ? VK_LWIN : VK_RWIN;
+            release[count].ki.dwFlags = KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP;
+            ++count;
+        }
+        // Synthetic Win+L is not handled by the shell. Release modifiers before
+        // the secure-desktop transition and use the native interactive API.
+        if (SendInput(count, release, sizeof(INPUT)) == count)
+        {
+            remoteWindowsKeys = 0;
+            suppressLockKeyUp = 1;
+            LockWorkStation();
+        }
+        return;
+    }
 	HWND windowHandle = GetForegroundWindow();
 	if (windowHandle == NULL) return;
 	SetForegroundWindow(windowHandle);
@@ -422,7 +457,11 @@ void KeyAction(unsigned char keycode, int up)
 	key.ki.time = 0;
 	key.ki.wScan = (WORD)MapVirtualKey((UINT)keycode, MAPVK_VK_TO_VSC);				// This is required to make RDP client work.
 	key.ki.dwExtraInfo = GetMessageExtraInfo();
-	SendInput(1, &key, sizeof(INPUT));
+    if (SendInput(1, &key, sizeof(INPUT)) == 1 && winBit)
+    {
+        if (keyUp) remoteWindowsKeys &= ~winBit;
+        else remoteWindowsKeys |= winBit;
+    }
 	//printf("KEY keycode: %d, up: %d, scan: %d\r\n", keycode, up, key.ki.wScan);
 }
 

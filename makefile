@@ -9,7 +9,7 @@
 #
 # To build MeshAgent2 on Linux you first got to download the dev libraries to compile the agent, we need x11, xtst, ext, xrandr, egl, glesv2, drm, wayland-client and jpeg. To install, do this:
 #	Using APT:
-#		sudo apt-get install libx11-dev libxtst-dev libxext-dev libjpeg62-dev libxrandr-dev libegl1-mesa-dev libgles2-mesa-dev libdrm-dev libwayland-dev pkg-config
+#		sudo apt-get install libx11-dev libxtst-dev libxext-dev libjpeg62-dev libxrandr-dev libegl1-mesa-dev libgles2-mesa-dev libdrm-dev libwayland-dev libpipewire-0.3-dev libspa-0.2-dev pkg-config
 #
 #	Using YUM:
 #		sudo yum install libX11-devel libXtst-devel libXext-devel libjpeg-devel libXrandr-devel mesa-libEGL-devel mesa-libGLES-devel libdrm-devel wayland-devel pkgconf
@@ -67,13 +67,11 @@
 #		so that you can execute the installer from there.
 #
 #
-# Special Note about KVM Support on Linux: 
-#    If you get an error stating that an Xauthority cannot be found, and asking if your DM is configured to use X, 
-#    or if you get a black screen when connecting to the login screen, you may need to: 
-#    1. Open /etc/gdm/custom.conf or /etc/gdm3/custom.conf
-#    2. Uncomment: WaylandEnable=false.
-#    3. Add the following line to the [daemon] section:
-#       DefaultSession=gnome-xorg.desktop
+# Special Note about KVM Support on Linux:
+#    Wayland physical-console capture uses DRM/EGL for video and uinput/libevdev for input. Keep the
+#    display manager and desktop in their installed Wayland configuration. See
+#    docs/Wayland-Unattended-Console.md for runtime dependencies, service permissions, diagnostics,
+#    capability limits, and the physical-console qualification procedure.
 #
 #
 # Special note about running on FreeBSD systems:
@@ -572,7 +570,8 @@ endif
 
 ifeq ($(KVM),1)
 # Mesh Agent KVM, this is only included in builds that have KVM support
-LINUXKVMSOURCES = meshcore/KVM/Linux/linux_kvm.c meshcore/KVM/Linux/linux_kvm_wayland.c meshcore/KVM/Linux/linux_kvm_drm.c meshcore/KVM/Linux/linux_kvm_drm_egl.c meshcore/KVM/Linux/linux_kvm_rotated.c meshcore/KVM/Linux/linux_kvm_xkb.c meshcore/KVM/Linux/linux_events.c meshcore/KVM/Linux/linux_events_evdev.c meshcore/KVM/Linux/linux_tile.c meshcore/KVM/Linux/linux_compression.c
+LINUXKVMSOURCES = meshcore/KVM/Linux/linux_kvm.c meshcore/KVM/Linux/linux_kvm_capture_helper.c meshcore/KVM/Linux/linux_kvm_wayland.c meshcore/KVM/Linux/linux_kvm_recovery.c meshcore/KVM/Linux/linux_kvm_capture.c meshcore/KVM/Linux/linux_kvm_dmabuf_sync.c meshcore/KVM/Linux/linux_kvm_input_state.c meshcore/KVM/Linux/linux_kvm_drm.c meshcore/KVM/Linux/linux_kvm_drm_egl.c meshcore/KVM/Linux/linux_kvm_rotated.c meshcore/KVM/Linux/linux_kvm_xkb.c meshcore/KVM/Linux/linux_kvm_eis.c meshcore/KVM/Linux/linux_kvm_cinnamon.c meshcore/KVM/Linux/linux_kvm_pipewire.c meshcore/KVM/Linux/linux_kvm_gnome.c meshcore/KVM/Linux/linux_kvm_gala.c meshcore/KVM/Linux/linux_gala_assets.c meshcore/KVM/Linux/linux_gala_consent.c meshcore/KVM/Linux/linux_gnome_assets.c microscript/ILibDuktape_GnomeCompanion.c meshcore/KVM/Linux/linux_events.c meshcore/KVM/Linux/linux_events_evdev.c meshcore/KVM/Linux/linux_tile.c meshcore/KVM/Linux/linux_compression.c
+LINUXKVMSOURCES += meshcore/KVM/Linux/linux_gnome_autostart.c
 MACOSKVMSOURCES = meshcore/KVM/MacOS/mac_kvm.c meshcore/KVM/MacOS/mac_events.c meshcore/KVM/MacOS/mac_tile.c meshcore/KVM/Linux/linux_compression.c
 CFLAGS += -D_LINKVM
 DRMLIBS =
@@ -592,6 +591,12 @@ ifneq (,$(filter linux pi,$(MAKECMDGOALS)))
         $(error Linux KVM builds require the wayland-client development package)
     endif
     CFLAGS += $(shell pkg-config --cflags wayland-client)
+    # PipeWire/SPA headers are build dependencies only; libpipewire remains dlopen-only.
+    PIPEWIRECFLAGS ?= $(shell pkg-config --cflags libpipewire-0.3 2>/dev/null)
+    ifeq ($(strip $(PIPEWIRECFLAGS)),)
+        $(error Linux KVM builds require the PipeWire and SPA development headers)
+    endif
+    CFLAGS += $(PIPEWIRECFLAGS)
     # libwayland-client is dlopen'd at runtime (linux_kvm_drm.c), not linked — headers only.
     # If the system headers are jpeg8 (JPEG_LIB_VERSION >= 80) and a v80 lib exists, default to it
     # so the linked lib matches the headers, else libjpeg aborts at runtime ("Wrong JPEG library
@@ -744,9 +749,190 @@ $(shell git log -1 | grep "Date: " | awk '{ aLen=split($$0, a, " "); printf "#de
 $(shell git log -1 --format=%H | awk '{ printf "#define SOURCE_COMMIT_HASH \"%s\"\n", $$0; }' >> microscript/ILibDuktape_Commit.h )
 endif
 
-.PHONY: all clean
+.PHONY: all clean linux-kvm-tests linux-kvm-xkb-tests linux-kvm-eis-tests linux-kvm-pipewire-tests linux-kvm-kwin-tests linux-kvm-gnome-tests
 
 all: $(EXENAME) $(LIBNAME)
+
+# Rebuild the compiled identity when the generated commit header changes.
+meshconsole/main.o meshcore/agentcore.o microscript/ILibDuktape_ScriptContainer.o meshservice/ServiceMain.o: microscript/ILibDuktape_Commit.h
+
+LINUX_KVM_TEST_BIN ?= /tmp/meshagent-linux-kvm-wayland-tests
+
+# Deterministic native coverage for session generations, worker recovery, and allocation limits.
+# This does not substitute for compositor/GPU lifecycle qualification on a physical Linux console.
+linux-kvm-tests:
+	$(CC) -std=gnu99 -Wall -Wextra -Werror -I. \
+		test/linux-kvm-wayland-tests.c \
+		meshcore/KVM/Linux/linux_kvm_wayland.c \
+		meshcore/KVM/Linux/linux_kvm_recovery.c \
+		meshcore/KVM/Linux/linux_kvm_capture.c \
+		meshcore/KVM/Linux/linux_kvm_dmabuf_sync.c \
+		meshcore/KVM/Linux/linux_kvm_input_state.c \
+		-o $(LINUX_KVM_TEST_BIN) -ldl
+	$(LINUX_KVM_TEST_BIN)
+	rm -f $(LINUX_KVM_TEST_BIN)
+
+.PHONY: linux-cosmic-greeter-tests
+linux-cosmic-greeter-tests:
+	$(CC) -std=gnu99 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -I. \
+		test/linux-cosmic-greeter-tests.c -Wl,--gc-sections -o /tmp/meshagent-cosmic-greeter-tests -ldl
+	/tmp/meshagent-cosmic-greeter-tests
+	rm -f /tmp/meshagent-cosmic-greeter-tests
+
+LINUX_KVM_XKB_TEST_BIN ?= /tmp/meshagent-linux-kvm-xkb-tests
+
+# Substitutes the dynamically loaded Wayland boundary; live delivery is tested separately.
+linux-kvm-xkb-tests:
+	$(CC) -std=gnu99 -Wall -Wextra -Werror -Wno-unused-parameter -I. \
+		test/linux-kvm-xkb-tests.c -o $(LINUX_KVM_XKB_TEST_BIN) -ldl
+	$(LINUX_KVM_XKB_TEST_BIN)
+	rm -f $(LINUX_KVM_XKB_TEST_BIN)
+
+LINUX_KVM_EIS_TEST_BIN ?= /tmp/meshagent-linux-kvm-eis-tests
+
+# Real socket provenance/worker-registration fixtures require an isolated root environment.
+.PHONY: linux-kvm-bridge-auth-tests linux-kvm-capture-helper-tests
+linux-kvm-capture-helper-tests:
+	$(CC) -std=gnu99 -O1 -Wall -Wextra -Werror $(CAPTURE_HELPER_TEST_FLAGS) \
+		test/linux-kvm-capture-helper-tests.c -o /tmp/meshagent-capture-helper-tests -ldl
+	timeout 35 /tmp/meshagent-capture-helper-tests
+	$(CC) -std=gnu99 -O1 -Wall -Wextra -Werror test/linux-kvm-capture-helper-stubs-tests.c -o /tmp/meshagent-capture-helper-stubs-tests
+	/tmp/meshagent-capture-helper-stubs-tests
+	python3 test/kwin-capture-declaration-test.py
+	rm -f /tmp/meshagent-capture-helper-tests /tmp/meshagent-capture-helper-stubs-tests
+
+linux-kvm-bridge-auth-tests:
+	$(CC) -std=gnu99 -O1 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -I. \
+		test/linux-kvm-bridge-auth-tests.c -Wl,--gc-sections -o /tmp/meshagent-bridge-auth-test -ldl
+	timeout 15 /tmp/meshagent-bridge-auth-test
+	python3 test/kwin-ime-wire-bridge-test.py
+	python3 test/kwin-wire-session-test.py
+	node test/kwin-wire-assets-test.mjs
+	node meshcore/KVM/Linux/kwin-input-bridge/generate-assets.mjs --check
+	node addons/gnome-shell/generate-installer-modules.mjs --check
+	rm -f /tmp/meshagent-bridge-auth-test
+
+linux-kvm-eis-tests:
+	$(CC) -std=gnu99 -Wall -Wextra -Werror -I. \
+		test/linux-kvm-eis-tests.c -o $(LINUX_KVM_EIS_TEST_BIN) -ldl
+	$(LINUX_KVM_EIS_TEST_BIN)
+	rm -f $(LINUX_KVM_EIS_TEST_BIN)
+
+LINUX_KVM_PIPEWIRE_TEST_BIN ?= /tmp/meshagent-linux-kvm-pipewire-tests
+PIPEWIRECFLAGS ?= $(shell pkg-config --cflags libpipewire-0.3 2>/dev/null)
+
+linux-kvm-pipewire-tests:
+	$(CC) -std=gnu99 -Wall -Wextra -Werror -I. $(PIPEWIRECFLAGS) \
+		test/linux-kvm-pipewire-tests.c meshcore/KVM/Linux/linux_kvm_capture.c \
+		-o $(LINUX_KVM_PIPEWIRE_TEST_BIN) -ldl
+	$(LINUX_KVM_PIPEWIRE_TEST_BIN)
+	rm -f $(LINUX_KVM_PIPEWIRE_TEST_BIN)
+
+# Track the shared integration include when rebuilding the DRM translation unit.
+meshcore/KVM/Linux/linux_kvm.o meshcore/KVM/Linux/linux_kvm_eis.o: meshcore/KVM/Linux/linux_kvm_bridge_auth.h
+meshcore/KVM/Linux/linux_kvm_gnome.o meshcore/KVM/Linux/linux_kvm_gala.o addons/gala/activate: meshcore/KVM/Linux/linux_kvm_peer_message.h
+meshconsole/main.o meshcore/KVM/Linux/linux_kvm.o meshcore/KVM/Linux/linux_kvm_drm.o meshcore/KVM/Linux/linux_kvm_capture_helper.o: meshcore/KVM/Linux/linux_kvm_capture_helper.h
+meshcore/KVM/Linux/linux_kvm_capture_helper.o: meshcore/KVM/Linux/linux_kvm_bridge_auth.h meshcore/KVM/Linux/linux_kvm_wayland.h
+meshcore/KVM/Linux/linux_kvm.o meshcore/KVM/Linux/linux_kvm_eis.o meshcore/KVM/Linux/linux_kvm_capture_helper.o: meshcore/KVM/Linux/linux_kvm_syscall_compat.h
+
+meshcore/KVM/Linux/linux_kvm_drm.o: meshcore/KVM/Linux/linux_kvm_kwin_capture.inc meshcore/KVM/Linux/linux_kvm_pipewire.h
+meshcore/KVM/Linux/linux_kvm_xkb.o: meshcore/KVM/Linux/linux_kvm_virtual_keyboard.inc
+meshcore/KVM/Linux/linux_kvm_pipewire.o: meshcore/KVM/Linux/linux_kvm_pipewire.h meshcore/KVM/Linux/linux_kvm_capture.h
+meshcore/KVM/Linux/linux_tile.o meshcore/KVM/Linux/linux_kvm_drm.o meshcore/KVM/Linux/linux_compression.o: meshcore/KVM/Linux/linux_tile.h meshcore/KVM/Linux/linux_compression.h
+meshcore/KVM/Linux/linux_tile.o: meshcore/KVM/Linux/linux_kvm_capture.h
+meshcore/KVM/MacOS/mac_tile.o: meshcore/KVM/Linux/linux_compression.h
+
+LINUX_KVM_KWIN_TEST_BIN ?= /tmp/meshagent-linux-kvm-kwin-tests
+
+.PHONY: linux-kvm-tile-tests
+.PHONY: linux-jpeg-reuse-tests
+JPEG_TEST_FLAGS ?= -O2
+.PHONY: linux-jpeg-frame-recovery-tests
+.PHONY: linux-bgrx-jpeg-tests
+.PHONY: linux-jpeg-no-extensions-tests
+linux-jpeg-no-extensions-tests:
+	$(CC) -std=gnu99 -O2 -Wall -Wextra test/linux-jpeg-no-extensions-tests.c -ljpeg -o /tmp/meshagent-jpeg-no-extensions-tests
+	/tmp/meshagent-jpeg-no-extensions-tests
+	rm -f /tmp/meshagent-jpeg-no-extensions-tests
+
+linux-bgrx-jpeg-tests:
+	$(CC) -std=gnu99 $(JPEG_TEST_FLAGS) -g -Wall -Wextra -Wno-unused-parameter -ffunction-sections -fdata-sections -D_POSIX -D_LINKVM -D_FILE_OFFSET_BITS=64 -DJPEGMAXBUF=$(LINUX_TILE_TEST_LIMIT) \
+		-I. -Iopenssl/include -Imicrostack -Imicroscript -Imeshcore $(shell pkg-config --cflags libdrm egl glesv2 wayland-client) \
+		-include test/linux-jpeg-test-hooks.h -DLINUX_TILE_MALLOC=linux_tile_test_malloc \
+		test/linux-bgrx-jpeg-tests.c meshcore/KVM/Linux/linux_tile.c meshcore/KVM/Linux/linux_compression.c meshcore/KVM/Linux/linux_kvm_capture.c \
+		-Wl,--gc-sections,--wrap=jpeg_start_compress -o /tmp/meshagent-bgrx-jpeg-tests -ldl -ljpeg
+	timeout 60 /tmp/meshagent-bgrx-jpeg-tests
+	rm -f /tmp/meshagent-bgrx-jpeg-tests
+
+linux-jpeg-frame-recovery-tests:
+	$(CC) -std=gnu99 $(JPEG_TEST_FLAGS) -g -Wall -Wextra -Wno-unused-parameter -ffunction-sections -fdata-sections -D_POSIX -D_LINKVM -D_FILE_OFFSET_BITS=64 -DJPEGMAXBUF=0 \
+		-I. -Iopenssl/include -Imicrostack -Imicroscript -Imeshcore $(shell pkg-config --cflags libdrm egl glesv2 wayland-client) \
+		-include test/linux-jpeg-test-hooks.h -DLINUX_TILE_MALLOC=linux_tile_test_malloc \
+		test/linux-jpeg-frame-recovery-tests.c meshcore/KVM/Linux/linux_tile.c meshcore/KVM/Linux/linux_compression.c meshcore/KVM/Linux/linux_kvm_capture.c \
+		-Wl,--gc-sections,--wrap=jpeg_start_compress -o /tmp/meshagent-jpeg-frame-tests -ldl -ljpeg
+	timeout 30 /tmp/meshagent-jpeg-frame-tests
+	rm -f /tmp/meshagent-jpeg-frame-tests
+
+linux-jpeg-reuse-tests:
+	$(CC) -std=gnu99 $(JPEG_TEST_FLAGS) -g -Wall -Wextra -Wno-unused-parameter -D_POSIX -DJPEGMAXBUF=$(LINUX_TILE_TEST_LIMIT) -I. \
+		-include test/linux-jpeg-test-hooks.h -DLINUX_JPEG_MALLOC=linux_jpeg_test_malloc \
+		-DLINUX_JPEG_REALLOC=linux_jpeg_test_realloc -DLINUX_TILE_MALLOC=linux_tile_test_malloc \
+		test/linux-jpeg-reuse-tests.c meshcore/KVM/Linux/linux_tile.c meshcore/KVM/Linux/linux_compression.c meshcore/KVM/Linux/linux_kvm_capture.c \
+		-Wl,--wrap=jpeg_CreateCompress,--wrap=jpeg_start_compress,--wrap=jpeg_write_scanlines \
+		-o /tmp/meshagent-jpeg-reuse-tests -ljpeg
+	timeout 60 /tmp/meshagent-jpeg-reuse-tests
+	rm -f /tmp/meshagent-jpeg-reuse-tests
+
+LINUX_TILE_TEST_LIMIT ?= 0
+linux-kvm-tile-tests:
+	$(CC) -std=gnu99 -O2 -g -Wall -Wextra -Wno-unused-parameter -D_POSIX -DJPEGMAXBUF=$(LINUX_TILE_TEST_LIMIT) -I. \
+		test/linux-kvm-tile-tests.c meshcore/KVM/Linux/linux_tile.c meshcore/KVM/Linux/linux_compression.c meshcore/KVM/Linux/linux_kvm_capture.c \
+		-o /tmp/meshagent-tile-tests -ljpeg
+	timeout 30 /tmp/meshagent-tile-tests
+	rm -f /tmp/meshagent-tile-tests
+
+linux-kvm-kwin-tests:
+	$(CC) -std=gnu99 -O1 -ffunction-sections -fdata-sections -D_POSIX -D_LINKVM -D_FILE_OFFSET_BITS=64 \
+		-I. -Iopenssl/include -Imicrostack -Imicroscript -Imeshcore $(shell pkg-config --cflags libdrm egl glesv2 wayland-client) \
+		test/linux-kvm-kwin-tests.c meshcore/KVM/Linux/linux_kvm_capture.c -Wl,--gc-sections -o $(LINUX_KVM_KWIN_TEST_BIN) -ldl
+	$(LINUX_KVM_KWIN_TEST_BIN)
+	rm -f $(LINUX_KVM_KWIN_TEST_BIN)
+
+.PHONY: linux-kvm-gnome-assets-tests
+linux-kvm-gnome-assets-tests:
+	node addons/gnome-shell/generate-assets.mjs --check
+	node test/linux-kvm-gnome-assets-tests.mjs
+
+LINUX_KVM_GNOME_TEST_BIN ?= /tmp/meshagent-linux-kvm-gnome-tests
+linux-kvm-gnome-tests:
+	$(CC) -std=gnu11 -O2 -Wall -Wextra -Werror -Imeshcore/KVM/Linux \
+		test/linux-kvm-gnome-tests.c meshcore/KVM/Linux/linux_kvm_gnome.c \
+		meshcore/KVM/Linux/linux_kvm_wayland.c -o $(LINUX_KVM_GNOME_TEST_BIN) -ldl
+	$(LINUX_KVM_GNOME_TEST_BIN)
+	$(CC) -std=gnu99 -Wall -Wextra -Werror -I. test/linux-kvm-peer-message-tests.c -o /tmp/meshagent-peer-message-tests
+	/tmp/meshagent-peer-message-tests
+	rm -f /tmp/meshagent-peer-message-tests
+	rm -f $(LINUX_KVM_GNOME_TEST_BIN)
+
+# Real descriptor transport with mocked session discovery; no Shell required.
+.PHONY: linux-kvm-gnome-fd-tests
+LINUX_KVM_GNOME_FD_TEST_BIN ?= /tmp/meshagent-linux-kvm-gnome-fd-tests
+linux-kvm-gnome-fd-tests:
+	$(CC) -std=gnu11 -O2 -Wall -Wextra -Werror -Imeshcore/KVM/Linux \
+		test/linux-kvm-gnome-fd-tests.c -o $(LINUX_KVM_GNOME_FD_TEST_BIN) -ldl
+	$(LINUX_KVM_GNOME_FD_TEST_BIN)
+	rm -f $(LINUX_KVM_GNOME_FD_TEST_BIN)
+
+# Installer storage tests run as root in a newly created private /tmp directory.
+# This target never operates on a real GNOME extension directory.
+.PHONY: linux-gnome-assets-store-tests
+LINUX_GNOME_ASSETS_TEST_BIN ?= /tmp/meshagent-linux-gnome-assets-tests
+linux-gnome-assets-store-tests:
+	$(CC) -std=gnu11 -O2 -Wall -Wextra -Werror -Imeshcore/KVM/Linux \
+		test/linux-gnome-assets-tests.c meshcore/KVM/Linux/linux_gnome_assets.c \
+		-o $(LINUX_GNOME_ASSETS_TEST_BIN) -Wl,--wrap=fsync -lcrypto
+	$(LINUX_GNOME_ASSETS_TEST_BIN)
+	rm -f $(LINUX_GNOME_ASSETS_TEST_BIN)
 
 $(EXENAME): $(OBJECTS)
 ifeq ($(SKIPFLAGS), 1)
@@ -873,3 +1059,100 @@ openbsd:
 	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)"  AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_OPENBSD -D_NOHECI -D_NOILIBSTACKDEBUG -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) $(BSDFLAGS) -L. -lpthread -lz $(filter-out -lutil,$(LDFLAGS)) $(LDEXTRA)"
 	$(SYMBOLCP)
 	$(STRIP)
+
+.PHONY: linux-gnome-owner-rollback-tests
+GNOME_OWNER_ROLLBACK_FLAGS ?=
+linux-gnome-owner-rollback-tests:
+	$(CC) -std=gnu11 -O2 -Wall -Wextra -Werror $(GNOME_OWNER_ROLLBACK_FLAGS) -Imeshcore/KVM/Linux \
+		test/linux-gnome-owner-rollback-tests.c meshcore/KVM/Linux/linux_gnome_assets.c \
+		-o /tmp/meshagent-gnome-owner-rollback-tests -lcrypto
+	/tmp/meshagent-gnome-owner-rollback-tests
+	rm -f /tmp/meshagent-gnome-owner-rollback-tests
+
+# The store and Duktape binding must agree on opaque token buffer capacity.
+meshcore/KVM/Linux/linux_gnome_assets.o microscript/ILibDuktape_GnomeCompanion.o: meshcore/KVM/Linux/linux_gnome_assets.h
+meshcore/KVM/Linux/linux_gnome_autostart.o microscript/ILibDuktape_GnomeCompanion.o: meshcore/KVM/Linux/linux_gnome_autostart.h
+
+.PHONY: linux-gnome-autostart-tests
+GNOME_AUTOSTART_FLAGS ?=
+linux-gnome-autostart-tests:
+	$(CC) -std=gnu11 -O2 -Wall -Wextra -Werror $(GNOME_AUTOSTART_FLAGS) -Imeshcore/KVM/Linux \
+		test/linux-gnome-autostart-tests.c meshcore/KVM/Linux/linux_gnome_autostart.c \
+		-Wl,--wrap=fsync -o /tmp/meshagent-gnome-autostart-tests
+	/tmp/meshagent-gnome-autostart-tests
+	rm -f /tmp/meshagent-gnome-autostart-tests
+
+.PHONY: linux-gnome-installer-lifecycle-tests
+linux-gnome-installer-lifecycle-tests:
+	node addons/gnome-shell/generate-installer-modules.mjs --check
+	node test/linux-gnome-installer-lifecycle-tests.mjs
+
+.PHONY: linux-gnome-session-tests
+linux-gnome-session-tests:
+	node addons/gnome-shell/generate-installer-modules.mjs --check
+	node test/linux-gnome-session-tests.mjs
+
+.PHONY: linux-gnome-activation-tests
+linux-gnome-activation-tests:
+	node addons/gnome-shell/generate-installer-modules.mjs --check
+	node test/linux-gnome-activation-tests.mjs
+
+.PHONY: linux-gnome-signout-tests
+linux-gnome-signout-tests:
+	node addons/gnome-shell/generate-installer-modules.mjs --check
+	node test/linux-gnome-signout-tests.mjs
+
+.PHONY: linux-gnome-greeter-refresh-tests
+linux-gnome-greeter-refresh-tests:
+	node addons/gnome-shell/generate-installer-modules.mjs --check
+	node test/linux-gnome-greeter-refresh-tests.mjs
+
+.PHONY: linux-gnome-startup-tests
+linux-gnome-startup-tests:
+	node addons/gnome-shell/generate-installer-modules.mjs --check
+	node test/linux-gnome-startup-tests.mjs
+
+.PHONY: linux-gnome-input-expiry-tests
+linux-gnome-input-expiry-tests:
+	node test/linux-gnome-input-expiry-tests.mjs
+	$(CC) -std=gnu11 -O2 -Wall -Wextra -Werror -Imeshcore/KVM/Linux test/linux-gnome-input-expiry-tests.c -o /tmp/meshagent-gnome-expiry-tests -ldl
+	/tmp/meshagent-gnome-expiry-tests
+	rm -f /tmp/meshagent-gnome-expiry-tests
+
+meshcore/agentcore.o: meshcore/KVM/Linux/linux_gnome_update.h
+
+# Agent-owned Gala addition and installer choice. Both images are built for the
+# same architecture as the Agent, with no GLib/Gtk SDK dependency.
+ifneq ($(shell $(CC) -dM -E -x c /dev/null 2>/dev/null | sed -n '/define __linux__/p'),)
+addons/gala/console.so: addons/gala/console.c addons/gala/glib-abi.h meshcore/KVM/Linux/linux_gala_assets.h
+	$(CC) $(CFLAGS) -std=gnu99 -Os -s -shared -fPIC -fvisibility=hidden -Wl,--build-id=none -Wl,-z,relro,-z,now $< -o $@ -ldl
+addons/gala/activate: addons/gala/activate.c addons/gala/glib-abi.h meshcore/KVM/Linux/linux_kvm_gala.h meshcore/KVM/Linux/linux_gala_assets.h meshcore/KVM/Linux/linux_kvm_gala.c meshcore/KVM/Linux/linux_kvm_wayland.c
+	$(CC) $(CFLAGS) -std=gnu99 -Os -s -ffunction-sections -fdata-sections -Wl,--gc-sections -Wl,--build-id=none -I. addons/gala/activate.c meshcore/KVM/Linux/linux_kvm_gala.c meshcore/KVM/Linux/linux_kvm_wayland.c -o $@ -ldl
+meshcore/KVM/Linux/linux_gala_assets.o: addons/gala/console.so meshcore/KVM/Linux/linux_gala_assets.h
+meshcore/KVM/Linux/linux_gala_consent.o: addons/gala/activate meshcore/KVM/Linux/linux_gala_consent.h
+endif
+meshcore/KVM/Linux/linux_kvm_gala.o microscript/ILibDuktape_GnomeCompanion.o: meshcore/KVM/Linux/linux_gala_assets.h meshcore/KVM/Linux/linux_kvm_gala.h meshcore/KVM/Linux/linux_gala_consent.h
+
+.PHONY: linux-gala-tests
+linux-gala-tests:
+	$(CC) -std=gnu99 -Wall -Wextra -Werror -Wno-deprecated-declarations -DMESH_GALA_ASSET_TEST -I. test/linux-gala-assets-tests.c meshcore/KVM/Linux/linux_gala_assets.c -Wl,--wrap=fsync -o /tmp/meshagent-gala-assets-tests -lcrypto
+	/tmp/meshagent-gala-assets-tests
+	$(CC) -std=gnu99 -Wall -Wextra -Werror -I. test/linux-gala-transport-tests.c -o /tmp/meshagent-gala-transport-tests
+	/tmp/meshagent-gala-transport-tests
+	node test/linux-gala-installer-tests.cjs
+	$(CC) -std=gnu99 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -I. test/linux-gala-client-type-tests.c -Wl,--gc-sections -o /tmp/meshagent-gala-client-types -ldl
+	/tmp/meshagent-gala-client-types
+	rm -f /tmp/meshagent-gala-client-types
+	$(CC) -std=gnu99 -Wall -Wextra -Werror test/linux-gala-consent-child.c -o /tmp/meshagent-gala-consent-child
+	$(CC) -std=gnu99 -Wall -Wextra -Werror -DMESH_GALA_CONSENT_IMAGE='"/tmp/meshagent-gala-consent-child"' -I. test/linux-gala-consent-tests.c meshcore/KVM/Linux/linux_gala_consent.c -o /tmp/meshagent-gala-consent-tests
+	/tmp/meshagent-gala-consent-tests
+	rm -f /tmp/meshagent-gala-consent-tests /tmp/meshagent-gala-consent-child
+	rm -f /tmp/meshagent-gala-assets-tests /tmp/meshagent-gala-transport-tests
+
+meshcore/KVM/Linux/linux_kvm_cinnamon.o: meshcore/KVM/Linux/linux_kvm_cinnamon_source.h meshcore/KVM/Linux/linux_kvm_cinnamon.h
+
+.PHONY: linux-kvm-cinnamon-tests
+linux-kvm-cinnamon-tests:
+	node meshcore/KVM/Linux/generate-cinnamon-input.mjs --check
+	node test/cinnamon-input-tests.mjs
+	$(CC) -std=gnu99 -Wall -Wextra -Werror -I. -fsyntax-only meshcore/KVM/Linux/linux_kvm_cinnamon.c

@@ -436,6 +436,11 @@ function UserSessions()
         Object.defineProperty(this, "gdmUid", {
             get: function ()
             {
+                if (process.platform === 'linux' && typeof this.activeConsoleSession === 'function')
+                {
+                    var greeter = this.activeConsoleSession();
+                    if (greeter && greeter.sessionClass === 'greeter' && greeter.uid > 0) { return greeter.uid; }
+                }
                 var ret = null;
                 var min = this.minUid();
                 var child;
@@ -508,7 +513,7 @@ function UserSessions()
                             while(uids.length>0)
                             {
                                 var tst = uids.pop();
-                                if (pwd[tst].desc.toLowerCase().indexOf('display manager') >= 0 || pwd[tst].user == 'gdm' || pwd[tst].user == 'lightdm' || pwd[tst].user == 'sddm' || pwd[tst].user == '_ldm')
+                                if (pwd[tst].desc.toLowerCase().indexOf('display manager') >= 0 || pwd[tst].user == 'gdm' || pwd[tst].user == 'lightdm' || pwd[tst].user == 'sddm' || pwd[tst].user == 'plasmalogin' || pwd[tst].user == '_ldm')
                                 {
                                     if (parseInt(tst) < min)
                                     {
@@ -557,6 +562,36 @@ function UserSessions()
             throw ('username: ' + username + ' NOT FOUND');
         };
         
+        // Query the actual local console, including a greeter. Human-readable session
+        // lists may also contain active SSH and user-manager sessions without a seat.
+        this.activeConsoleSession = function activeConsoleSession()
+        {
+            if (process.platform != 'linux' || !this.hasLoginCtl) { return null; }
+            try
+            {
+                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = '';
+                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stderr.on('data', function () { });
+                child.stdin.write('sid=$(loginctl show-seat seat0 --property=ActiveSession --value 2>/dev/null); ' +
+                    'if [ -n "$sid" ]; then loginctl show-session "$sid" ' +
+                    '--property=Id --property=User --property=Seat --property=Remote --property=Active ' +
+                    '--property=Type --property=Class --property=Display 2>/dev/null; fi\nexit\n');
+                child.waitExit();
+                var values = {};
+                var lines = child.stdout.str.split('\n');
+                for (var i = 0; i < lines.length; ++i)
+                {
+                    var separator = lines[i].indexOf('=');
+                    if (separator > 0) { values[lines[i].substring(0, separator)] = lines[i].substring(separator + 1).trim(); }
+                }
+                if (values.Seat != 'seat0' || values.Remote != 'no' || values.Active != 'yes' ||
+                    !/^[a-zA-Z0-9_-]+$/.test(values.Id || '') || !/^[0-9]+$/.test(values.User || '')) { return null; }
+                return { id: values.Id, uid: parseInt(values.User), type: values.Type, sessionClass: values.Class, display: values.Display || '' };
+            }
+            catch (e) { return null; }
+        };
+
         function linux_Onchange_checkLoginCtl()
         {
             if (linux_Onchange_checkLoginCtl.counter > 10)
@@ -625,18 +660,20 @@ function UserSessions()
         this.Current = function Current(cb)
         {
             var ret = null;
+            // Resolve potentially failing/reentrant discovery before owning an idle shell.
+            var useLoginCtl = process.platform != 'freebsd' && this.hasLoginCtl;
+            var min = useLoginCtl ? this.minUid() : 0;
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
             child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
 
-            if (process.platform == 'freebsd' || !this.hasLoginCtl)
+            if (!useLoginCtl)
             {
                 child.stdin.write("who | tr '\\n' '`' | awk -F'`' '" + '{ printf "{"; for(a=1;a<NF;++a) { n=split($a, tok, " "); printf "%s\\"%s\\": \\"%s\\"", (a>1?",":""), tok[2], tok[1];  } printf "}";  }\'\nexit\n');
                 child.waitExit();
             }
             else
             {
-                var min = this.minUid();
 
                 child.stdin.write("loginctl list-sessions | tr '\\n' '`' | awk '{");
                 child.stdin.write('printf "[";');
@@ -718,20 +755,48 @@ function UserSessions()
         {
             if (require('fs').watch)
             {
-                this._linuxWatcher = require('fs').watch('/var/run/utmp');
-                this._linuxWatcher.on('change', function (a, b)
+                // Some current distributions no longer maintain utmp. Preserve its
+                // notifications where present and also observe active-seat changes.
+                if (require('fs').existsSync('/var/run/utmp'))
                 {
-                    if (require('user-sessions').hasLoginCtl)
+                    this._linuxWatcher = require('fs').watch('/var/run/utmp');
+                    this._linuxWatcher.on('change', function (a, b)
                     {
-                        linux_Onchange_checkLoginCtl.counter = 0;
-                        linux_Onchange_checkLoginCtl.timer = null;
-                        linux_Onchange_checkLoginCtl();
-                    }
-                    else
+                        if (require('user-sessions').hasLoginCtl)
+                        {
+                            linux_Onchange_checkLoginCtl.counter = 0;
+                            linux_Onchange_checkLoginCtl.timer = null;
+                            linux_Onchange_checkLoginCtl();
+                        }
+                        else
+                        {
+                            require('user-sessions').emit('changed');
+                        }
+                    });
+                }
+                if (require('fs').existsSync('/run/systemd/seats'))
+                {
+                    this._linuxSeatIdentity = JSON.stringify(this.activeConsoleSession());
+                    this._linuxSeatWatcher = require('fs').watch('/run/systemd/seats');
+                    this._linuxSeatWatcher.on('change', function (event, filename)
                     {
-                        require('user-sessions').emit('changed');
-                    }
-                });
+                        if (filename != null && filename.toString() != 'seat0') { return; }
+                        var sessions = require('user-sessions');
+                        if (sessions._linuxSeatTimer) { clearTimeout(sessions._linuxSeatTimer); }
+                        sessions._linuxSeatTimer = setTimeout(function ()
+                        {
+                            sessions._linuxSeatTimer = null;
+                            var current = sessions.activeConsoleSession();
+                            if (current == null) { return; }
+                            var identity = JSON.stringify(current);
+                            if (identity != sessions._linuxSeatIdentity)
+                            {
+                                sessions._linuxSeatIdentity = identity;
+                                sessions.emit('changed');
+                            }
+                        }, 200);
+                    });
+                }
             }
             
             this.getUidConfig = function getUidConfig() {
@@ -842,11 +907,19 @@ function UserSessions()
         };
         this.consoleUid = function consoleUid(options)
         {
+            if (process.platform == 'linux' && !(options && options.active == true))
+            {
+                var consoleSession = this.activeConsoleSession();
+                if (consoleSession && (consoleSession.type == 'x11' || consoleSession.type == 'wayland')) { return consoleSession.uid; }
+            }
+            // Resolve potentially failing/reentrant discovery before owning an idle shell.
+            var useLoginCtl = process.platform != 'freebsd' && this.hasLoginCtl;
+            var min = useLoginCtl ? this.minUid() : 0;
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
             child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
 
-            if (process.platform == 'freebsd' || !this.hasLoginCtl)
+            if (!useLoginCtl)
             {
                 child.stdin.write("who | tr '\\n' '`' | awk -F'`' '{");
                 child.stdin.write("  for(i=1;i<NF;++i) ");
@@ -878,7 +951,6 @@ function UserSessions()
             }
             else
             {
-                var min = this.minUid();
 
                 child.stdin.write("loginctl list-sessions | tr '\\n' '`' | awk '{");
                 child.stdin.write('printf "[";');

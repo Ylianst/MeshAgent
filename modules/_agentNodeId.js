@@ -98,7 +98,38 @@ function _meshName()
                 if (name == null) { name = 'Mesh Agent'; }
                 break;
             default:
-                var service = require('service-manager').manager.enumerateService();
+                var manager = require('service-manager').manager;
+                // Default installers run outside the installed service path. Avoid
+                // materializing every service (and fetching every description)
+                // just to discover that none points at this executable.
+                if (process.platform == 'linux' && manager.getServiceType() == 'systemd')
+                {
+                    var fs = require('fs'), paths = ['/lib/systemd/system', '/usr/lib/systemd/system'], seen = {};
+                    for (var p = 0; p < paths.length; ++p)
+                    {
+                        var files;
+                        try { files = fs.readdirSync(paths[p]); } catch (readError) { continue; }
+                        for (var f = 0; f < files.length; ++f)
+                        {
+                            var unit = files[f];
+                            if (!unit.endsWith('.service') || Object.prototype.hasOwnProperty.call(seen, unit)) { continue; }
+                            var text;
+                            try { text = fs.readFileSync(paths[p] + '/' + unit).toString(); } catch (unitError) { continue; }
+                            seen[unit] = true;
+                            // Encoded executable paths still use the existing parser.
+                            // Only ordinary paths that cannot match are skipped.
+                            if (text.indexOf(process.execPath) < 0 && !/ExecStart=.*\\/m.test(text)) { continue; }
+                            try
+                            {
+                                var candidate = manager.getService(unit.substring(0, unit.length - 8), 'systemd');
+                                if (candidate.appLocation() == process.execPath) { return candidate.name; }
+                            }
+                            catch (candidateError) { }
+                        }
+                    }
+                    return 'meshagent';
+                }
+                var service = manager.enumerateService();
                 name = 'meshagent';
                 for (var i = 0; i < service.length; ++i)
                 {

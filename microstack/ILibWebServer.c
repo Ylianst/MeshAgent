@@ -35,6 +35,9 @@ limitations under the License.
 #include "ILibAsyncSocket.h"
 #include "ILibWebClient.h"
 #include "ILibCrypto.h"
+#ifndef MICROSTACK_NOTLS
+#include "microstack/ILibTLSContext.h"
+#endif
 #include "ILibRemoteLogging.h"
 
 #define DIGEST_AUTHENTICATION_NONCE_DEFAULT_DURATION_MINUTES 15
@@ -994,7 +997,7 @@ int ILibWebServer_EnableHTTPS(ILibWebServer_ServerToken object, struct util_cert
 		return 1;
 	}
 
-	SSL_CTX_set_options(ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER | SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1);
+	ILibSSL_CTX_SetProtocolOptions(ctx, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1);
 
 	util_load_system_certs(ctx);
 	SSL_CTX_use_certificate(ctx, leafCert->x509);

@@ -12,11 +12,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include "linux_kvm_xkb.h"
 
 #if defined(__linux__)
 
 #include <dlfcn.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
 #include <errno.h>
 #include <poll.h>
 #include <stdio.h>
@@ -180,10 +189,17 @@ static kvm_xkb_table g_xkbCapsOn;
 static int g_xkbTablesReady = 0;
 
 static struct wl_display *g_xkbDisplay = NULL;
+static struct wl_display *g_xkbPreparedDisplay, *g_xkbAuthenticatedDisplay;
+static uid_t g_xkbPreparedUid;
+static pid_t g_xkbPreparedPid;
 static struct wl_registry *g_xkbRegistry = NULL;
 static struct wl_seat *g_xkbSeat = NULL;
 static struct wl_keyboard *g_xkbKeyboard = NULL;
 static uint32_t g_xkbSeatCaps = 0;
+static uint32_t g_xkbVirtualManagerName;
+static struct wl_proxy *g_xkbVirtualManager;
+static struct wl_proxy *g_xkbVirtualKeyboard;
+static char *g_xkbRawKeymap;
 static int g_xkbLibsUnavailable = 0;
 static uint64_t g_xkbLastAttemptMs = 0;
 #define KVM_XKB_RETRY_MS 10000
@@ -388,7 +404,11 @@ static void kvm_xkb_on_keymap(void *data, struct wl_keyboard *keyboard, uint32_t
 	munmap(mapped, size);
 	if (text == NULL) { return; }
 	kvm_xkb_build_from_keymap_string(text);
-	free(text);
+    if (g_xkbVirtualManagerName && size <= 1048576)
+    {
+        free(g_xkbRawKeymap); g_xkbRawKeymap = text;
+    }
+    else { free(text); }
 }
 static void kvm_xkb_on_kb_enter(void *data, struct wl_keyboard *keyboard, uint32_t serial, struct wl_surface *surface, struct wl_array *keys) { }
 static void kvm_xkb_on_kb_leave(void *data, struct wl_keyboard *keyboard, uint32_t serial, struct wl_surface *surface) { }
@@ -397,9 +417,11 @@ static void kvm_xkb_on_kb_key(void *data, struct wl_keyboard *keyboard, uint32_t
 // layout group (Alt+Shift switches land here); ones that don't leave the group at 0 and lookup
 // falls back to its cheapest-entry order, which is the pre-group-tracking behavior.
 static uint32_t g_xkbActiveGroup = 0;
+static uint32_t g_xkbDepressed, g_xkbLatched, g_xkbLocked;
 static void kvm_xkb_on_kb_modifiers(void *data, struct wl_keyboard *keyboard, uint32_t serial, uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group)
 {
-	(void)data; (void)keyboard; (void)serial; (void)depressed; (void)latched; (void)locked;
+	(void)data; (void)keyboard; (void)serial;
+	g_xkbDepressed = depressed; g_xkbLatched = latched; g_xkbLocked = locked;
 	g_xkbActiveGroup = group;
 }
 static void kvm_xkb_on_kb_repeat_info(void *data, struct wl_keyboard *keyboard, int32_t rate, int32_t delay) { }
@@ -428,6 +450,10 @@ static const struct wl_seat_listener g_xkbSeatListener =
 
 static void kvm_xkb_on_global(void *data, struct wl_registry *registry, uint32_t name, const char *interface, uint32_t version)
 {
+	if (interface && !strcmp(interface, "zwp_virtual_keyboard_manager_v1") && version >= 1)
+	{
+		g_xkbVirtualManagerName = name;
+	}
 	if (g_xkbSeat == NULL && interface != NULL && strcmp(interface, "wl_seat") == 0)
 	{
 		g_xkbSeat = (struct wl_seat *)kvm_xkb_wl_registry_bind(registry, name, x_wl_seat_interface, 1);
@@ -437,7 +463,10 @@ static void kvm_xkb_on_global(void *data, struct wl_registry *registry, uint32_t
 		}
 	}
 }
-static void kvm_xkb_on_global_remove(void *data, struct wl_registry *registry, uint32_t name) { }
+static void kvm_xkb_on_global_remove(void *data, struct wl_registry *registry, uint32_t name)
+{
+    if (name == g_xkbVirtualManagerName) { g_xkbVirtualManagerName = 0; }
+}
 
 static const struct wl_registry_listener g_xkbRegistryListener =
 {
@@ -449,11 +478,18 @@ static const struct wl_registry_listener g_xkbRegistryListener =
 // with the last known keymap if the compositor connection drops.
 static void kvm_xkb_disconnect(void)
 {
+    if (g_xkbPreparedDisplay) { x_wl_display_disconnect(g_xkbPreparedDisplay); g_xkbPreparedDisplay = NULL; }
+    g_xkbAuthenticatedDisplay = NULL; g_xkbPreparedUid = 0; g_xkbPreparedPid = 0;
+    if (g_xkbVirtualKeyboard) { x_wl_proxy_destroy(g_xkbVirtualKeyboard); g_xkbVirtualKeyboard = NULL; }
+    if (g_xkbVirtualManager) { x_wl_proxy_destroy(g_xkbVirtualManager); g_xkbVirtualManager = NULL; }
+    g_xkbVirtualManagerName = 0;
+    free(g_xkbRawKeymap); g_xkbRawKeymap = NULL;
 	if (g_xkbKeyboard != NULL) { x_wl_proxy_destroy((struct wl_proxy *)g_xkbKeyboard); g_xkbKeyboard = NULL; }
 	if (g_xkbSeat != NULL) { x_wl_proxy_destroy((struct wl_proxy *)g_xkbSeat); g_xkbSeat = NULL; }
 	if (g_xkbRegistry != NULL) { x_wl_proxy_destroy((struct wl_proxy *)g_xkbRegistry); g_xkbRegistry = NULL; }
 	if (g_xkbDisplay != NULL) { x_wl_display_disconnect(g_xkbDisplay); g_xkbDisplay = NULL; }
 	g_xkbSeatCaps = 0;
+    g_xkbDepressed = g_xkbLatched = g_xkbLocked = g_xkbActiveGroup = 0;
 }
 
 // Non-blocking drain of pending events so keymap changes (layout added/removed) are picked up
@@ -464,7 +500,11 @@ static void kvm_xkb_pump(void)
 	if (g_xkbDisplay == NULL) { return; }
 	while (x_wl_display_prepare_read(g_xkbDisplay) != 0)
 	{
-		x_wl_display_dispatch_pending(g_xkbDisplay);
+		if (x_wl_display_dispatch_pending(g_xkbDisplay) < 0)
+		{
+			kvm_xkb_disconnect();
+			return;
+		}
 	}
 	x_wl_display_flush(g_xkbDisplay);
 	pfd.fd = x_wl_display_get_fd(g_xkbDisplay);
@@ -557,7 +597,16 @@ static int kvm_xkb_try_connect(void)
 		return 0;
 	}
 
-	g_xkbDisplay = x_wl_display_connect(NULL);
+    if (g_xkbPreparedDisplay && g_xkbPreparedUid == geteuid())
+    {
+        g_xkbDisplay = g_xkbPreparedDisplay; g_xkbPreparedDisplay = NULL;
+        g_xkbAuthenticatedDisplay = g_xkbDisplay;
+    }
+    else
+    {
+        if (g_xkbPreparedDisplay) { kvm_xkb_disconnect(); }
+        g_xkbDisplay = x_wl_display_connect(NULL);
+    }
 	if (g_xkbDisplay == NULL)
 	{
 		if (kvm_xkb_debug())
@@ -628,6 +677,8 @@ static int kvm_xkb_ensure_ready(void)
 	return g_xkbTablesReady;
 }
 
+#include "linux_kvm_virtual_keyboard.inc"
+
 int kvm_xkb_lookup_unicode(uint32_t codepoint, int capslockOn, kvm_xkb_match *match)
 {
 	const kvm_xkb_table *table;
@@ -675,6 +726,10 @@ void kvm_xkb_shutdown(void)
 }
 
 #else
+
+void kvm_xkb_prepare_virtual_peer(int sessionUid) { (void)sessionUid; }
+
+int kvm_xkb_type_unicode_virtual(uint32_t cp, unsigned int leds) { (void)cp; (void)leds; return 0; }
 
 int kvm_xkb_lookup_unicode(uint32_t codepoint, int capslockOn, kvm_xkb_match *match)
 {

@@ -86,6 +86,7 @@ extern char __agentExecPath[];
 #ifdef _POSIX
 extern char **environ;
 int SignalDescriptors[2] = { 0, 0 };
+static pid_t SignalDescriptorsOwner = 0;
 #endif
 
 #define SCRIPT_ENGINE_PIPE_BUFFER_SIZE 65535
@@ -501,10 +502,12 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_ExitEx(duk_context *ctx)
 {
 	if (duk_is_number(ctx, 0))
 	{
+		printf("Agent process._exit invoked with code %d\n", duk_require_int(ctx, 0));
 		exit(duk_require_int(ctx, 0));
 	}
 	else
 	{
+		printf("Agent process._exit invoked with default code 0\n");
 		exit(0);
 	}
 	return(0);
@@ -1028,6 +1031,7 @@ void ILibDuktape_ScriptContainer_Process_SignalListener_PostSelect(void* object,
 			close(SignalDescriptors[1]);
 			if (pipe(SignalDescriptors) == 0)
 			{
+				SignalDescriptorsOwner = getpid();
 				fcntl(SignalDescriptors[0], F_SETFL, O_NONBLOCK);
 				fcntl(SignalDescriptors[1], F_SETFL, O_NONBLOCK);
 			}
@@ -1036,7 +1040,9 @@ void ILibDuktape_ScriptContainer_Process_SignalListener_PostSelect(void* object,
 }
 void ILibDuktape_ScriptContainer_Process_SignalListener(int signum, siginfo_t *info, void *context)
 {
-	if (SignalDescriptors[1] != 0)
+	// A forked capture worker inherits this handler and pipe. Never forward its
+	// signals into the parent Agent event loop (SIGTERM would stop the Agent).
+	if (SignalDescriptors[1] != 0 && SignalDescriptorsOwner == getpid())
 	{
 		char tmp[255];
 		switch (signum)
@@ -1456,6 +1462,7 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	{
 		if (pipe(SignalDescriptors) == 0)
 		{
+			SignalDescriptorsOwner = getpid();
 			fcntl(SignalDescriptors[0], F_SETFL, O_NONBLOCK);
 			fcntl(SignalDescriptors[1], F_SETFL, O_NONBLOCK);
 

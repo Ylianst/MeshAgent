@@ -31,6 +31,9 @@ limitations under the License.
 #include "ILibDuktape_Helpers.h"
 #include "ILibDuktapeModSearch.h"
 #include "ILibDuktape_fs.h"
+#if defined(__linux__) && defined(_LINKVM)
+#include "ILibDuktape_GnomeCompanion.h"
+#endif
 #include "ILibDuktape_WritableStream.h"
 #include "ILibDuktape_ReadableStream.h"
 #include "ILibDuktape_EventEmitter.h"
@@ -2768,6 +2771,9 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 void ILibDuktape_fs_init(duk_context * ctx)
 {
 	ILibDuktape_ModSearch_AddHandler(ctx, "fs", ILibDuktape_fs_PUSH);
+#if defined(__linux__) && defined(_LINKVM)
+	ILibDuktape_GnomeCompanion_Init(ctx);
+#endif
 }
 
 #ifdef __DOXY__

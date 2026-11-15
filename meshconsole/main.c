@@ -32,6 +32,9 @@ limitations under the License.
 #include "microscript/ILibDuktape_ScriptContainer.h"
 #include "microstack/ILibCrypto.h"
 #include "microscript/ILibDuktape_Commit.h"
+#if defined(__linux__) && defined(_LINKVM)
+#include "meshcore/KVM/Linux/linux_kvm_capture_helper.h"
+#endif
 
 MeshAgentHostContainer *agentHost = NULL;
 #ifdef _OPENBSD
@@ -92,6 +95,17 @@ int wmain(int argc, char **wargv)
 int main(int argc, char **argv)
 #endif
 {
+#if defined(__linux__) && defined(_LINKVM)
+	/* Internal capture-only exec must precede crash handlers, embedded scripts,
+	 * configuration and Agent identity initialization. */
+	int captureRole = kvm_capture_helper_dispatch(argc, argv);
+	if (captureRole >= 0) { return captureRole; }
+#elif defined(__linux__)
+	/* A KVM-disabled executable must not reinterpret the internal role as an
+	 * ordinary Agent invocation during an installation/version mismatch. */
+	for (int captureArg=1; captureArg<argc; ++captureArg)
+		if (!strncmp(argv[captureArg], "--meshagent-kwin-capture", strlen("--meshagent-kwin-capture"))) { return 125; }
+#endif
 #ifdef _OPENBSD
 	realpath(argv[0], __agentExecPath);
 #endif

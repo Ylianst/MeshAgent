@@ -16,9 +16,16 @@ limitations under the License.
 
 #include "linux_kvm_drm.h"
 #include "linux_kvm_drm_egl.h"
+#include "linux_kvm_capture.h"
+#include "linux_kvm_pipewire.h"
+#include "linux_kvm_gnome.h"
+#include "linux_kvm_gala.h"
+#include "linux_kvm_dmabuf_sync.h"
 #include "linux_kvm.h"
 #include "linux_kvm_rotated.h"
 #include "linux_kvm_wayland.h"
+#include "linux_kvm_capture_helper.h"
+#include "linux_kvm_xkb.h"
 #include "linux_compression.h"
 #include "linux_tile.h"
 #include "meshcore/meshdefines.h"
@@ -49,6 +56,9 @@ limitations under the License.
 #include <sys/prctl.h>
 #include <sys/syscall.h>
 #include <sys/mman.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <linux/dma-buf.h>
 
 #include <dlfcn.h>
 #include <sys/socket.h>
@@ -137,6 +147,9 @@ static int kvm_drm_load_libdrm(void)
 #ifndef DRM_PLANE_TYPE_PRIMARY
 #define DRM_PLANE_TYPE_PRIMARY 1
 #endif
+#ifndef DRM_PLANE_TYPE_CURSOR
+#define DRM_PLANE_TYPE_CURSOR 2
+#endif
 
 // Lets linux_kvm_drm_egl.c reach libdrm through the single dlopen here.
 int kvm_drm_prime_handle_to_fd(int fd, unsigned int handle, unsigned int flags, int *prime_fd)
@@ -160,7 +173,7 @@ int kvm_drm_render_node_for_fd(int fd, char *out, size_t out_len)
 // Array marshallers instead of wl_proxy_marshal_flags: flags needs libwayland >= 1.20 (2021),
 // which would silently lose the xdg-output layout on Debian 11 / Ubuntu 20.04-era systems.
 #define KVM_DRM_WAYLAND_SYMBOLS(_) \
-	_(wl_display_connect) _(wl_display_disconnect) \
+	_(wl_display_connect) _(wl_display_connect_to_fd) _(wl_display_disconnect) \
 	_(wl_display_flush) _(wl_display_dispatch_pending) _(wl_display_prepare_read) \
 	_(wl_display_read_events) _(wl_display_cancel_read) _(wl_display_get_fd) \
 	_(wl_proxy_marshal_array) _(wl_proxy_marshal_array_constructor) _(wl_proxy_marshal_array_constructor_versioned) \
@@ -265,6 +278,8 @@ static void kvm_drm_init_debug()
 }
 
 extern int SCREEN_NUM;
+extern int kvm_registered_uid;
+extern int KVM_OUTPUT_WIDTH, KVM_OUTPUT_HEIGHT, SCALING_FACTOR, SCALING_FACTOR_NEW, kvm_force_refresh;
 extern int SCREEN_WIDTH;
 extern int SCREEN_HEIGHT;
 extern int SCREEN_DEPTH;
@@ -394,9 +409,19 @@ static void kvm_drm_process_pending_input(void)
 	int consumed = 0;
 	int msgLen = 0;
 
-	while ((msgLen = kvm_server_inputdata(g_drmInputBuf + consumed, g_drmInputLen - consumed)) != 0)
+	while (g_drmInputLen - consumed >= 4 &&
+		(msgLen = kvm_server_inputdata(g_drmInputBuf + consumed, g_drmInputLen - consumed)) != 0)
 	{
+		unsigned short type = ntohs(ILibUnaligned_Read16(g_drmInputBuf + consumed));
 		consumed += msgLen;
+		if (type == MNG_KVM_SET_DISPLAY)
+		{
+			// Monitor selection changes the coordinate generation. Input queued after this command
+			// was encoded against an ambiguous old/new mapping, so discard it rather than clicking
+			// another monitor. The viewer will naturally send fresh state against the new frame.
+			consumed = g_drmInputLen;
+			break;
+		}
 	}
 	if (consumed > 0)
 	{
@@ -408,7 +433,23 @@ static void kvm_drm_process_pending_input(void)
 	}
 }
 
-static int kvm_drm_send_dirty_tiles(const unsigned char *rgbBuffer, size_t rgbSize, char **desktopBuffer, long long *desktopBufferSize)
+static int kvm_drm_prepare_tile_buffer(char **desktopBuffer, long long *desktopBufferSize)
+{
+    size_t requiredSize;
+    if (SCREEN_WIDTH <= 0 || SCREEN_HEIGHT <= 0 || TILE_WIDTH <= 0 ||
+        SCREEN_WIDTH > INT32_MAX - TILE_WIDTH || SCREEN_HEIGHT > INT32_MAX - TILE_WIDTH ||
+        !kvm_capture_checked_rgb_size(adjust_screen_size(SCREEN_WIDTH), adjust_screen_size(SCREEN_HEIGHT), &requiredSize)) return -1;
+    if (*desktopBufferSize != (long long)requiredSize)
+    {
+        char *next = malloc(requiredSize);
+        if (!next) return -1;
+        free(*desktopBuffer); *desktopBuffer = next; *desktopBufferSize = (long long)requiredSize;
+    }
+    return 0;
+}
+
+static int kvm_drm_send_tiles(const unsigned char *rgbBuffer, size_t rgbSize, char **desktopBuffer,
+    long long *desktopBufferSize, const linux_tile_rgb32_frame *rgb32)
 {
 	int r = 0;
 	int c = 0;
@@ -427,6 +468,7 @@ static int kvm_drm_send_dirty_tiles(const unsigned char *rgbBuffer, size_t rgbSi
 		return 0;
 	}
 
+	if (!rgb32) {
 	rowBytes = ((size_t)SCREEN_WIDTH) * 3u;
 	requiredSize = ((size_t)SCREEN_WIDTH) * ((size_t)SCREEN_HEIGHT) * 3u;
 	if (rgbBuffer == NULL || rgbSize < requiredSize)
@@ -439,25 +481,16 @@ static int kvm_drm_send_dirty_tiles(const unsigned char *rgbBuffer, size_t rgbSi
 	rowPaddedBytes = ((size_t)paddedWidth) * 3u;
 	requiredSize = ((size_t)paddedWidth) * ((size_t)paddedHeight) * 3u;
 
-	if (*desktopBufferSize != (long long)requiredSize)
-	{
-		char *tmp = NULL;
-		if (*desktopBuffer != NULL)
-		{
-			free(*desktopBuffer);
-			*desktopBuffer = NULL;
-		}
-		tmp = (char *)malloc(requiredSize);
-		if (tmp == NULL) ILIBCRITICALEXIT(254);
-		*desktopBuffer = tmp;
-		*desktopBufferSize = (long long)requiredSize;
-	}
+	// An in-place converted frame already has the final stride and allocation.
+	if (rgbBuffer == (unsigned char *)*desktopBuffer &&
+		(paddedWidth != SCREEN_WIDTH || *desktopBufferSize != (long long)requiredSize)) return -1;
+	if (kvm_drm_prepare_tile_buffer(desktopBuffer, desktopBufferSize) != 0) return -1;
 
 	for (y = 0; y < SCREEN_HEIGHT; ++y)
 	{
 		char *dst = *desktopBuffer + (((size_t)y) * rowPaddedBytes);
 		const char *src = (const char *)rgbBuffer + (((size_t)y) * rowBytes);
-		memcpy_s(dst, rowPaddedBytes, src, rowBytes);
+		if (src != dst) memcpy_s(dst, rowPaddedBytes, src, rowBytes);
 		if (rowPaddedBytes > rowBytes)
 		{
 			memset(dst + rowBytes, 0, rowPaddedBytes - rowBytes);
@@ -469,6 +502,7 @@ static int kvm_drm_send_dirty_tiles(const unsigned char *rgbBuffer, size_t rgbSi
 		char *dst = *desktopBuffer + (((size_t)SCREEN_HEIGHT) * rowPaddedBytes);
 		size_t bytes = ((size_t)(paddedHeight - SCREEN_HEIGHT)) * rowPaddedBytes;
 		memset(dst, 0, bytes);
+	}
 	}
 
 	for (r = 0; r < TILE_HEIGHT_COUNT; ++r)
@@ -482,6 +516,8 @@ static int kvm_drm_send_dirty_tiles(const unsigned char *rgbBuffer, size_t rgbSi
 		}
 	}
 
+	if ((rgb32 ? update_tile_checksums_rgb32(rgb32) :
+        update_tile_checksums(*desktopBuffer, *desktopBufferSize)) != 0) { return -1; }
 	for (y = 0; y < TILE_HEIGHT_COUNT; ++y)
 	{
 		for (x = 0; x < TILE_WIDTH_COUNT; ++x)
@@ -497,7 +533,8 @@ static int kvm_drm_send_dirty_tiles(const unsigned char *rgbBuffer, size_t rgbSi
 				continue;
 			}
 
-			getTileAt(width, height, &tilePacket, &tilePacketSize, *desktopBuffer, *desktopBufferSize, y, x);
+			if ((rgb32 ? getTileAt_rgb32(width,height,&tilePacket,&tilePacketSize,rgb32,y,x) :
+                getTileAt(width,height,&tilePacket,&tilePacketSize,*desktopBuffer,*desktopBufferSize,y,x)) < 0) { return 1; }
 			if (tilePacket != NULL && tilePacketSize > 0)
 			{
 				if (kvm_drm_write_all(slave2master[1], (char *)tilePacket, (size_t)tilePacketSize) != 0)
@@ -511,6 +548,37 @@ static int kvm_drm_send_dirty_tiles(const unsigned char *rgbBuffer, size_t rgbSi
 	}
 
 	return 0;
+}
+
+static int kvm_drm_send_dirty_tiles(const unsigned char *rgbBuffer, size_t rgbSize,
+    char **desktopBuffer, long long *desktopBufferSize)
+{
+    return kvm_drm_send_tiles(rgbBuffer,rgbSize,desktopBuffer,desktopBufferSize,NULL);
+}
+
+static jpeg_pixel_format kvm_drm_jpeg_format(uint32_t format)
+{
+    switch (format) {
+    case DRM_FORMAT_XRGB8888: case DRM_FORMAT_ARGB8888: return JPEG_BGRX32;
+    case DRM_FORMAT_XBGR8888: case DRM_FORMAT_ABGR8888: return JPEG_RGBX32;
+    case DRM_FORMAT_RGBX8888: case DRM_FORMAT_RGBA8888: return JPEG_XBGR32;
+    case DRM_FORMAT_BGRX8888: case DRM_FORMAT_BGRA8888: return JPEG_XRGB32;
+    default: return JPEG_RGB24; /* not eligible for direct RGB32 encoding */
+    }
+}
+
+static void kvm_drm_set_capture_state(kvm_capture_state *state, kvm_capture_state next,
+	const char *reason)
+{
+	if (state == NULL || *state == next) { return; }
+	if (drm_debug)
+	{
+		fprintf(stderr, "DRM: capture state %s -> %s%s%s\n",
+			kvm_capture_state_name(*state), kvm_capture_state_name(next),
+			reason != NULL && reason[0] != 0 ? ": " : "",
+			reason != NULL ? reason : "");
+	}
+	*state = next;
 }
 
 #if defined(__linux__)
@@ -548,6 +616,7 @@ typedef struct kvm_drm_frame_map
 	uint8_t *addr;
 	size_t size;
 	int dma_fd;
+	int identity_fd; // Pins DMA-BUF identity for a dumb mapping; not a CPU-sync fd.
 	int drm_fd;
 } kvm_drm_frame_map;
 
@@ -717,6 +786,7 @@ static bool kvm_drm_is_transient_scanout_error(const char *err)
 static bool kvm_drm_is_expected_suspended_refresh_error(const char *err)
 {
 	static const char *noOutputPrefix = "No connected display with active CRTC on ";
+	static const char *noScanoutPrefix = "No connected display with active scanout on ";
 
 	if (err == NULL)
 	{
@@ -724,7 +794,8 @@ static bool kvm_drm_is_expected_suspended_refresh_error(const char *err)
 	}
 
 	return strcmp(err, "No active DRM framebuffer available yet") == 0 ||
-		strncmp(err, noOutputPrefix, strlen(noOutputPrefix)) == 0;
+		strncmp(err, noOutputPrefix, strlen(noOutputPrefix)) == 0 ||
+		strncmp(err, noScanoutPrefix, strlen(noScanoutPrefix)) == 0;
 }
 
 static const char *kvm_drm_connector_type_name(uint32_t t)
@@ -780,6 +851,7 @@ static void kvm_drm_destroy_map(kvm_drm_frame_map *map)
 	{
 		close(map->dma_fd);
 	}
+	if (map->identity_fd >= 0) { close(map->identity_fd); }
 	if (map->handle != 0)
 	{
 		kvm_drm_close_gem_handle(map->drm_fd, map->handle);
@@ -788,16 +860,41 @@ static void kvm_drm_destroy_map(kvm_drm_frame_map *map)
 	map->addr = NULL;
 	map->size = 0;
 	map->dma_fd = -1;
+	map->identity_fd = -1;
 	map->drm_fd = -1;
 }
 
 static bool kvm_drm_map_framebuffer_handle(int fd, uint32_t handle, size_t min_size, kvm_drm_frame_map *map, char *out_error, size_t out_error_size)
 {
-	if (map->handle == handle && map->addr != NULL && map->size >= min_size)
+	if (map->drm_fd == fd && map->handle == handle && map->addr != NULL && map->size >= min_size)
 	{
 		return true;
 	}
+	int dma_fd = -1;
+	(void)drmPrimeHandleToFD(fd, handle, DRM_CLOEXEC | DRM_RDWR, &dma_fd);
+	if (dma_fd >= 0 && map->addr != NULL && map->drm_fd == fd && map->size >= min_size)
+	{
+		int previousFd = map->dma_fd >= 0 ? map->dma_fd : map->identity_fd;
+#if defined(SYS_kcmp)
+		// GETFB may return a fresh GEM handle for the same DMA-BUF. Its
+		// exports share an open file description. KCMP_FILE (ABI value 0)
+		// compares that kernel identity, without trusting reusable IDs or
+		// inodes (old kernels shared an anon_inode between different buffers).
+		// Missing/denied kcmp simply retains the original remapping path.
+		if (previousFd >= 0 && syscall(SYS_kcmp, getpid(), getpid(), 0,
+			(unsigned long)dma_fd, (unsigned long)previousFd) == 0)
+		{
+			close(dma_fd);
+			if (handle != map->handle) { kvm_drm_close_gem_handle(fd, handle); }
+			return true;
+		}
+#else
+		(void)previousFd;
+#endif
+	}
 
+	// Transfer a still-owned handle when only the required mapping length grew.
+	if (map->drm_fd == fd && map->handle == handle) { map->handle = 0; }
 	kvm_drm_destroy_map(map);
 
 	struct drm_mode_map_dumb map_dumb;
@@ -812,12 +909,12 @@ static bool kvm_drm_map_framebuffer_handle(int fd, uint32_t handle, size_t min_s
 			map->addr = (uint8_t *)ptr;
 			map->size = min_size;
 			map->drm_fd = fd;
+			map->identity_fd = dma_fd;
 			return true;
 		}
 	}
 
-	int dma_fd = -1;
-	if (drmPrimeHandleToFD(fd, handle, DRM_CLOEXEC | DRM_RDWR, &dma_fd) == 0)
+	if (dma_fd >= 0)
 	{
 		void *ptr = mmap(NULL, min_size, PROT_READ, MAP_SHARED, dma_fd, 0);
 		if (ptr != MAP_FAILED)
@@ -835,6 +932,51 @@ static bool kvm_drm_map_framebuffer_handle(int fd, uint32_t handle, size_t min_s
 	kvm_drm_copy_error_message(out_error, out_error_size,
 							   "Failed to map scanout buffer (requires mappable dumb/linear buffer and DRM access)");
 	return false;
+}
+
+// DMA-BUF mappings need explicit CPU-access bracketing for cache coherency. Dumb-buffer mappings
+// use the DRM device mapping directly and must not receive DMA-BUF ioctls.
+typedef struct kvm_drm_dmabuf_context
+{
+	int fd;
+} kvm_drm_dmabuf_context;
+
+static int kvm_drm_dmabuf_wait_readable(void *context, unsigned int timeout_ms)
+{
+	kvm_drm_dmabuf_context *dma = (kvm_drm_dmabuf_context *)context;
+	struct pollfd pfd;
+	int result;
+	pfd.fd = dma->fd;
+	pfd.events = POLLIN;
+	pfd.revents = 0;
+	do { result = poll(&pfd, 1, (int)timeout_ms); } while (result < 0 && errno == EINTR);
+	if (result < 0) { return -errno; }
+	if (result == 0) { return 0; }
+	return (pfd.revents & POLLIN) != 0 ? 1 : -EIO;
+}
+
+static int kvm_drm_dmabuf_sync(void *context, int start)
+{
+	kvm_drm_dmabuf_context *dma = (kvm_drm_dmabuf_context *)context;
+	struct dma_buf_sync sync;
+	memset(&sync, 0, sizeof(sync));
+	sync.flags = DMA_BUF_SYNC_READ | (start ? DMA_BUF_SYNC_START : DMA_BUF_SYNC_END);
+	return ioctl(dma->fd, DMA_BUF_IOCTL_SYNC, &sync) == 0 ? 0 : -errno;
+}
+
+static bool kvm_drm_dmabuf_cpu_access(kvm_drm_frame_map *map, int start,
+	char *out_error, size_t out_error_size)
+{
+	kvm_drm_dmabuf_context context;
+	kvm_dmabuf_access_ops ops;
+
+	if (map == NULL || map->dma_fd < 0) { return true; }
+	context.fd = map->dma_fd;
+	memset(&ops, 0, sizeof(ops));
+	ops.context = &context;
+	ops.wait_readable = kvm_drm_dmabuf_wait_readable;
+	ops.sync = kvm_drm_dmabuf_sync;
+	return kvm_dmabuf_cpu_access(&ops, start, out_error, out_error_size) != 0;
 }
 
 static uint32_t kvm_drm_pick_crtc_for_connector(int fd, const drmModeRes *res, const drmModeConnector *conn)
@@ -1066,6 +1208,7 @@ static bool kvm_drm_try_device(const char *path, kvm_drm_device *devices, int ma
 	memset(&devices[*device_count], 0, sizeof(devices[*device_count]));
 	devices[*device_count].fd = fd;
 	devices[*device_count].map.dma_fd = -1;
+	devices[*device_count].map.identity_fd = -1;
 	devices[*device_count].map.drm_fd = -1;
 	snprintf(devices[*device_count].path, sizeof(devices[*device_count].path), "%s", path);
 	*out_count += collected;
@@ -1231,6 +1374,41 @@ static uint32_t kvm_drm_get_scanout_fb_id(int fd, uint32_t crtc_id, int crtc_ind
 	return fb_id;
 }
 
+/* Query scanout activity without acquiring framebuffer handles or requiring
+ * CAP_SYS_ADMIN. A connected output with a successfully inspected CRTC and
+ * plane set can be positively inactive; query errors are never display sleep.
+ * Returns 1 active, 0 inactive, -1 unknown/disconnected.
+ */
+static int kvm_drm_output_scanout_state(int fd, const kvm_drm_output *output)
+{
+	if (output == NULL || output->crtc_index < 0 || output->crtc_index >= 32) { return -1; }
+	drmModeConnector *connector = drmModeGetConnector(fd, output->connector_id);
+	if (connector == NULL) { return -1; }
+	int connected = connector->connection == DRM_MODE_CONNECTED;
+	drmModeFreeConnector(connector);
+	if (!connected) { return -1; }
+	drmModeCrtc *crtc = drmModeGetCrtc(fd, output->crtc_id);
+	if (crtc == NULL) { return -1; }
+	int active = crtc->buffer_id != 0;
+	drmModeFreeCrtc(crtc);
+	if (active) { return 1; }
+
+	drmModePlaneRes *planes = drmModeGetPlaneResources(fd);
+	if (planes == NULL) { return -1; }
+	int result = 0;
+	for (uint32_t i = 0; i < planes->count_planes; ++i)
+	{
+		drmModePlane *plane = drmModeGetPlane(fd, planes->planes[i]);
+		if (plane == NULL) { result = -1; continue; }
+		active = plane->crtc_id == output->crtc_id && plane->fb_id != 0 &&
+			(plane->possible_crtcs & (1u << (uint32_t)output->crtc_index));
+		drmModeFreePlane(plane);
+		if (active) { result = 1; break; }
+	}
+	drmModeFreePlaneResources(planes);
+	return result;
+}
+
 static bool kvm_drm_get_scanout_frame(int fd, uint32_t crtc_id, int crtc_index, kvm_drm_scanout_frame *out, char *out_error, size_t out_error_size)
 {
 	bool have_crtc = false;
@@ -1375,6 +1553,34 @@ static uint32_t kvm_drm_bytes_per_pixel(uint32_t format)
 	}
 }
 
+// Compare visible bytes, never framebuffer IDs: compositors can repaint the same
+// buffer in place. The caller must hold CPU access and have validated the map.
+static bool kvm_drm_linear_snapshot_matches(const kvm_drm_scanout_frame *frame,
+	const kvm_drm_scanout_frame *previous, const kvm_drm_output *output,
+	const kvm_drm_output *previousOutput, const uint8_t *src,
+	const uint8_t *snapshot, size_t snapshotSize)
+{
+	size_t pixelSize, mapSize;
+	uint32_t bpp = kvm_drm_bytes_per_pixel(frame->format);
+	if (src == NULL || snapshot == NULL || frame->plane_count != 1 ||
+		(frame->modifier != DRM_FORMAT_MOD_INVALID && frame->modifier != DRM_FORMAT_MOD_LINEAR) ||
+		previous->plane_count != 1 || frame->width != previous->width ||
+		frame->height != previous->height || frame->pitch != previous->pitch ||
+		frame->offset != previous->offset || frame->format != previous->format ||
+		frame->modifier != previous->modifier || frame->rotation != previous->rotation ||
+		memcmp(output, previousOutput, sizeof(*output)) != 0 ||
+		!kvm_capture_checked_pixel_size(frame->width, frame->height, bpp, &pixelSize) ||
+		(uint64_t)frame->width * bpp > frame->pitch ||
+		!kvm_capture_checked_map_size(0, frame->pitch, frame->height, &mapSize) ||
+		snapshotSize < mapSize) { return false; }
+	for (uint32_t y = 0; y < frame->height; ++y)
+	{
+		size_t offset = (size_t)y * frame->pitch;
+		if (memcmp(src + offset, snapshot + offset, (size_t)frame->width * bpp) != 0) { return false; }
+	}
+	return true;
+}
+
 static bool kvm_drm_convert_to_rgb24(const kvm_drm_scanout_frame *f, const uint8_t *src, uint8_t *rgb, size_t rgb_capacity, size_t *rgb_size_out, char *out_error, size_t out_error_size)
 {
 	static uint8_t expand5[32];
@@ -1431,15 +1637,7 @@ static bool kvm_drm_convert_to_rgb24(const kvm_drm_scanout_frame *f, const uint8
 			{
 				const uint8_t *s = src + ((size_t)y * (size_t)f->pitch);
 				uint8_t *d = rgb + ((size_t)y * (size_t)f->width * 3u);
-				uint32_t x = f->width;
-				while (x-- > 0)
-				{
-					d[0] = s[2];
-					d[1] = s[1];
-					d[2] = s[0];
-					s += 4;
-					d += 3;
-				}
+				kvm_capture_rgb32_row(d, s, f->width, 2, 1, 0);
 			}
 			break;
 		}
@@ -1450,15 +1648,7 @@ static bool kvm_drm_convert_to_rgb24(const kvm_drm_scanout_frame *f, const uint8
 			{
 				const uint8_t *s = src + ((size_t)y * (size_t)f->pitch);
 				uint8_t *d = rgb + ((size_t)y * (size_t)f->width * 3u);
-				uint32_t x = f->width;
-				while (x-- > 0)
-				{
-					d[0] = s[0];
-					d[1] = s[1];
-					d[2] = s[2];
-					s += 4;
-					d += 3;
-				}
+				kvm_capture_rgb32_row(d, s, f->width, 0, 1, 2);
 			}
 			break;
 		}
@@ -1469,15 +1659,7 @@ static bool kvm_drm_convert_to_rgb24(const kvm_drm_scanout_frame *f, const uint8
 			{
 				const uint8_t *s = src + ((size_t)y * (size_t)f->pitch);
 				uint8_t *d = rgb + ((size_t)y * (size_t)f->width * 3u);
-				uint32_t x = f->width;
-				while (x-- > 0)
-				{
-					d[0] = s[3];
-					d[1] = s[2];
-					d[2] = s[1];
-					s += 4;
-					d += 3;
-				}
+				kvm_capture_rgb32_row(d, s, f->width, 3, 2, 1);
 			}
 			break;
 		}
@@ -1488,15 +1670,7 @@ static bool kvm_drm_convert_to_rgb24(const kvm_drm_scanout_frame *f, const uint8
 			{
 				const uint8_t *s = src + ((size_t)y * (size_t)f->pitch);
 				uint8_t *d = rgb + ((size_t)y * (size_t)f->width * 3u);
-				uint32_t x = f->width;
-				while (x-- > 0)
-				{
-					d[0] = s[1];
-					d[1] = s[2];
-					d[2] = s[3];
-					s += 4;
-					d += 3;
-				}
+				kvm_capture_rgb32_row(d, s, f->width, 1, 2, 3);
 			}
 			break;
 		}
@@ -1740,6 +1914,47 @@ static int kvm_drm_read_plane_prop_value(int fd, uint32_t plane_id, uint32_t pro
 	return found;
 }
 
+// The existing frame path can reproduce one complete non-cursor scanout plane. More than one
+// active primary/overlay plane requires crop, stacking and blend reconstruction; publishing only
+// the largest plane would silently omit windows. Reject that topology until a qualified compositor
+// adapter or complete plane compositor is selected.
+static int kvm_drm_validate_plane_composition(int fd, uint32_t crtc_id,
+	char *out_error, size_t out_error_size)
+{
+	drmModePlaneRes *pres = drmModeGetPlaneResources(fd);
+	uint32_t i;
+	int imagePlanes = 0;
+	int unknownActivePlanes = 0;
+
+	if (pres == NULL)
+	{
+		kvm_drm_copy_error_message(out_error, out_error_size, "Unable to enumerate DRM planes");
+		return 0;
+	}
+	for (i = 0; i < pres->count_planes; ++i)
+	{
+		drmModePlane *plane = drmModeGetPlane(fd, pres->planes[i]);
+		uint64_t type = UINT64_MAX;
+		uint32_t typeProp;
+		if (plane == NULL) { continue; }
+		if (plane->crtc_id == crtc_id && plane->fb_id != 0)
+		{
+			typeProp = kvm_drm_find_plane_prop(fd, plane->plane_id, "type", &type);
+			if (typeProp == 0) { ++unknownActivePlanes; }
+			else if (type != DRM_PLANE_TYPE_CURSOR) { ++imagePlanes; }
+		}
+		drmModeFreePlane(plane);
+	}
+	drmModeFreePlaneResources(pres);
+	if (!kvm_capture_plane_topology_supported(imagePlanes, unknownActivePlanes))
+	{
+		kvm_drm_copy_error_message(out_error, out_error_size,
+			"Active DRM hardware-plane composition is unsupported; a qualified compositor capture adapter is required");
+		return 0;
+	}
+	return 1;
+}
+
 // The scanout plane feeding a CRTC and its "rotation" property id are stable across frames, so the
 // per-frame cost is one plane fetch (rebind check) plus one property-values fetch.
 typedef struct kvm_drm_plane_rotation_cache
@@ -1903,10 +2118,10 @@ static kvm_drm_rotation kvm_drm_effective_output_rotation(int fd, const kvm_drm_
 static bool kvm_drm_compute_desktop_layout(const kvm_drm_output *outputs, int output_count, kvm_drm_desktop_layout *layout)
 {
 	int i;
-	int min_x = INT_MAX;
-	int min_y = INT_MAX;
-	int max_x = INT_MIN;
-	int max_y = INT_MIN;
+	int64_t min_x = INT64_MAX;
+	int64_t min_y = INT64_MAX;
+	int64_t max_x = INT64_MIN;
+	int64_t max_y = INT64_MIN;
 
 	if (outputs == NULL || output_count <= 0 || layout == NULL)
 	{
@@ -1915,8 +2130,8 @@ static bool kvm_drm_compute_desktop_layout(const kvm_drm_output *outputs, int ou
 
 	for (i = 0; i < output_count; ++i)
 	{
-		int right = outputs[i].x + (int)outputs[i].width;
-		int bottom = outputs[i].y + (int)outputs[i].height;
+		int64_t right = (int64_t)outputs[i].x + (int64_t)outputs[i].width;
+		int64_t bottom = (int64_t)outputs[i].y + (int64_t)outputs[i].height;
 		if (outputs[i].width == 0 || outputs[i].height == 0)
 		{
 			continue;
@@ -1927,17 +2142,17 @@ static bool kvm_drm_compute_desktop_layout(const kvm_drm_output *outputs, int ou
 		if (bottom > max_y) { max_y = bottom; }
 	}
 
-	if (min_x == INT_MAX || min_y == INT_MAX || max_x <= min_x || max_y <= min_y)
+	if (min_x == INT64_MAX || min_y == INT64_MAX || min_x < INT_MIN || min_y < INT_MIN ||
+		max_x > INT_MAX || max_y > INT_MAX ||
+		!kvm_capture_checked_layout_size(min_x, min_y, max_x, max_y, &layout->width, &layout->height))
 	{
 		return false;
 	}
 
-	layout->min_x = min_x;
-	layout->min_y = min_y;
-	layout->max_x = max_x;
-	layout->max_y = max_y;
-	layout->width = (uint32_t)(max_x - min_x);
-	layout->height = (uint32_t)(max_y - min_y);
+	layout->min_x = (int)min_x;
+	layout->min_y = (int)min_y;
+	layout->max_x = (int)max_x;
+	layout->max_y = (int)max_y;
 	return true;
 }
 
@@ -1968,16 +2183,10 @@ static void kvm_drm_publish_monitor_layout(const kvm_drm_output *outputs, int ou
 
 static void kvm_drm_update_tile_geometry()
 {
-	TILE_HEIGHT_COUNT = SCREEN_HEIGHT / TILE_HEIGHT;
-	TILE_WIDTH_COUNT = SCREEN_WIDTH / TILE_WIDTH;
-	if (SCREEN_WIDTH % TILE_WIDTH)
-	{
-		TILE_WIDTH_COUNT++;
-	}
-	if (SCREEN_HEIGHT % TILE_HEIGHT)
-	{
-		TILE_HEIGHT_COUNT++;
-	}
+    int width = KVM_OUTPUT_WIDTH ? KVM_OUTPUT_WIDTH : SCREEN_WIDTH;
+    int height = KVM_OUTPUT_HEIGHT ? KVM_OUTPUT_HEIGHT : SCREEN_HEIGHT;
+    TILE_WIDTH_COUNT = (width + TILE_WIDTH - 1) / TILE_WIDTH;
+    TILE_HEIGHT_COUNT = (height + TILE_HEIGHT - 1) / TILE_HEIGHT;
 }
 
 // mutter names an HDMI type-A connector "HDMI-<id>", but the kernel, libdrm, and our own
@@ -2590,6 +2799,8 @@ static bool kvm_drm_apply_xdg_output_layout(kvm_drm_output *outputs, int output_
 	return true;
 }
 
+#include "linux_kvm_kwin_capture.inc"
+
 static bool kvm_drm_apply_kwin_layout(kvm_drm_output *outputs, int output_count, bool logSelection)
 {
 	FILE *pipe;
@@ -2694,15 +2905,23 @@ static bool kvm_drm_apply_kwin_layout(kvm_drm_output *outputs, int output_count,
 // A socket FILE existing does not mean a compositor is behind it: a crashed/previous session can
 // leave a stale wayland-0 while the live one listens on wayland-1. Only a successful connect() is
 // proof of life.
-static int kvm_drm_wayland_socket_alive(const char *runtimeDir, const char *name)
+static int kvm_drm_wayland_socket_alive(const char *runtimeDir, const char *name, int sessionUid)
 {
 	struct sockaddr_un addr;
+	struct stat runtimeStat;
+	struct stat socketStat;
 	int fd, r, len;
 
+	if (runtimeDir == NULL || name == NULL || sessionUid <= 0) { return 0; }
 	memset(&addr, 0, sizeof(addr));
 	addr.sun_family = AF_UNIX;
 	len = snprintf(addr.sun_path, sizeof(addr.sun_path), "%s/%s", runtimeDir, name);
 	if (len <= 0 || len >= (int)sizeof(addr.sun_path)) { return 0; }
+	// Never bind a privileged capture child to an endpoint selected by another local account.
+	// lstat also rejects a symlink substituted between directory enumeration and connect().
+	if (lstat(runtimeDir, &runtimeStat) != 0 || !S_ISDIR(runtimeStat.st_mode) ||
+		(int)runtimeStat.st_uid != sessionUid || lstat(addr.sun_path, &socketStat) != 0 ||
+		!S_ISSOCK(socketStat.st_mode) || (int)socketStat.st_uid != sessionUid) { return 0; }
 	if ((fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0)) < 0) { return 0; }
 	r = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
 	close(fd);
@@ -2739,7 +2958,7 @@ static void kvm_drm_prepare_session_environment(int sessionUid)
 	}
 
 	envDisplay = getenv("WAYLAND_DISPLAY");
-	if (envDisplay != NULL && kvm_drm_wayland_socket_alive(runtimeDir, envDisplay))
+	if (envDisplay != NULL && kvm_drm_wayland_socket_alive(runtimeDir, envDisplay, sessionUid))
 	{
 		return;
 	}
@@ -2753,7 +2972,7 @@ static void kvm_drm_prepare_session_environment(int sessionUid)
 		while ((ent = readdir(dir)) != NULL)
 		{
 			if (strncmp(ent->d_name, "wayland-", 8) == 0 && strstr(ent->d_name, ".lock") == NULL &&
-				kvm_drm_wayland_socket_alive(runtimeDir, ent->d_name))
+				kvm_drm_wayland_socket_alive(runtimeDir, ent->d_name, sessionUid))
 			{
 				if (drm_debug) { fprintf(stderr, "DRM: using live Wayland socket %s/%s\n", runtimeDir, ent->d_name); }
 				setenv("WAYLAND_DISPLAY", ent->d_name, 1);
@@ -2836,6 +3055,14 @@ static void kvm_drm_copy_frame_to_desktop(const unsigned char *src, uint32_t src
 	}
 }
 
+static int kvm_drm_frame_covers_desktop(uint32_t width, uint32_t height, int x, int y,
+	uint32_t outputWidth, uint32_t outputHeight, uint32_t desktopWidth, uint32_t desktopHeight)
+{
+	return width > 0 && height > 0 && x == 0 && y == 0 &&
+		width == desktopWidth && height == desktopHeight &&
+		outputWidth == desktopWidth && outputHeight == desktopHeight;
+}
+
 static uint64_t kvm_drm_now_ms()
 {
 	struct timespec tsNow;
@@ -2900,17 +3127,28 @@ static void kvm_drm_debug_dump_frame(const unsigned char *rgb, uint32_t width, u
 // a momentary display sleep. The child freezes the last frame (no error to the viewer) during this
 // window, then exits so the root parent can re-fork against the current session.
 #define KVM_DRM_SESSION_LOST_GRACE_MS 3000
+#define KVM_DRM_CAPTURE_FAILURE_RETRY_MS 5000
+#define KVM_DRM_INACTIVE_REPROBE_MS 30000
 
-// True while the captured session's XDG runtime dir still exists. On logout/user-switch systemd
-// tears down /run/user/<uid> entirely, so its disappearance is our definitive "this session ended"
-// signal. A display merely in DPMS sleep keeps its runtime dir, so we do not mistake sleep for
-// logout. For uid<=0 (greeter/root/unknown) we can't use this signal, so report "present".
+// True while the captured session's XDG runtime dir still exists. Session identity is the primary
+// generation signal; runtime disappearance is a secondary logout/restart signal when logind is
+// temporarily unavailable or a compositor dies without an immediate seat transition. A display
+// merely in DPMS sleep keeps its runtime dir. For uid<=0 we report "present".
 static int kvm_drm_session_runtime_present(int sessionUid)
 {
 	char path[64];
 	if (sessionUid <= 0) { return 1; }
 	if (snprintf(path, sizeof(path), "/run/user/%d", sessionUid) <= 0) { return 1; }
 	return access(path, F_OK) == 0 ? 1 : 0;
+}
+
+static void kvm_drm_publish_lock_state(void)
+{
+	char buffer[5];
+	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_KEYSTATE);
+	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)sizeof(buffer));
+	buffer[4] = (char)kvm_events_evdev_lock_state();
+	ignore_result(kvm_drm_slave_write(buffer, sizeof(buffer)));
 }
 
 static int kvm_drm_set_only_sys_admin_cap()
@@ -3047,18 +3285,45 @@ void *kvm_server_mainloop_drm(void *parm)
 	uint64_t lastFrameTimeMs = 0;
 	int lastCaptureError = 0;
 	int scanoutSuspended = 0;
+	int compositorScanoutState[KVM_DRM_MAX_OUTPUTS] = {0};
 	int forceTileReset = 0;
+    int jpegRetryPending = 0;
+    /* Preserve the existing RGB diagnostic dump and fall back after any direct
+     * codec failure, including an incompatible runtime libjpeg implementation. */
+    const char *dumpPath = getenv("MESH_KVM_DRM_DUMP");
+    int rgb32Disabled = dumpPath != NULL && *dumpPath != 0;
+    unsigned char *scaledRgb = NULL;
+    size_t scaledCapacity = 0;
+    uint64_t sentRevisions[KVM_DRM_MAX_OUTPUTS] = {0};
+    int sentSourceWidth = 0, sentSourceHeight = 0;
+    KVM_OUTPUT_WIDTH = KVM_OUTPUT_HEIGHT = 0;
+    kvm_force_refresh = 1;
 	uint64_t captureLostSinceMs = 0;	// when scanout first went unavailable (0 = capturing normally)
+	uint64_t captureHardFailureSinceMs = 0;	// excludes ordinary display suspension from hard retries
 	int reportedScreenWidth = 0;
 	int reportedScreenHeight = 0;
 	int reportedScreenSel = -1;
 	uint64_t lastOutputRefreshMs = 0;
 	uint64_t lastRefreshFailureLogMs = 0;
-	int consoleUidMismatch = 0;
+	uint64_t lastSuspendedLogMs = 0;
+	uint64_t lastDisplayWakeMs = 0;
+	int consoleSessionConfirmed = 0;
+	uint64_t lastInputRetryMs = 0;
+	int inputFailureReported = 0;
+	int consoleNoticePending = 1;
+	int consoleSessionMismatch = 0;
+	int planeCompositionSupported = 1;
+	kvm_capture_state captureState = KVM_CAPTURE_STATE_DETACHED;
+	kvm_wayland_console_session capturedSession;
+	char planeCompositionError[KVM_DRM_MAX_ERROR];
 	char lastRefreshFailure[KVM_DRM_MAX_ERROR];
 
 	kvm_drm_init_debug();
 	g_kvmBackendDRM = 1;
+	kvm_drm_set_capture_state(&captureState, KVM_CAPTURE_STATE_DISCOVERING, "selecting seat0 and DRM outputs");
+	memset(&capturedSession, 0, sizeof(capturedSession));
+	memset(planeCompositionError, 0, sizeof(planeCompositionError));
+	capturedSession.uid = -1;
 	{
 		// Trust logind's notion of the console over the uid the master derived. The master passes
 		// uid 0 at a display-manager greeter (consoleUid() only reports sessions at or above the
@@ -3066,13 +3331,22 @@ void *kvm_server_mainloop_drm(void *parm)
 		// pass THAT uid — either way this child would point at a runtime dir with no compositor,
 		// so the logical-layout and keymap queries fail: monitors pile up at 0,0 and unicode input
 		// turns ASCII-only. When logind cannot answer, keep whatever the master passed.
-		int derivedUid = kvm_wayland_active_console_uid();
+		int haveSession = kvm_wayland_active_console_session(&capturedSession);
+		int derivedUid = haveSession ? capturedSession.uid : -1;
 		if (derivedUid > 0 && derivedUid != sessionUid)
 		{
 			if (drm_debug) { fprintf(stderr, "DRM: using logind seat0 active uid %d (master passed %d)\n", derivedUid, sessionUid); }
 			sessionUid = derivedUid;
 		}
+		if (drm_debug && haveSession)
+		{
+			fprintf(stderr, "DRM: binding capture to seat0 session=%s uid=%d type=%s state=%s\n",
+				capturedSession.id, capturedSession.uid, capturedSession.type, capturedSession.state);
+		}
 	}
+    /* A handover between the parent's registration and this discovery must
+     * restart the worker, rather than leave an A-registered worker in session B. */
+    if (kvm_registered_uid >= 0 && sessionUid != kvm_registered_uid) return (void *)-1;
 	// Non-blocking for the slave's lifetime: kvm_drm_write_all() relies on it to multiplex tile
 	// writes against master2slave input drains, and every sender routes through there in DRM mode.
 	fcntl(slave2master[1], F_SETFL, fcntl(slave2master[1], F_GETFL, 0) | O_NONBLOCK);
@@ -3080,16 +3354,14 @@ void *kvm_server_mainloop_drm(void *parm)
 	if (!g_enableEvents)
 	{
 		kvm_send_error("evdev input injection unavailable");
+		inputFailureReported = 1;
+		lastInputRetryMs = kvm_drm_now_ms();
 	}
 	else
 	{
 		// Initial lock state for the viewer indicator (the X11 path does this in kvm_init). The
 		// compositor pushed the current LED state while evdev init's post-create settle ran.
-		char ksbuf[5];
-		((unsigned short*)ksbuf)[0] = (unsigned short)htons((unsigned short)MNG_KVM_KEYSTATE);
-		((unsigned short*)ksbuf)[1] = (unsigned short)htons((unsigned short)5);
-		ksbuf[4] = (char)kvm_events_evdev_lock_state();
-		ignore_result(kvm_drm_slave_write(ksbuf, sizeof(ksbuf)));
+		kvm_drm_publish_lock_state();
 	}
 	CURRENT_DISPLAY_ID = 0;
 	SCREEN_NUM = 0;
@@ -3114,6 +3386,11 @@ void *kvm_server_mainloop_drm(void *parm)
 	return (void *)-1;
 #else
 	kvm_drm_device devices[KVM_DRM_MAX_DEVICES];
+	kvm_drm_kwin_capture *kwinCapture = NULL;
+	/* Authenticate the optional text-only Gala endpoint before dropping root. */
+	(void)kvm_gala_prepare(&capturedSession);
+	int gnomePrepared = kvm_gnome_prepare(&capturedSession);
+	kvm_gnome_reply gnomeStatus;
 	int deviceCount = 0;
 	char err[KVM_DRM_MAX_ERROR];
 	kvm_drm_output outputs[KVM_DRM_MAX_OUTPUTS];
@@ -3121,6 +3398,11 @@ void *kvm_server_mainloop_drm(void *parm)
 	kvm_drm_desktop_layout layout;
 	unsigned char *rgbBuffer = NULL;
 	size_t rgbBufferSize = 0;
+	unsigned char *readbackBuffer = NULL;
+	size_t readbackBufferSize = 0;
+	kvm_drm_scanout_frame linearSnapshotFrame = {0};
+	kvm_drm_output linearSnapshotOutput = {0};
+	int linearSnapshotValid = 0;
 	unsigned char *rgbRotatedBuffer = NULL;
 	size_t rgbRotatedBufferSize = 0;
 	unsigned char *desktopRgbBuffer = NULL;
@@ -3142,9 +3424,10 @@ void *kvm_server_mainloop_drm(void *parm)
 	memset(devices, 0, sizeof(devices));
 	memset(lastRefreshFailure, 0, sizeof(lastRefreshFailure));
 
-	if (!kvm_drm_load_libdrm())
+	if (!gnomePrepared && !kvm_drm_load_libdrm())
 	{
 		kvm_send_error("libdrm is not installed; DRM capture backend unavailable");
+		kvm_gnome_shutdown();
 		kvm_events_evdev_shutdown();
 		g_enableEvents = 0;
 		g_kvmBackendDRM = 0;
@@ -3152,8 +3435,8 @@ void *kvm_server_mainloop_drm(void *parm)
 	}
 
 	char *explicitDevice = getenv("MESH_KVM_DRM_DEVICE");
-	int haveLayout = kvm_drm_open_all_devices(explicitDevice, devices, KVM_DRM_MAX_DEVICES, &deviceCount, outputs, KVM_DRM_MAX_OUTPUTS, &outputCount, err, sizeof(err)) &&
-		kvm_drm_compute_desktop_layout(outputs, outputCount, &layout);
+	int haveLayout = gnomePrepared || (kvm_drm_open_all_devices(explicitDevice, devices, KVM_DRM_MAX_DEVICES, &deviceCount, outputs, KVM_DRM_MAX_OUTPUTS, &outputCount, err, sizeof(err)) &&
+		kvm_drm_compute_desktop_layout(outputs, outputCount, &layout));
 	if (!haveLayout)
 	{
 		// No scanout usually means the displays are in DPMS sleep; nudge them awake and retry.
@@ -3173,6 +3456,7 @@ void *kvm_server_mainloop_drm(void *parm)
 	{
 		kvm_send_error(err[0] ? err : "Unable to compute DRM desktop layout");
 		kvm_drm_close_all_devices(devices, deviceCount);
+		kvm_gnome_shutdown();
 		kvm_events_evdev_shutdown();
 		g_enableEvents = 0;
 		g_kvmBackendDRM = 0;
@@ -3185,6 +3469,7 @@ void *kvm_server_mainloop_drm(void *parm)
 			snprintf(err, sizeof(err), "drmDropMaster failed on %s (errno=%d)", devices[di].path, errno);
 			kvm_send_error(err);
 			kvm_drm_close_all_devices(devices, deviceCount);
+			kvm_gnome_shutdown();
 			kvm_events_evdev_shutdown();
 			g_enableEvents = 0;
 			g_kvmBackendDRM = 0;
@@ -3192,28 +3477,80 @@ void *kvm_server_mainloop_drm(void *parm)
 		}
 	}
 
-	if (kvm_drm_drop_to_session_uid_with_caps(sessionUid, err, sizeof(err)) != 0)
+    if (!gnomePrepared && geteuid() == 0)
+    {
+        kvm_drm_prepare_session_environment(sessionUid);
+        kvm_xkb_prepare_virtual_peer(sessionUid);
+    }
+	if (gnomePrepared)
+	{
+		// The socket was authenticated while root, without reading its data. Drop
+		// all identities, groups and capabilities before decoding any reply/image.
+		if (!kvm_gnome_drop_and_activate(&gnomeStatus) || gnomeStatus.count > KVM_DRM_MAX_OUTPUTS)
+		{
+			kvm_send_error("GNOME console initialization failed");
+			kvm_gnome_shutdown();
+			kvm_events_evdev_shutdown();
+			g_enableEvents = 0; g_kvmBackendDRM = 0;
+			return (void *)-1;
+		}
+		outputCount = (int)gnomeStatus.count;
+		for (int i = 0; i < outputCount; ++i)
+		{
+			outputs[i].x = gnomeStatus.monitors[i].x;
+			outputs[i].y = gnomeStatus.monitors[i].y;
+			outputs[i].width = gnomeStatus.monitors[i].width;
+			outputs[i].height = gnomeStatus.monitors[i].height;
+			outputs[i].rotation = KVM_DRM_ROTATION_0;
+			snprintf(outputs[i].connector_name, sizeof(outputs[i].connector_name), "GNOME-%d", i + 1);
+		}
+		if (!kvm_drm_compute_desktop_layout(outputs, outputCount, &layout))
+		{
+			kvm_send_error("GNOME console layout invalid");
+			kvm_gnome_shutdown();
+			kvm_events_evdev_shutdown();
+			g_enableEvents = 0; g_kvmBackendDRM = 0;
+			return (void *)-1;
+		}
+		if (drm_debug) { fprintf(stderr, "GNOME: using authenticated composed capture and native text with zero capabilities\n"); }
+	}
+	else if (kvm_drm_drop_to_session_uid_with_caps(sessionUid, err, sizeof(err)) != 0)
 	{
 		fprintf(stderr, "DRM privilege setup failed: %s\n", err);
 		kvm_send_error(err);
 		kvm_drm_close_all_devices(devices, deviceCount);
+		kvm_gnome_shutdown();
 		kvm_events_evdev_shutdown();
 		g_enableEvents = 0;
 		g_kvmBackendDRM = 0;
 		return (void *)-1;
 	}
-	kvm_drm_prepare_session_environment(sessionUid);
-	if (kvm_drm_apply_xdg_output_layout(outputs, outputCount, true) || kvm_drm_apply_kwin_layout(outputs, outputCount, true))
+	if (prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0 || prctl(PR_GET_DUMPABLE) != 0)
+    { kvm_send_error("Unable to protect capture worker identity"); g_shutdown = 1; }
+    kvm_drm_prepare_session_environment(sessionUid);
+	if (!gnomePrepared && (kvm_drm_apply_xdg_output_layout(outputs, outputCount, true) || kvm_drm_apply_kwin_layout(outputs, outputCount, true)))
 	{
 		if (!kvm_drm_compute_desktop_layout(outputs, outputCount, &layout))
 		{
 			kvm_send_error("Unable to compute Wayland DRM desktop layout");
 			kvm_drm_close_all_devices(devices, deviceCount);
+			kvm_gnome_shutdown();
 			kvm_events_evdev_shutdown();
 			g_enableEvents = 0;
 			g_kvmBackendDRM = 0;
 			return (void *)-1;
 		}
+	}
+
+	if (!gnomePrepared && kvm_kwin_open(&kwinCapture, outputs, outputCount, &capturedSession) < 0)
+	{
+		kvm_send_error("Compositor capture initialization failed");
+		kvm_drm_close_all_devices(devices, deviceCount);
+		kvm_gnome_shutdown();
+		kvm_events_evdev_shutdown();
+		g_enableEvents = 0;
+		g_kvmBackendDRM = 0;
+		return (void *)-1;
 	}
 	kvm_drm_publish_monitor_layout(outputs, outputCount, &layout);
 	kvm_drm_update_tile_geometry();
@@ -3256,10 +3593,65 @@ void *kvm_server_mainloop_drm(void *parm)
 		}
 		// Also covers input drained into the buffer while a frame write was stalled: those bytes
 		// don't wake select() again, so parse whenever anything is pending.
+		if (g_drmInputLen > 0 && capturedSession.id[0] != 0)
+		{
+			kvm_wayland_console_session inputSession;
+			if (kvm_wayland_active_console_session(&inputSession) &&
+				!kvm_wayland_console_session_equal(&capturedSession, &inputSession))
+			{
+				// Fail closed for input as soon as logind changes the active session. Do not wait for
+				// the debounced capture transition or replay queued typing into the replacement.
+				g_drmInputLen = 0;
+				kvm_events_evdev_release_all();
+				kvm_drm_set_capture_state(&captureState, KVM_CAPTURE_STATE_RECOVERING, "active session changed while input was queued");
+				g_shutdown = 1;
+				break;
+			}
+		}
+
+		if (kwinCapture != NULL && !kvm_kwin_pump(kwinCapture))
+		{
+			g_drmInputLen = 0;
+			kvm_events_evdev_release_all();
+			g_shutdown = 1;
+			kvm_drm_set_capture_state(&captureState, KVM_CAPTURE_STATE_RECOVERING,
+				"compositor stream, layout or session changed");
+			break;
+		}
 		kvm_drm_process_pending_input();
+		if (g_enableEvents && !kvm_events_evdev_is_active())
+		{
+			g_enableEvents = 0;
+			lastInputRetryMs = kvm_drm_now_ms();
+			if (!inputFailureReported)
+			{
+				kvm_send_error("evdev input injection failed; capture remains available");
+				inputFailureReported = 1;
+				consoleNoticePending = 1;
+			}
+		}
+		if (!g_enableEvents)
+		{
+			uint64_t inputNowMs = kvm_drm_now_ms();
+			if (lastInputRetryMs == 0 || inputNowMs - lastInputRetryMs >= 30000)
+			{
+				lastInputRetryMs = inputNowMs;
+				if (kvm_events_evdev_init())
+				{
+					g_enableEvents = 1;
+					inputFailureReported = 0;
+					fprintf(stderr, "MeshAgent: evdev input injection recovered\n");
+					fflush(stderr);
+					kvm_drm_publish_lock_state();
+				}
+			}
+		}
 
 		if (change_display)
 		{
+			// Pointer coordinates and monitor ownership are generation-scoped. Clear synthetic
+			// held state before accepting input against the new mapping.
+			kvm_events_evdev_release_all();
 			SCREEN_SEL = SCREEN_SEL_TARGET;
 			kvm_apply_monitor_selection();
 			change_display = 0;
@@ -3277,6 +3669,7 @@ void *kvm_server_mainloop_drm(void *parm)
 
 		if (g_pause || g_remotepause)
 		{
+			linearSnapshotValid = 0;
 			continue;
 		}
 
@@ -3286,108 +3679,305 @@ void *kvm_server_mainloop_drm(void *parm)
 			// runtime-dir check in the capturedOutputs<=0 block only runs when scanout is lost, but
 			// DRM captures straight across a handover, so this child would stay bound to the dead
 			// session's uid/env forever. Exit for re-fork once logind consistently reports a
-			// different console owner; consecutive checks filter the flapping mid-transition.
-			int liveConsoleUid = kvm_wayland_active_console_uid();
-			if (liveConsoleUid > 0 && liveConsoleUid != sessionUid)
+			// different session incarnation; consecutive checks filter the flapping mid-transition.
+			kvm_wayland_console_session liveSession;
+			int haveLiveSession = kvm_wayland_active_console_session(&liveSession);
+			consoleSessionConfirmed = haveLiveSession && capturedSession.id[0] != 0 &&
+				kvm_wayland_console_session_equal(&capturedSession, &liveSession);
+			int sessionChanged = haveLiveSession && capturedSession.id[0] != 0 &&
+				!kvm_wayland_console_session_equal(&capturedSession, &liveSession);
+			if (sessionChanged || (haveLiveSession && liveSession.uid > 0 && liveSession.uid != sessionUid))
 			{
-				if (++consoleUidMismatch >= 3)
+				if (++consoleSessionMismatch >= 3)
 				{
-					if (drm_debug) { fprintf(stderr, "DRM: console session uid changed %d -> %d; exiting for re-fork\n", sessionUid, liveConsoleUid); }
+					if (drm_debug)
+					{
+						fprintf(stderr, "DRM: console session changed %s/%d -> %s/%d; exiting for re-fork\n",
+							capturedSession.id[0] ? capturedSession.id : "unknown", sessionUid,
+							liveSession.id, liveSession.uid);
+					}
 					g_shutdown = 1;
+					kvm_drm_set_capture_state(&captureState, KVM_CAPTURE_STATE_RECOVERING, "active console session changed");
 					break;
 				}
 			}
 			else
 			{
-				consoleUidMismatch = 0;
+				consoleSessionMismatch = 0;
 			}
-			kvm_drm_output refreshed[KVM_DRM_MAX_OUTPUTS];
-			kvm_drm_desktop_layout refreshedLayout;
-			int refreshedCount = 0;
-			char refreshErr[KVM_DRM_MAX_ERROR];
-			memset(refreshed, 0, sizeof(refreshed));
-			memset(&refreshedLayout, 0, sizeof(refreshedLayout));
-			if (kvm_drm_refresh_all_devices(devices, deviceCount, refreshed, KVM_DRM_MAX_OUTPUTS, &refreshedCount, refreshErr, sizeof(refreshErr)))
+			// logind can activate a user session before Shell has loaded its bridge.
+			// A fallback worker must not stay on keymap-limited input indefinitely.
+			// Probe identity only; exit so the next root worker can authenticate the
+			// endpoint afresh and drop every capability before reading its replies.
+			if (!gnomePrepared && kwinCapture == NULL && consoleSessionConfirmed &&
+				kvm_gnome_endpoint_available(&capturedSession))
 			{
-				if (!kvm_drm_apply_xdg_output_layout(refreshed, refreshedCount, false))
+				g_drmInputLen = 0;
+				kvm_events_evdev_release_all();
+				g_shutdown = 1;
+				kvm_drm_set_capture_state(&captureState, KVM_CAPTURE_STATE_RECOVERING,
+					"GNOME console endpoint became available");
+				break;
+			}
+			// The compositor connection tracks its complete logical output generation.
+			// DRM's active-only enumeration must not shrink it when one monitor sleeps.
+			if (!gnomePrepared && kwinCapture == NULL)
+			{
+				kvm_drm_output refreshed[KVM_DRM_MAX_OUTPUTS];
+				kvm_drm_desktop_layout refreshedLayout;
+				int refreshedCount = 0;
+				char refreshErr[KVM_DRM_MAX_ERROR];
+				memset(refreshed, 0, sizeof(refreshed));
+				memset(&refreshedLayout, 0, sizeof(refreshedLayout));
+				if (kvm_drm_refresh_all_devices(devices, deviceCount, refreshed, KVM_DRM_MAX_OUTPUTS, &refreshedCount, refreshErr, sizeof(refreshErr)))
 				{
-					ignore_result(kvm_drm_apply_kwin_layout(refreshed, refreshedCount, false));
-				}
-				if (kvm_drm_compute_desktop_layout(refreshed, refreshedCount, &refreshedLayout))
-				{
-					if (refreshedCount != outputCount ||
-						memcmp(outputs, refreshed, sizeof(kvm_drm_output) * (size_t)refreshedCount) != 0 ||
-						memcmp(&layout, &refreshedLayout, sizeof(layout)) != 0)
+					if (!kvm_drm_apply_xdg_output_layout(refreshed, refreshedCount, false))
 					{
-						memcpy_s(outputs, sizeof(outputs), refreshed, sizeof(kvm_drm_output) * (size_t)refreshedCount);
-						outputCount = refreshedCount;
-						layout = refreshedLayout;
-						kvm_drm_publish_monitor_layout(outputs, outputCount, &layout);
-						forceTileReset = 1;
-						displayListSent = 0;
-						// Keep each device's EGL context across a layout change (same GPU; the convert
-						// resizes its own readback target). Only the framebuffer maps need resetting.
-						for (int di = 0; di < deviceCount; ++di)
-						{
-							kvm_drm_destroy_map(&devices[di].map);
-						}
-						kvm_drm_reset_logged_scanout_state(&lastLoggedFbId, &lastLoggedWidth, &lastLoggedHeight,
-							&lastLoggedPitch, &lastLoggedOffset, &lastLoggedFormat, &lastLoggedHandle,
-							&lastLoggedModifier, &lastLoggedPath);
-						lastLoggedRotation = -1;
-						if (drm_debug)
-						{
-							fprintf(stderr, "DRM: Refreshed desktop layout: %d output(s), origin=%d,%d size=%ux%u\n",
-								outputCount, layout.min_x, layout.min_y, layout.width, layout.height);
-						}
+						ignore_result(kvm_drm_apply_kwin_layout(refreshed, refreshedCount, false));
 					}
-					lastRefreshFailure[0] = 0;
-					lastRefreshFailureLogMs = 0;
+					if (kvm_drm_compute_desktop_layout(refreshed, refreshedCount, &refreshedLayout))
+					{
+						if (refreshedCount != outputCount ||
+							memcmp(outputs, refreshed, sizeof(kvm_drm_output) * (size_t)refreshedCount) != 0 ||
+							memcmp(&layout, &refreshedLayout, sizeof(layout)) != 0)
+						{
+
+							kvm_events_evdev_release_all();
+							memcpy_s(outputs, sizeof(outputs), refreshed, sizeof(kvm_drm_output) * (size_t)refreshedCount);
+							outputCount = refreshedCount;
+							layout = refreshedLayout;
+							kvm_drm_publish_monitor_layout(outputs, outputCount, &layout);
+							forceTileReset = 1;
+							displayListSent = 0;
+							// Keep each device's EGL context across a layout change (same GPU; the convert
+							// resizes its own readback target). Only the framebuffer maps need resetting.
+							for (int di = 0; di < deviceCount; ++di)
+							{
+								kvm_drm_destroy_map(&devices[di].map);
+							}
+							kvm_drm_reset_logged_scanout_state(&lastLoggedFbId, &lastLoggedWidth, &lastLoggedHeight,
+								&lastLoggedPitch, &lastLoggedOffset, &lastLoggedFormat, &lastLoggedHandle,
+								&lastLoggedModifier, &lastLoggedPath);
+							lastLoggedRotation = -1;
+							if (drm_debug)
+							{
+								fprintf(stderr, "DRM: Refreshed desktop layout: %d output(s), origin=%d,%d size=%ux%u\n",
+									outputCount, layout.min_x, layout.min_y, layout.width, layout.height);
+							}
+						}
+						lastRefreshFailure[0] = 0;
+						lastRefreshFailureLogMs = 0;
+					}
+				}
+				else if (drm_debug && !kvm_drm_is_expected_suspended_refresh_error(refreshErr) &&
+					(lastRefreshFailure[0] == 0 ||
+					 strcmp(lastRefreshFailure, refreshErr) != 0 ||
+					 nowMs - lastRefreshFailureLogMs >= 5000))
+				{
+					fprintf(stderr, "DRM: Output refresh failed: %s\n", refreshErr);
+					kvm_drm_copy_error_message(lastRefreshFailure, sizeof(lastRefreshFailure), refreshErr);
+					lastRefreshFailureLogMs = nowMs;
 				}
 			}
-			else if (drm_debug && !kvm_drm_is_expected_suspended_refresh_error(refreshErr) &&
-				(lastRefreshFailure[0] == 0 ||
-				 strcmp(lastRefreshFailure, refreshErr) != 0 ||
-				 nowMs - lastRefreshFailureLogMs >= 5000))
+			planeCompositionSupported = 1;
+			planeCompositionError[0] = 0;
+			for (int oi = 0; !gnomePrepared && oi < outputCount; ++oi)
 			{
-				fprintf(stderr, "DRM: Output refresh failed: %s\n", refreshErr);
-				kvm_drm_copy_error_message(lastRefreshFailure, sizeof(lastRefreshFailure), refreshErr);
-				lastRefreshFailureLogMs = nowMs;
+				kvm_drm_device *topologyDevice = &devices[outputs[oi].device_index];
+				if (kwinCapture != NULL)
+				{
+					int state = kvm_drm_output_scanout_state(topologyDevice->fd, &outputs[oi]);
+					if (lastOutputRefreshMs != 0 && state == 1 && compositorScanoutState[oi] != 1)
+					{
+						// Require a newly delivered compositor frame after wake, not a
+						// cached black/stale frame from before the output became active.
+						kvm_kwin_discard_frame(kwinCapture, oi);
+					}
+					compositorScanoutState[oi] = state;
+				}
+				if (kwinCapture == NULL && !kvm_drm_validate_plane_composition(topologyDevice->fd, outputs[oi].crtc_id,
+					planeCompositionError, sizeof(planeCompositionError)))
+				{
+					planeCompositionSupported = 0;
+					break;
+				}
 			}
 			lastOutputRefreshMs = nowMs;
 		}
 
-		size_t desktopRgbSize = (size_t)SCREEN_WIDTH * (size_t)SCREEN_HEIGHT * 3u;
-		if (desktopRgbBufferSize < desktopRgbSize)
+        uint32_t outWidth, outHeight;
+        if (!kvm_capture_scaled_size(SCREEN_WIDTH, SCREEN_HEIGHT, SCALING_FACTOR_NEW, &outWidth, &outHeight))
+        { kvm_send_error("Scaled desktop exceeds capture limits"); SCALING_FACTOR_NEW = SCALING_FACTOR; continue; }
+        int scalingChanged = KVM_OUTPUT_WIDTH != (int)outWidth || KVM_OUTPUT_HEIGHT != (int)outHeight;
+        if (scalingChanged) { KVM_OUTPUT_WIDTH = outWidth; KVM_OUTPUT_HEIGHT = outHeight; forceTileReset = 1; }
+        SCALING_FACTOR = SCALING_FACTOR_NEW;
+        if (kwinCapture && !jpegRetryPending && !forceTileReset && !kvm_force_refresh && !consoleNoticePending &&
+            SCREEN_SEL == reportedScreenSel && SCREEN_WIDTH == sentSourceWidth && SCREEN_HEIGHT == sentSourceHeight)
+        {
+            int unchanged = 1;
+            for (int oi=0; oi<outputCount; ++oi)
+                if (compositorScanoutState[oi] != 1 || !kvm_kwin_revision(kwinCapture, oi) ||
+                    kvm_kwin_revision(kwinCapture, oi) != sentRevisions[oi]) unchanged = 0;
+            if (unchanged) continue;
+        }
+        // Reuse the existing readback only for a single linear output. Multiple
+        // outputs share this scratch buffer, so it is not a per-output cache.
+        int canSkipLinear = linearSnapshotValid && !jpegRetryPending && outputCount == 1 &&
+            !gnomePrepared && !kwinCapture && !forceTileReset && !kvm_force_refresh &&
+            !consoleNoticePending && !lastCaptureError && !scanoutSuspended &&
+            captureState == KVM_CAPTURE_STATE_CAPTURING && SCREEN_SEL == reportedScreenSel &&
+            SCREEN_WIDTH == sentSourceWidth && SCREEN_HEIGHT == sentSourceHeight;
+        int unchangedLinearFrame = 0, linearReadbackAccepted = 0;
+        linearSnapshotValid = 0; // Any failure invalidates the saved publication.
+        size_t desktopRgbSize = 0;
+		if (!kvm_capture_checked_rgb_size((uint32_t)SCREEN_WIDTH, (uint32_t)SCREEN_HEIGHT, &desktopRgbSize))
+		{
+			kvm_send_error("DRM desktop allocation exceeds capture limits");
+			g_shutdown = 1;
+			break;
+		}
+		// Full native frames can use their capture buffer directly. Allocate the
+		// composition image only for compositor/multi-output or cropped layouts.
+		int nativeSingleFrame = !gnomePrepared && !kwinCapture && outputCount == 1;
+		if (!nativeSingleFrame && desktopRgbBufferSize < desktopRgbSize)
 		{
 			unsigned char *tmp = (unsigned char *)realloc(desktopRgbBuffer, desktopRgbSize);
 			if (tmp == NULL) ILIBCRITICALEXIT(254);
 			desktopRgbBuffer = tmp;
 			desktopRgbBufferSize = desktopRgbSize;
 		}
-		memset(desktopRgbBuffer, 0, desktopRgbSize);
+		// Native RGB buffers are private to this worker and remain valid through
+		// encoding. A full single-output frame needs no second composition copy.
+		const unsigned char *desktopFrame = desktopRgbBuffer;
+		linux_tile_rgb32_frame jpegFrame = {0};
+		if (!canSkipLinear && !nativeSingleFrame) { memset(desktopRgbBuffer, 0, desktopRgbSize); }
 
 		int capturedOutputs = 0;
+		int inactiveOutputs = 0;
+		int incompleteFrameIsHard = 0;
+		char incompleteReason[KVM_DRM_MAX_ERROR];
 		int outputIndex = 0;
-		for (outputIndex = 0; outputIndex < outputCount; ++outputIndex)
+		memset(incompleteReason, 0, sizeof(incompleteReason));
+		if (gnomePrepared)
+		{
+			const unsigned char *composed = NULL;
+			uint32_t width = 0, height = 0;
+			kvm_gnome_reply frameLayout;
+			int ready = kvm_gnome_frame(&composed, &width, &height, &frameLayout);
+			if (ready == 0 ||
+				frameLayout.width != gnomeStatus.width || frameLayout.height != gnomeStatus.height ||
+				frameLayout.count != gnomeStatus.count ||
+				memcmp(frameLayout.monitors, gnomeStatus.monitors,
+					(size_t)gnomeStatus.count * sizeof(kvm_gnome_monitor)) != 0)
+			{
+				g_drmInputLen = 0;
+				kvm_events_evdev_release_all();
+				g_shutdown = 1;
+				kvm_drm_set_capture_state(&captureState, KVM_CAPTURE_STATE_RECOVERING,
+					"GNOME capture, layout or session changed");
+				break;
+			}
+			if (ready == 2)
+			{
+				// Mutter's explicit PowerSaveMode is authoritative. Never infer
+				// sleep from black pixels or publish a black substitute frame.
+				incompleteFrameIsHard = (frameLayout.flags & 4u) == 0;
+				if (!incompleteFrameIsHard) { inactiveOutputs = outputCount; }
+				scanoutSuspended = 1;
+				forceTileReset = 1;
+				if (captureLostSinceMs == 0) { captureLostSinceMs = nowMs; }
+				kvm_drm_copy_error_message(incompleteReason, sizeof(incompleteReason),
+					incompleteFrameIsHard ? "GNOME display power state unavailable" : "GNOME display asleep");
+			}
+			else
+			{
+				kvm_drm_copy_frame_to_desktop(composed, width, height, desktopRgbBuffer,
+					(uint32_t)SCREEN_WIDTH, (uint32_t)SCREEN_HEIGHT, -CAPTURE_X, -CAPTURE_Y,
+					layout.width, layout.height);
+				capturedOutputs = outputCount;
+			}
+		}
+		for (outputIndex = 0; !gnomePrepared && outputIndex < outputCount; ++outputIndex)
 		{
 			kvm_drm_scanout_frame frame;
 			size_t rgbSize = 0;
 			bool converted = false;
+			int directTileConversion = 0;
+			int directJpeg = 0;
+			size_t directJpegSize = 0;
 			uint32_t effectiveWidth = 0;
 			uint32_t effectiveHeight = 0;
 			kvm_drm_device *dev = &devices[outputs[outputIndex].device_index];
+
 			memset(&frame, 0, sizeof(frame));
+			if (kwinCapture != NULL)
+			{
+				if (compositorScanoutState[outputIndex] != 1)
+				{
+					if (compositorScanoutState[outputIndex] == 0)
+					{
+						++inactiveOutputs;
+						kvm_drm_copy_error_message(incompleteReason, sizeof(incompleteReason), "Compositor output scanout inactive");
+					}
+					else
+					{
+						incompleteFrameIsHard = 1;
+						kvm_drm_copy_error_message(incompleteReason, sizeof(incompleteReason), "Compositor output scanout query failed");
+					}
+					scanoutSuspended = 1;
+					forceTileReset = 1;
+					if (captureLostSinceMs == 0) { captureLostSinceMs = nowMs; }
+					continue;
+				}
+				const unsigned char *composed = NULL;
+				uint32_t width = 0, height = 0;
+				int ready = kvm_kwin_frame(kwinCapture, outputIndex, &composed, &width, &height);
+				if (ready == 1)
+				{
+					// PipeWire output pixels already have the compositor's orientation.
+					// Scale into the same logical desktop used for pointer coordinates.
+					kvm_drm_copy_frame_to_desktop(composed, width, height, desktopRgbBuffer,
+						(uint32_t)SCREEN_WIDTH, (uint32_t)SCREEN_HEIGHT,
+						outputs[outputIndex].x - layout.min_x - CAPTURE_X,
+						outputs[outputIndex].y - layout.min_y - CAPTURE_Y,
+						outputs[outputIndex].width, outputs[outputIndex].height);
+					++capturedOutputs;
+				}
+				else
+				{
+					incompleteFrameIsHard = 1;
+					kvm_drm_copy_error_message(incompleteReason, sizeof(incompleteReason),
+						ready < 0 ? "Compositor frame failed" : "Waiting for complete compositor outputs");
+					forceTileReset = 1;
+					if (captureLostSinceMs == 0) { captureLostSinceMs = nowMs; }
+				}
+				continue;
+			}
+			if (!planeCompositionSupported)
+			{
+				incompleteFrameIsHard = 1;
+				kvm_drm_copy_error_message(incompleteReason, sizeof(incompleteReason), planeCompositionError);
+				scanoutSuspended = 1;
+				forceTileReset = 1;
+				if (captureLostSinceMs == 0) { captureLostSinceMs = nowMs; }
+				continue;
+			}
 
 			if (!kvm_drm_get_scanout_frame(dev->fd, outputs[outputIndex].crtc_id, outputs[outputIndex].crtc_index, &frame, err, sizeof(err)))
 			{
 				// Scanout acquisition failing mid-session is the logout / display-sleep symptom. Freeze
 				// the last frame quietly instead of pushing a fatal error to the viewer; the grace +
-				// runtime-dir check in the capturedOutputs<=0 block below distinguishes a transient
+				// runtime-dir check in the incomplete-frame block below distinguishes a transient
 				// display sleep (keep waiting) from a real session teardown (exit so the parent re-forks).
+				if (strcmp(err, "Active CRTC has no framebuffer") == 0) { ++inactiveOutputs; }
 				if (!kvm_drm_is_transient_scanout_error(err) && drm_debug)
 				{
 					fprintf(stderr, "DRM: scanout acquisition failed (%s); suspending\n", err);
+				}
+				if (!kvm_drm_is_transient_scanout_error(err))
+				{
+					incompleteFrameIsHard = 1;
+					kvm_drm_copy_error_message(incompleteReason, sizeof(incompleteReason), err);
 				}
 				scanoutSuspended = 1;
 				forceTileReset = 1;
@@ -3399,6 +3989,8 @@ void *kvm_server_mainloop_drm(void *parm)
 			{
 				kvm_drm_close_frame_handles(dev->fd, &frame);
 				// No readable framebuffer handle: same handover/sleep symptom as above, suspend quietly.
+				incompleteFrameIsHard = 1;
+				kvm_drm_copy_error_message(incompleteReason, sizeof(incompleteReason), "DRM framebuffer has no readable handle");
 				scanoutSuspended = 1;
 				forceTileReset = 1;
 				if (captureLostSinceMs == 0) { captureLostSinceMs = nowMs; }
@@ -3436,8 +4028,31 @@ void *kvm_server_mainloop_drm(void *parm)
 				lastLoggedRotation = (int)frame.rotation;
 			}
 
-			rgbSize = (size_t)frame.width * (size_t)frame.height * 3u;
-			if (rgbBufferSize < rgbSize)
+			if (!kvm_capture_checked_rgb_size(frame.width, frame.height, &rgbSize))
+			{
+				kvm_drm_close_frame_handles(dev->fd, &frame);
+				kvm_send_error("DRM framebuffer allocation exceeds capture limits");
+				lastCaptureError = 1;
+				incompleteFrameIsHard = 1;
+				kvm_drm_copy_error_message(incompleteReason, sizeof(incompleteReason), "DRM framebuffer allocation exceeds capture limits");
+				if (captureLostSinceMs == 0) { captureLostSinceMs = nowMs; }
+				continue;
+			}
+			directTileConversion = nativeSingleFrame && frame.plane_count <= 1 && frame.rotation == KVM_DRM_ROTATION_0 &&
+				(frame.modifier == DRM_FORMAT_MOD_INVALID || frame.modifier == DRM_FORMAT_MOD_LINEAR) &&
+				SCALING_FACTOR == 1024 && TILE_WIDTH > 0 && SCREEN_WIDTH % TILE_WIDTH == 0 &&
+				kvm_drm_frame_covers_desktop(frame.width, frame.height,
+					outputs[outputIndex].x - layout.min_x - CAPTURE_X,
+					outputs[outputIndex].y - layout.min_y - CAPTURE_Y,
+					outputs[outputIndex].width, outputs[outputIndex].height, SCREEN_WIDTH, SCREEN_HEIGHT);
+			directJpeg = directTileConversion && !rgb32Disabled && TILE_WIDTH == 32 && TILE_HEIGHT == 32 &&
+                jpeg_rgb32_supported(kvm_drm_jpeg_format(frame.format)) &&
+                (uint64_t)frame.width * 4u <= frame.pitch &&
+                kvm_capture_checked_map_size(0,frame.pitch,adjust_screen_size(SCREEN_HEIGHT),&directJpegSize);
+			if (directJpeg) directTileConversion = 0;
+			if (directTileConversion && kvm_drm_prepare_tile_buffer(&desktopBuffer, &desktopBufferSize) != 0)
+			{ g_shutdown = 1; break; }
+			if (!directTileConversion && !directJpeg && rgbBufferSize < rgbSize)
 			{
 				unsigned char *tmp = (unsigned char *)realloc(rgbBuffer, rgbSize);
 				if (tmp == NULL) ILIBCRITICALEXIT(254);
@@ -3463,7 +4078,16 @@ void *kvm_server_mainloop_drm(void *parm)
 			}
 			else
 			{
-				size_t required_bytes = (size_t)frame.offset + ((size_t)frame.pitch * (size_t)frame.height);
+				size_t required_bytes = 0;
+				if (!kvm_capture_checked_map_size(frame.offset, frame.pitch, frame.height, &required_bytes))
+				{
+					kvm_drm_close_frame_handles(dev->fd, &frame);
+					kvm_drm_copy_error_message(err, sizeof(err), "DRM framebuffer mapping exceeds capture limits");
+					converted = false;
+					incompleteFrameIsHard = 1;
+					kvm_drm_copy_error_message(incompleteReason, sizeof(incompleteReason), err);
+					goto conversion_complete;
+				}
 				if (!kvm_drm_map_framebuffer_handle(dev->fd, frame.handle, required_bytes, &dev->map, err, sizeof(err)))
 				{
 					kvm_drm_close_gem_handle(dev->fd, frame.handle);
@@ -3473,25 +4097,65 @@ void *kvm_server_mainloop_drm(void *parm)
 					scanoutSuspended = 1;
 					forceTileReset = 1;
 					if (captureLostSinceMs == 0) { captureLostSinceMs = nowMs; }
+					incompleteFrameIsHard = 1;
+					kvm_drm_copy_error_message(incompleteReason, sizeof(incompleteReason), err);
 					continue;
 				}
 				else
 				{
-					if (drm_debug >= 2 && lastLoggedPath != 0)
+					if (drm_debug >= 2 && lastLoggedPath != (directJpeg ? 2 : 0))
 					{
 						char format[32];
 						kvm_drm_format_fourcc(format, sizeof(format), frame.format);
-						fprintf(stderr, "DRM: Using CPU readback conversion for format %s\n", format);
-						lastLoggedPath = 0;
+						fprintf(stderr, "DRM: Using CPU readback %s for format %s\n",
+                            directJpeg ? "with direct RGB32 JPEG" : "conversion", format);
+						lastLoggedPath = directJpeg ? 2 : 0;
 					}
 
+					// Per-channel byte reads from a device mapping can dominate capture time.
+					// Stage the bounded linear image once in ordinary RAM, then convert there.
+					// Keep the copy inside the DMA-BUF CPU-access synchronization interval.
+					size_t readbackSize = required_bytes - frame.offset;
+					size_t privateSize = directJpeg ? directJpegSize : readbackSize;
+					if (readbackBufferSize < privateSize)
+					{
+						unsigned char *tmp = (unsigned char *)realloc(readbackBuffer, privateSize);
+						if (tmp == NULL) ILIBCRITICALEXIT(254);
+						readbackBuffer = tmp;
+						readbackBufferSize = privateSize;
+					}
 					const uint8_t *src = dev->map.addr + frame.offset;
-					converted = kvm_drm_convert_to_rgb24(&frame, src, rgbBuffer, rgbBufferSize, &rgbSize, err, sizeof(err));
+					if (kvm_drm_dmabuf_cpu_access(&dev->map, 1, err, sizeof(err)))
+					{
+						unchangedLinearFrame = canSkipLinear && kvm_drm_linear_snapshot_matches(&frame,
+							&linearSnapshotFrame, &outputs[outputIndex], &linearSnapshotOutput,
+							src, readbackBuffer, readbackBufferSize);
+						if (unchangedLinearFrame) { converted = true; }
+						else
+						{
+							kvm_capture_copy_linear(readbackBuffer, src, readbackSize);
+							converted = directJpeg || kvm_drm_convert_to_rgb24(&frame, readbackBuffer,
+								directTileConversion ? (unsigned char *)desktopBuffer : rgbBuffer,
+								directTileConversion ? (size_t)desktopBufferSize : rgbBufferSize, &rgbSize, err, sizeof(err));
+						}
+						if (!kvm_drm_dmabuf_cpu_access(&dev->map, 0, err, sizeof(err)))
+						{ converted = false; unchangedLinearFrame = 0; }
+						if (converted && outputCount == 1)
+						{
+							linearSnapshotFrame = frame;
+							linearSnapshotOutput = outputs[outputIndex];
+							linearReadbackAccepted = 1;
+						}
+					}
 				}
 			}
 
+		conversion_complete:
 			if (!converted)
 			{
+				incompleteFrameIsHard = 1;
+				kvm_drm_copy_error_message(incompleteReason, sizeof(incompleteReason), err);
+				if (captureLostSinceMs == 0) { captureLostSinceMs = nowMs; }
 				if (lastCaptureError == 0)
 				{
 					kvm_send_error(err);
@@ -3500,6 +4164,33 @@ void *kvm_server_mainloop_drm(void *parm)
 				continue;
 			}
 
+			if (unchangedLinearFrame) { break; }
+			if (directJpeg)
+			{
+                /* Only the validated scanout bytes were read under DMA-BUF CPU
+                 * access. Bottom tile rows are private zero padding, never a
+                 * read beyond the mapping or a previous session's pixels. */
+                size_t visible = (size_t)frame.pitch * frame.height;
+                memset(readbackBuffer+visible,0,directJpegSize-visible);
+                jpegFrame = (linux_tile_rgb32_frame){readbackBuffer,readbackBufferSize,
+                    frame.pitch,kvm_drm_jpeg_format(frame.format)};
+                free(rgbBuffer); rgbBuffer=NULL; rgbBufferSize=0;
+                free(desktopRgbBuffer); desktopRgbBuffer=NULL; desktopRgbBufferSize=0;
+                free(desktopBuffer); desktopBuffer=NULL; desktopBufferSize=0;
+                desktopFrame=NULL;
+                capturedOutputs++;
+                continue;
+			}
+			if (directTileConversion)
+			{
+				// The final padded image is worker-owned ordinary RAM, never a
+				// device mapping. Conversion still finishes inside CPU-access sync.
+				desktopFrame = (const unsigned char *)desktopBuffer;
+				free(rgbBuffer); rgbBuffer = NULL; rgbBufferSize = 0;
+				free(desktopRgbBuffer); desktopRgbBuffer = NULL; desktopRgbBufferSize = 0;
+				capturedOutputs++;
+				continue;
+			}
 			const unsigned char *rgbFrame = rgbBuffer;
 			kvm_drm_get_rotated_dimensions(&frame, &effectiveWidth, &effectiveHeight);
 			if (frame.rotation != KVM_DRM_ROTATION_0)
@@ -3515,18 +4206,45 @@ void *kvm_server_mainloop_drm(void *parm)
 				rgbFrame = rgbRotatedBuffer;
 			}
 
-			kvm_drm_copy_frame_to_desktop(rgbFrame, effectiveWidth, effectiveHeight, desktopRgbBuffer, (uint32_t)SCREEN_WIDTH, (uint32_t)SCREEN_HEIGHT,
-				outputs[outputIndex].x - layout.min_x - CAPTURE_X, outputs[outputIndex].y - layout.min_y - CAPTURE_Y,
-				outputs[outputIndex].width, outputs[outputIndex].height);
+			int desktopX = outputs[outputIndex].x - layout.min_x - CAPTURE_X;
+			int desktopY = outputs[outputIndex].y - layout.min_y - CAPTURE_Y;
+			if (nativeSingleFrame && kvm_drm_frame_covers_desktop(effectiveWidth, effectiveHeight,
+				desktopX, desktopY, outputs[outputIndex].width, outputs[outputIndex].height, SCREEN_WIDTH, SCREEN_HEIGHT))
+			{
+				desktopFrame = rgbFrame;
+			}
+			else
+			{
+				if (desktopRgbBufferSize < desktopRgbSize)
+				{
+					unsigned char *tmp = realloc(desktopRgbBuffer, desktopRgbSize);
+					if (!tmp) { g_shutdown = 1; break; }
+					desktopRgbBuffer = tmp; desktopRgbBufferSize = desktopRgbSize;
+				}
+				desktopFrame = desktopRgbBuffer;
+				if (nativeSingleFrame) { memset(desktopRgbBuffer, 0, desktopRgbSize); }
+				kvm_drm_copy_frame_to_desktop(rgbFrame, effectiveWidth, effectiveHeight, desktopRgbBuffer,
+					(uint32_t)SCREEN_WIDTH, (uint32_t)SCREEN_HEIGHT, desktopX, desktopY,
+					outputs[outputIndex].width, outputs[outputIndex].height);
+			}
 			capturedOutputs++;
 		}
 
-		if (capturedOutputs <= 0)
+		if (unchangedLinearFrame)
 		{
-			// Scanout has been unavailable on every output for longer than the grace period. If the
+			linearSnapshotValid = 1;
+			continue;
+		}
+		if (capturedOutputs != outputCount)
+		{
+			kvm_drm_set_capture_state(&captureState,
+				incompleteFrameIsHard ? KVM_CAPTURE_STATE_RECOVERING : KVM_CAPTURE_STATE_SUSPENDED,
+				incompleteReason);
+			// Never publish a partial multi-monitor desktop as a healthy complete frame. If the
 			// captured session's runtime dir is also gone, the user has logged out / switched away:
 			// exit cleanly so the (still-root) parent re-forks against the CURRENT active session uid.
-			// If the runtime dir is still present the display is only asleep (DPMS) — keep waiting.
+			// A hard acquisition/import/layout failure with a live runtime gets a bounded retry before
+			// worker replacement; an inactive output continues waiting for display wake/session events.
 			if (captureLostSinceMs != 0 &&
 				(kvm_drm_now_ms() - captureLostSinceMs) >= KVM_DRM_SESSION_LOST_GRACE_MS &&
 				!kvm_drm_session_runtime_present(sessionUid))
@@ -3536,20 +4254,65 @@ void *kvm_server_mainloop_drm(void *parm)
 					fprintf(stderr, "DRM: session uid %d runtime dir gone; exiting for re-derive/re-fork\n", sessionUid);
 				}
 				g_shutdown = 1;	// leave the loop; the parent detects the child exit and re-forks
+				kvm_drm_set_capture_state(&captureState, KVM_CAPTURE_STATE_RECOVERING, "captured session ended");
 				break;
 			}
-			if (scanoutSuspended && drm_debug)
+			// Waking discards pre-suspend compositor pixels and waits for a fresh frame.
+			// Give that hard wait its own retry budget; sleeping time still counts toward
+			// the unchanged overall reprobe/session limits, not this acquisition timeout.
+			if (kvm_capture_failure_due(&captureHardFailureSinceMs, nowMs,
+				incompleteFrameIsHard, KVM_DRM_CAPTURE_FAILURE_RETRY_MS))
 			{
-				fprintf(stderr, "DRM: Scanout unavailable on all outputs, waiting for display resume\n");
+				if (lastCaptureError == 0)
+				{
+					kvm_send_error(incompleteReason[0] ? incompleteReason : "DRM capture failed");
+				}
+				g_shutdown = 1;
+				kvm_drm_set_capture_state(&captureState, KVM_CAPTURE_STATE_FAILED,
+					incompleteReason[0] ? incompleteReason : "DRM capture failed");
+				break;
+			}
+			// Reuse the startup wake action without tearing down a healthy worker. Only wake when
+			// every selected output is inactive and logind still confirms the same console session.
+			// Partial layouts and acquisition/import failures continue through normal recovery.
+			if (kvm_capture_wake_due(captureLostSinceMs, nowMs, &lastDisplayWakeMs,
+				!incompleteFrameIsHard && outputCount > 0 && inactiveOutputs == outputCount,
+				g_enableEvents && kvm_events_evdev_is_active(), consoleSessionConfirmed))
+			{
+				if (drm_debug) { fprintf(stderr, "DRM: waking inactive displays within current capture worker\n"); }
+				kvm_events_evdev_wake();
+			}
+			if (captureLostSinceMs != 0 &&
+				(kvm_drm_now_ms() - captureLostSinceMs) >= KVM_DRM_INACTIVE_REPROBE_MS)
+			{
+				if (drm_debug)
+				{
+					fprintf(stderr, "DRM: output remained inactive for %u ms; reopening capture devices\n",
+						(unsigned int)KVM_DRM_INACTIVE_REPROBE_MS);
+				}
+				g_shutdown = 1;
+				kvm_drm_set_capture_state(&captureState, KVM_CAPTURE_STATE_RECOVERING, "inactive output reprobe");
+				break;
+			}
+			if (scanoutSuspended && drm_debug &&
+				(lastSuspendedLogMs == 0 || nowMs - lastSuspendedLogMs >= 5000))
+			{
+				fprintf(stderr, "DRM: Scanout unavailable on one or more outputs, waiting for recovery\n");
+				lastSuspendedLogMs = nowMs;
 			}
 			continue;
 		}
 		scanoutSuspended = 0;
+		if (lastCaptureError) { consoleNoticePending = 1; }
 		lastCaptureError = 0;
 		captureLostSinceMs = 0;	// captured a frame again; clear the session-loss grace timer
-		kvm_drm_debug_dump_frame(desktopRgbBuffer, (uint32_t)SCREEN_WIDTH, (uint32_t)SCREEN_HEIGHT);
+		captureHardFailureSinceMs = 0;
+		lastDisplayWakeMs = 0;
+		lastSuspendedLogMs = 0;
+		kvm_drm_set_capture_state(&captureState, KVM_CAPTURE_STATE_CAPTURING, "complete frame ready");
+		if (!jpegFrame.pixels) kvm_drm_debug_dump_frame(desktopFrame, (uint32_t)SCREEN_WIDTH, (uint32_t)SCREEN_HEIGHT);
 
-		if (SCREEN_WIDTH != reportedScreenWidth || SCREEN_HEIGHT != reportedScreenHeight || SCREEN_SEL != reportedScreenSel)
+		if (KVM_OUTPUT_WIDTH != reportedScreenWidth || KVM_OUTPUT_HEIGHT != reportedScreenHeight || SCREEN_SEL != reportedScreenSel)
 		{
 			int oldTileHeightCount = TILE_HEIGHT_COUNT;
 			kvm_drm_update_tile_geometry();
@@ -3557,8 +4320,8 @@ void *kvm_server_mainloop_drm(void *parm)
 			kvm_send_display();
 			reset_tile_info(oldTileHeightCount);
 			forceTileReset = 0;
-			reportedScreenWidth = SCREEN_WIDTH;
-			reportedScreenHeight = SCREEN_HEIGHT;
+			reportedScreenWidth = KVM_OUTPUT_WIDTH;
+			reportedScreenHeight = KVM_OUTPUT_HEIGHT;
 			reportedScreenSel = SCREEN_SEL;
 		}
 
@@ -3573,35 +4336,83 @@ void *kvm_server_mainloop_drm(void *parm)
 			reset_tile_info(0);
 			forceTileReset = 0;
 		}
-		else if (forceTileReset)
+		else if (forceTileReset || kvm_force_refresh)
 		{
-			reset_tile_info(TILE_HEIGHT_COUNT);
+			/* A failed encode already invalidated checksums without allocating.
+             * Do not allocate a new tile table to recover from low memory. */
+            if (!jpegRetryPending) reset_tile_info(TILE_HEIGHT_COUNT);
 			forceTileReset = 0;
 		}
 
-		if (kvm_drm_send_dirty_tiles(desktopRgbBuffer, desktopRgbSize, &desktopBuffer, &desktopBufferSize) != 0)
+		// Empty MNG_ERROR clears a prior worker's stale viewer notice. Send it
+		// only after a complete frame is ready, preserving an unresolved input
+		// failure. Put the header before tiles so even a static first frame
+		// flushes the four-byte clear through the existing relay parser.
+		if (consoleNoticePending && !inputFailureReported)
+		{
+			kvm_send_error("");
+			consoleNoticePending = 0;
+		}
+        const unsigned char *transmitted = desktopFrame;
+        size_t transmittedSize = desktopRgbSize;
+        if (SCREEN_WIDTH != KVM_OUTPUT_WIDTH || SCREEN_HEIGHT != KVM_OUTPUT_HEIGHT)
+        {
+            if (!kvm_capture_checked_rgb_size(KVM_OUTPUT_WIDTH, KVM_OUTPUT_HEIGHT, &transmittedSize)) { g_shutdown = 1; break; }
+            if (scaledCapacity < transmittedSize) {
+                unsigned char *next = realloc(scaledRgb, transmittedSize);
+                if (!next) { g_shutdown = 1; break; }
+                scaledRgb = next; scaledCapacity = transmittedSize;
+            }
+            kvm_capture_scale_rgb(desktopFrame, SCREEN_WIDTH, SCREEN_HEIGHT, scaledRgb, KVM_OUTPUT_WIDTH, KVM_OUTPUT_HEIGHT);
+            transmitted = scaledRgb;
+        }
+        else if (scaledRgb != NULL)
+        {
+            /* A return to native dimensions no longer needs the scaled copy.
+             * Release its high-water allocation instead of retaining it for
+             * the rest of the desktop session. */
+            free(scaledRgb);
+            scaledRgb = NULL;
+            scaledCapacity = 0;
+        }
+        /* Tile encoder uses SCREEN_* as its stride. No input is dispatched inside
+         * its write drain; restore source dimensions before processing input. */
+        int sourceWidth = SCREEN_WIDTH, sourceHeight = SCREEN_HEIGHT;
+        SCREEN_WIDTH = KVM_OUTPUT_WIDTH; SCREEN_HEIGHT = KVM_OUTPUT_HEIGHT;
+        int tileResult = jpegFrame.pixels ? kvm_drm_send_tiles(NULL,0,NULL,NULL,&jpegFrame) :
+            kvm_drm_send_dirty_tiles(transmitted, transmittedSize, &desktopBuffer, &desktopBufferSize);
+        SCREEN_WIDTH = sourceWidth; SCREEN_HEIGHT = sourceHeight;
+        jpegRetryPending = tileResult > 0;
+        if (jpegFrame.pixels && jpegRetryPending) rgb32Disabled = 1;
+        if (!tileResult) {
+            linearSnapshotValid = linearReadbackAccepted;
+            kvm_force_refresh = 0; sentSourceWidth = sourceWidth; sentSourceHeight = sourceHeight;
+            if (kwinCapture) for (int oi=0; oi<outputCount; ++oi) sentRevisions[oi] = kvm_kwin_revision(kwinCapture, oi);
+        }
+        if (tileResult < 0)
 		{
 			g_shutdown = 1;
 		}
 	}
 
+    free(scaledRgb);
 	if (desktopBuffer != NULL)
 	{
 		free(desktopBuffer);
 		desktopBuffer = NULL;
 		desktopBufferSize = 0;
 	}
-	if (jpeg_buffer != NULL)
-	{
-		free(jpeg_buffer);
-		jpeg_buffer = NULL;
-		jpeg_buffer_length = 0;
-	}
+	jpeg_encoder_cleanup();
 
 	if (rgbBuffer != NULL)
 	{
 		free(rgbBuffer);
 		rgbBuffer = NULL;
+	}
+	if (readbackBuffer != NULL)
+	{
+		free(readbackBuffer);
+		readbackBuffer = NULL;
 	}
 	if (rgbRotatedBuffer != NULL)
 	{
@@ -3613,6 +4424,7 @@ void *kvm_server_mainloop_drm(void *parm)
 		free(desktopRgbBuffer);
 		desktopRgbBuffer = NULL;
 	}
+	kvm_kwin_destroy(kwinCapture);
 	kvm_drm_close_all_devices(devices, deviceCount);
 
 	close(slave2master[1]);
@@ -3634,7 +4446,9 @@ void *kvm_server_mainloop_drm(void *parm)
 		free(tilebuffer);
 		tilebuffer = NULL;
 	}
+	kvm_gnome_shutdown();
 	kvm_events_evdev_shutdown();
+	kvm_drm_set_capture_state(&captureState, KVM_CAPTURE_STATE_DETACHED, "worker stopped");
 	g_enableEvents = 0;
 	g_kvmBackendDRM = 0;
 

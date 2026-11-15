@@ -15,120 +15,206 @@ limitations under the License.
 */
 
 #include "linux_compression.h"
-#include "../../../microstack/ILibParsers.h"
+#include <stdint.h>
+#include <limits.h>
+#include <setjmp.h>
+#include <string.h>
 
-#if defined(JPEGMAXBUF)
-	#define MAX_TILE_SIZE JPEGMAXBUF
-#else
-	#define MAX_TILE_SIZE 65500
+#ifndef JPEGMAXBUF
+#define JPEGMAXBUF 65500
 #endif
+#ifndef LINUX_JPEG_MALLOC
+#define LINUX_JPEG_MALLOC malloc
+#endif
+#ifndef LINUX_JPEG_REALLOC
+#define LINUX_JPEG_REALLOC realloc
+#endif
+/* Retain ordinary output capacity, not an unusually large jumbo high-water mark. */
+#define JPEG_RETAIN_LIMIT (4u * 1024u * 1024u)
 
 unsigned char *jpeg_buffer = NULL;
 int jpeg_buffer_length = 0;
 char jpegLastError[JMSG_LENGTH_MAX];
 JPEG_error_handler default_JPEG_error_handler = NULL;
 
-void jpeg_error_handler(j_common_ptr ptr)
-{
-	// Build the error string
-	(*(ptr->err->format_message)) (ptr, jpegLastError);
+/* Like the existing exported output, this context belongs to one capture worker.
+ * No pointer into it escapes to an asynchronous send: tiles own their packets. */
+static struct {
+    struct jpeg_compress_struct codec;
+    struct jpeg_error_mgr errors;
+    struct jpeg_destination_mgr destination;
+    jmp_buf recovery;
+    unsigned char *output;
+    size_t capacity;
+    int configured, quality;
+    jpeg_pixel_format format;
+} encoder;
 
-	if (default_JPEG_error_handler != NULL) { default_JPEG_error_handler(jpegLastError); }
-	exit(1);
+static void reset_codec(void)
+{
+    if (encoder.codec.mem != NULL) { jpeg_destroy_compress(&encoder.codec); }
+    memset(&encoder.codec, 0, sizeof(encoder.codec));
+    encoder.configured = 0;
 }
 
-void init_destination(j_compress_ptr cinfo)
+void jpeg_discard_output(void)
 {
-	JOCTET * next_output_byte;
-	if (jpeg_buffer != NULL) { free(jpeg_buffer); }
-	if ((jpeg_buffer = malloc(MAX_BUFFER)) == NULL) { ILIBCRITICALEXIT(254); }
-	jpeg_buffer_length = 0;
-	next_output_byte = jpeg_buffer;
-	cinfo->dest->next_output_byte = next_output_byte;
-	cinfo->dest->free_in_buffer = MAX_BUFFER;
+    /* The packed compatibility API transfers ownership instead of borrowing. */
+    if (jpeg_buffer != NULL && jpeg_buffer != encoder.output) { free(jpeg_buffer); }
+    jpeg_buffer = NULL;
+    jpeg_buffer_length = 0;
+    if (encoder.capacity > JPEG_RETAIN_LIMIT) {
+        free(encoder.output); encoder.output = NULL; encoder.capacity = 0;
+    }
 }
 
-boolean empty_output_buffer(j_compress_ptr cinfo)
+void jpeg_encoder_cleanup(void)
 {
-	JOCTET * next_output_byte;
+    jpeg_discard_output();
+    reset_codec();
+    free(encoder.output); encoder.output = NULL; encoder.capacity = 0;
+}
 
-	jpeg_buffer_length += MAX_BUFFER;
-	if ((jpeg_buffer = (unsigned char *)realloc(jpeg_buffer, jpeg_buffer_length + MAX_BUFFER)) == NULL) { ILIBCRITICALEXIT(254); }
-	next_output_byte = jpeg_buffer + jpeg_buffer_length;
-	cinfo->dest->next_output_byte = next_output_byte;
-	cinfo->dest->free_in_buffer = MAX_BUFFER;
+static void jpeg_error_handler(j_common_ptr ptr)
+{
+    (*ptr->err->format_message)(ptr, jpegLastError);
+    longjmp(encoder.recovery, 1);
+}
 
-#if MAX_TILE_SIZE > 0
-	if ( jpeg_buffer_length > MAX_TILE_SIZE) return FALSE;
+static void init_destination(j_compress_ptr cinfo)
+{
+    if (encoder.output == NULL) {
+        encoder.capacity = MAX_BUFFER;
+        encoder.output = LINUX_JPEG_MALLOC(encoder.capacity);
+        if (encoder.output == NULL) { encoder.capacity = 0; ERREXIT(cinfo, JERR_OUT_OF_MEMORY); }
+    }
+    cinfo->dest->next_output_byte = encoder.output;
+    cinfo->dest->free_in_buffer = encoder.capacity;
+}
+
+static boolean empty_output_buffer(j_compress_ptr cinfo)
+{
+    size_t used = encoder.capacity;
+#if JPEGMAXBUF > 0
+    if (used > JPEGMAXBUF) {
+        jpeg_buffer_length = (int)used;
+        longjmp(encoder.recovery, 2); /* Oversize is a tile-splitting request. */
+    }
 #endif
-	return TRUE;
-}
-
-void term_destination (j_compress_ptr cinfo)
-{
-	int remaining_buff_length = MAX_BUFFER - cinfo->dest->free_in_buffer;
-
-	jpeg_buffer_length += remaining_buff_length;
-
-#if MAX_TILE_SIZE > 0
-	if (jpeg_buffer_length > MAX_TILE_SIZE)
-	{
-		free(jpeg_buffer);
-		jpeg_buffer = NULL;
-	}
-	else 
+    if (used >= (size_t)INT_MAX - 16u) { ERREXIT(cinfo, JERR_OUT_OF_MEMORY); }
+    size_t next = used > ((size_t)INT_MAX - 16u) / 2u ? (size_t)INT_MAX - 16u : used * 2u;
+#if JPEGMAXBUF > 0
+    if (next > (size_t)JPEGMAXBUF + 1u) { next = (size_t)JPEGMAXBUF + 1u; }
 #endif
-	{
-		if ((jpeg_buffer = (unsigned char *)realloc(jpeg_buffer, jpeg_buffer_length)) == NULL) { ILIBCRITICALEXIT(254); }
-	}
+    unsigned char *grown = LINUX_JPEG_REALLOC(encoder.output, next);
+    if (grown == NULL) { ERREXIT(cinfo, JERR_OUT_OF_MEMORY); }
+    encoder.output = grown; encoder.capacity = next;
+    cinfo->dest->next_output_byte = grown + used;
+    cinfo->dest->free_in_buffer = next - used;
+    return TRUE;
 }
 
-int write_JPEG_buffer(JSAMPLE * image_buffer, int image_width, int image_height, int quality)
+static void term_destination(j_compress_ptr cinfo)
 {
-	struct jpeg_compress_struct cinfo;
-	struct jpeg_error_mgr jerr;
-	JSAMPROW row_pointer[1];
-	int row_stride;
+    jpeg_buffer_length = (int)(encoder.capacity - cinfo->dest->free_in_buffer);
+}
 
-	cinfo.err = jpeg_std_error(&jerr);
-	if (default_JPEG_error_handler != NULL) { jerr.error_exit = jpeg_error_handler; }
+/* Packed callers (including macOS) keep the original caller-owned result and
+ * per-call codec lifetime. Linux's strided capture API opts into reuse. */
+int write_JPEG_buffer(JSAMPLE *image_buffer, int width, int height, int quality)
+{
+    int result = write_JPEG_buffer_strided(image_buffer, width, height, width > 0 ? (size_t)width * 3u : 0, quality);
+    if (jpeg_buffer != NULL) { encoder.output = NULL; encoder.capacity = 0; }
+    else { free(encoder.output); encoder.output = NULL; encoder.capacity = 0; }
+    reset_codec();
+    if (result < 0 && default_JPEG_error_handler != NULL) { default_JPEG_error_handler(jpegLastError); }
+    return result;
+}
 
-	jpeg_create_compress(&cinfo);
-	cinfo.dest = (struct jpeg_destination_mgr *) malloc(sizeof(struct jpeg_destination_mgr));
-	cinfo.dest->init_destination = &init_destination;
-	cinfo.dest->empty_output_buffer = &empty_output_buffer;
-	cinfo.dest->term_destination = &term_destination;
+int write_JPEG_buffer_strided(JSAMPLE *image_buffer, int width, int height, size_t stride, int quality)
+{
+    return write_JPEG_buffer_pixels(image_buffer, width, height, stride, quality, JPEG_RGB24);
+}
 
-	cinfo.image_width = image_width;
-	cinfo.image_height = image_height;
-	cinfo.input_components = 3;
-	cinfo.in_color_space = JCS_RGB;
-	jpeg_set_defaults(&cinfo);
+int jpeg_rgb32_supported(jpeg_pixel_format format)
+{
+#ifdef JCS_EXTENSIONS
+    return format >= JPEG_BGRX32 && format <= JPEG_XRGB32;
+#else
+    (void)format;
+    return 0;
+#endif
+}
 
-	// 4:4:4, 1x1 (no subsampling)
-	// The resolution of chrominance information (Cb & Cr) is preserved at the same rate as the luminance (Y) information
-	cinfo.comp_info[0].v_samp_factor = 1;
-	cinfo.comp_info[0].h_samp_factor = 1;
-	cinfo.comp_info[1].v_samp_factor = 1;
-	cinfo.comp_info[1].h_samp_factor = 1;
-	cinfo.comp_info[2].v_samp_factor = 1;
-	cinfo.comp_info[2].h_samp_factor = 1;
-
-	jpeg_set_quality(&cinfo, quality, TRUE);
-	jpeg_start_compress(&cinfo, TRUE);
-	row_stride = image_width * 3;
-
-	while (cinfo.next_scanline < cinfo.image_height)
-	{
-		row_pointer[0] = &image_buffer[cinfo.next_scanline * row_stride];
-		(void)jpeg_write_scanlines(&cinfo, row_pointer, 1);
-	}
-
-	jpeg_finish_compress(&cinfo);
-
-	free(cinfo.dest);
-	cinfo.dest = NULL;
-	jpeg_destroy_compress(&cinfo);
-
-	return 0;
+int write_JPEG_buffer_pixels(JSAMPLE *image_buffer, int width, int height, size_t stride,
+    int quality, jpeg_pixel_format format)
+{
+    jpeg_discard_output();
+    int components = format == JPEG_RGB24 ? 3 : 4;
+    J_COLOR_SPACE color = JCS_RGB;
+    if (format != JPEG_RGB24 && !jpeg_rgb32_supported(format)) {
+        strcpy(jpegLastError, "Unsupported JPEG input format"); return -1;
+    }
+#ifdef JCS_EXTENSIONS
+    switch (format) {
+    case JPEG_BGRX32: color = JCS_EXT_BGRX; break;
+    case JPEG_RGBX32: color = JCS_EXT_RGBX; break;
+    case JPEG_XBGR32: color = JCS_EXT_XBGR; break;
+    case JPEG_XRGB32: color = JCS_EXT_XRGB; break;
+    default: break;
+    }
+#endif
+    if (image_buffer == NULL || width <= 0 || height <= 0 ||
+        width > JPEG_MAX_DIMENSION || height > JPEG_MAX_DIMENSION ||
+        stride < (size_t)width * components || (height > 1 &&
+        stride > (SIZE_MAX - (size_t)width * components) / (size_t)(height - 1))) {
+        strcpy(jpegLastError, "Invalid JPEG image geometry");
+        return -1;
+    }
+    /* All state modified across the error jump has static storage duration. */
+    int failure = setjmp(encoder.recovery);
+    if (failure != 0) {
+        if (failure == 2) { jpeg_abort_compress(&encoder.codec); return 0; }
+        jpeg_encoder_cleanup();
+        return -1;
+    }
+    if (encoder.codec.mem == NULL) {
+        encoder.codec.err = jpeg_std_error(&encoder.errors);
+        encoder.errors.error_exit = jpeg_error_handler;
+        jpeg_create_compress(&encoder.codec);
+    }
+    encoder.destination.init_destination = init_destination;
+    encoder.destination.empty_output_buffer = empty_output_buffer;
+    encoder.destination.term_destination = term_destination;
+    encoder.codec.dest = &encoder.destination;
+    encoder.codec.image_width = width; encoder.codec.image_height = height;
+    int reconfigure = !encoder.configured || encoder.format != format;
+    if (reconfigure) {
+        encoder.codec.input_components = components; encoder.codec.in_color_space = color;
+        jpeg_set_defaults(&encoder.codec);
+        for (int i = 0; i < 3; ++i) {
+            encoder.codec.comp_info[i].v_samp_factor = 1;
+            encoder.codec.comp_info[i].h_samp_factor = 1;
+        }
+    }
+    if (reconfigure || encoder.quality != quality) {
+        jpeg_set_quality(&encoder.codec, quality, TRUE);
+        encoder.quality = quality;
+    }
+    encoder.configured = 1;
+    encoder.format = format;
+    jpeg_start_compress(&encoder.codec, TRUE);
+    while (encoder.codec.next_scanline < encoder.codec.image_height) {
+        JSAMPROW row = image_buffer + (size_t)encoder.codec.next_scanline * stride;
+        if (jpeg_write_scanlines(&encoder.codec, &row, 1) != 1) {
+            ERREXIT(&encoder.codec, JERR_CANT_SUSPEND);
+        }
+    }
+    jpeg_finish_compress(&encoder.codec);
+#if JPEGMAXBUF > 0
+    if (jpeg_buffer_length > JPEGMAXBUF) { return 0; }
+#endif
+    jpeg_buffer = encoder.output;
+    jpegLastError[0] = 0;
+    return 0;
 }

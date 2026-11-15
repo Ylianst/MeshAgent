@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <MeshJpegArch Condition="'$(Platform)'=='Win32'">x86</MeshJpegArch>
+    <MeshJpegArch Condition="'$(Platform)'=='x64'">x64</MeshJpegArch>
+    <MeshJpegLibrary>$(MSBuildProjectDirectory)\..\.build\windows-jpeg\$(VCToolsVersion)\$(MeshJpegArch)\$(Configuration)\jpeg-static.lib</MeshJpegLibrary>
+  </PropertyGroup>
+  <!-- ARM64 retains GDI+ until its native codec is built and qualified. -->
+  <ItemDefinitionGroup Condition="'$(MeshJpegArch)'!=''">
+    <ClCompile><PreprocessorDefinitions>MESH_WINDOWS_TURBOJPEG;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile>
+    <Link><AdditionalDependencies>$(MeshJpegLibrary);%(AdditionalDependencies)</AdditionalDependencies></Link>
+  </ItemDefinitionGroup>
+  <Target Name="BuildWindowsJpeg" BeforeTargets="PrepareForBuild" Condition="'$(MeshJpegArch)'!=''"
+    Inputs="$(MSBuildThisFileDirectory)build.ps1;$(MSBuildThisFileDirectory)libjpeg-turbo-3.2.1.tar.gz"
+    Outputs="$(MeshJpegLibrary)">
+    <Exec Command="powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)build.ps1&quot; -Architecture $(MeshJpegArch) -Configuration $(Configuration) -VisualStudioPath &quot;$(VSInstallDir).&quot; -VCToolsVersion $(VCToolsVersion)" />
+  </Target>
+</Project>
