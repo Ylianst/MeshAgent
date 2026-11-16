@@ -20,6 +20,9 @@ limitations under the License.
 #include "tile.h"
 #include <gdiplus.h>
 #include "meshcore/meshdefines.h"
+#include <setjmp.h>
+#include "lib-jpeg-turbo/includes/jpeglib.h"
+#include "lib-jpeg-turbo/includes/jerror.h"
 using namespace Gdiplus;
 
 #if defined(WIN32) && !defined(_WIN32_WCE) && !defined(_MINCORE)
@@ -72,6 +75,11 @@ HBITMAP hCapturedBitmap;
 CLSID encoderClsid;
 ULONG encCompression = 50; // Image compression
 EncoderParameters encParam;
+// The viewer's choice, set from the input thread, while encoderClsid is looked up on the KVM thread only, after GdiplusStartup.
+// In console mode a compression command can arrive before GdiplusStartup, and GDI+ called that early crashed the agent.
+volatile LONG tileEncoderType = 1; // The type numbers of set_tile_compression()
+int encoderClsidType = 0;
+
 LPVOID tilebuffer = NULL;
 unsigned int tilebuffersize = 0;
 
@@ -131,6 +139,159 @@ int tile_crc(int x, int y, void *desktop, int tilewidth, int tileheight)
 	return crc;
 }
 
+#define TILE_HEADER_SIZE 8
+#define TILE_JUMBO_HEADER_SIZE 16
+#define TILE_JUMBO_LIMIT 65500
+#define TILE_JPEG_START_SIZE 4096
+
+// libjpeg writes the JPEG straight into the tile packet, behind room for the 8-byte header.
+// Static, because the error branch reads it after the longjmp(), and only the KVM thread encodes.
+static struct
+{
+	struct jpeg_compress_struct cinfo;
+	struct jpeg_error_mgr err;
+	jmp_buf jump;
+	struct jpeg_destination_mgr dest;
+	unsigned char *packet;
+	size_t capacity;
+} tileJpeg;
+
+// Replaces libjpeg's error_exit(), which calls exit() and would end the KVM slave
+static void tile_jpeg_error_exit(j_common_ptr cinfo)
+{
+	UNREFERENCED_PARAMETER(cinfo);
+	longjmp(tileJpeg.jump, 1);
+}
+
+static void tile_jpeg_output_message(j_common_ptr cinfo)
+{
+	UNREFERENCED_PARAMETER(cinfo);
+}
+
+static void tile_jpeg_dest_init(j_compress_ptr cinfo)
+{
+	UNREFERENCED_PARAMETER(cinfo);
+	tileJpeg.dest.next_output_byte = tileJpeg.packet + TILE_HEADER_SIZE;
+	tileJpeg.dest.free_in_buffer = tileJpeg.capacity - TILE_HEADER_SIZE;
+}
+
+// libjpeg calls this with the whole buffer used, whatever next_output_byte and free_in_buffer say at that moment.
+// When realloc() fails the old packet stays valid, and the error branch of tile_jpeg_encode() frees it.
+static boolean tile_jpeg_dest_grow(j_compress_ptr cinfo)
+{
+	size_t used = tileJpeg.capacity;
+	unsigned char *grown = (unsigned char*)realloc(tileJpeg.packet, used * 2);
+	if (grown == NULL) { ERREXIT1(cinfo, JERR_OUT_OF_MEMORY, 10); }
+	tileJpeg.packet = grown;
+	tileJpeg.capacity = used * 2;
+	tileJpeg.dest.next_output_byte = grown + used;
+	tileJpeg.dest.free_in_buffer = used;
+	return TRUE;
+}
+
+static void tile_jpeg_dest_term(j_compress_ptr cinfo)
+{
+	UNREFERENCED_PARAMETER(cinfo);
+}
+
+// Encodes a rectangle straight from the bottom-up desktop buffer into a malloc'd tile packet, with the header still to be written.
+// Returns NULL when libjpeg reported an error or memory ran out
+static char* tile_jpeg_encode(int x, int y, int width, int height, void *desktop, unsigned long *jpegSize)
+{
+	size_t stride = (size_t)adjust_screen_size(SCALED_WIDTH) * PIXEL_SIZE;
+	JSAMPROW top, row;
+	unsigned char *packet, *grown;
+	size_t size;
+
+	// jpeg_create_compress() keeps cinfo.err, so the error and destination managers are set up once
+	if (tileJpeg.dest.init_destination == NULL)
+	{
+		tileJpeg.cinfo.err = jpeg_std_error(&tileJpeg.err);
+		tileJpeg.err.error_exit = tile_jpeg_error_exit;
+		tileJpeg.err.output_message = tile_jpeg_output_message;
+		tileJpeg.dest.init_destination = tile_jpeg_dest_init;
+		tileJpeg.dest.empty_output_buffer = tile_jpeg_dest_grow;
+		tileJpeg.dest.term_destination = tile_jpeg_dest_term;
+	}
+
+	tileJpeg.capacity = TILE_JPEG_START_SIZE;
+	if ((tileJpeg.packet = (unsigned char*)malloc(tileJpeg.capacity)) == NULL) { return NULL; }
+	if (setjmp(tileJpeg.jump))
+	{
+		jpeg_destroy_compress(&tileJpeg.cinfo);
+		free(tileJpeg.packet);
+		tileJpeg.packet = NULL;
+		return NULL;
+	}
+
+	jpeg_create_compress(&tileJpeg.cinfo);
+	tileJpeg.cinfo.dest = &tileJpeg.dest;
+	tileJpeg.cinfo.image_width = width;
+	tileJpeg.cinfo.image_height = height;
+	tileJpeg.cinfo.input_components = PIXEL_SIZE;
+	tileJpeg.cinfo.in_color_space = (PIXEL_SIZE == 4) ? JCS_EXT_BGRX : JCS_EXT_BGR;
+	jpeg_set_defaults(&tileJpeg.cinfo);
+	// 4:4:4 like Linux and macOS, not the 4:2:0 of the defaults and of the old GDI+ encoder.
+	// 4:2:0 averages the colour over 2x2 pixels, and a text stroke is thinner than that, so coloured text turned dull and dark.
+	for (int c = 0; c < 3; c++) { tileJpeg.cinfo.comp_info[c].h_samp_factor = 1; tileJpeg.cinfo.comp_info[c].v_samp_factor = 1; }
+	// No 18-byte JFIF block in every tile. Without it, decoders still take 3 components with IDs 1 to 3 as YCbCr.
+	tileJpeg.cinfo.write_JFIF_header = FALSE;
+	jpeg_set_quality(&tileJpeg.cinfo, (int)encCompression, TRUE);
+	jpeg_start_compress(&tileJpeg.cinfo, TRUE);
+
+	// The top row of the rectangle is its last row in the buffer, so the rows are walked backwards
+	top = (JSAMPROW)desktop + (size_t)(adjust_screen_size(SCALED_HEIGHT) - 1 - y) * stride + (size_t)x * PIXEL_SIZE;
+	while (tileJpeg.cinfo.next_scanline < tileJpeg.cinfo.image_height)
+	{
+		row = top - tileJpeg.cinfo.next_scanline * stride;
+		jpeg_write_scanlines(&tileJpeg.cinfo, &row, 1);
+	}
+
+	jpeg_finish_compress(&tileJpeg.cinfo);
+	jpeg_destroy_compress(&tileJpeg.cinfo);
+
+	packet = tileJpeg.packet;
+	tileJpeg.packet = NULL;
+	size = tileJpeg.capacity - tileJpeg.dest.free_in_buffer - TILE_HEADER_SIZE;
+	if (size > TILE_JUMBO_LIMIT)
+	{
+		// The jumbo header is longer, so the JPEG moves up behind it
+		if (tileJpeg.capacity < size + TILE_JUMBO_HEADER_SIZE)
+		{
+			if ((grown = (unsigned char*)realloc(packet, size + TILE_JUMBO_HEADER_SIZE)) == NULL) { free(packet); return NULL; }
+			packet = grown;
+		}
+		memmove_s(packet + TILE_JUMBO_HEADER_SIZE, size, packet + TILE_HEADER_SIZE, size);
+	}
+	*jpegSize = (unsigned long)size;
+	return (char*)packet;
+}
+
+// Writes the tile header in front of the encoded image, a jumbo header when it is over 65500 bytes
+static void set_tile_header(char *Tile, DWORD jpegSize, int x, int y, void **buffer, long long *bufferSize)
+{
+	*buffer = (unsigned char*)Tile;
+	*bufferSize = jpegSize + (jpegSize > 65500 ? 16 : 8);
+
+	if (jpegSize > 65500)
+	{
+		((unsigned short*)*buffer)[0] = (unsigned short)htons((unsigned short)MNG_JUMBO);		// Write the type
+		((unsigned short*)*buffer)[1] = (unsigned short)htons((unsigned short)8);				// Write the size
+		((unsigned int*)*buffer)[1]   = (unsigned int)htonl(jpegSize + 8);						// Size of the Next Packet
+		((unsigned short*)*buffer)[4] = (unsigned short)htons((unsigned short)MNG_KVM_PICTURE);	// Write the type
+		((unsigned short*)*buffer)[5] = 0;														// RESERVED
+		((unsigned short*)*buffer)[6] = (unsigned short)htons((unsigned short)x);				// X position
+		((unsigned short*)*buffer)[7] = (unsigned short)htons((unsigned short)y);				// Y position
+	}
+	else
+	{
+		((unsigned short*)*buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_PICTURE);	// Write the type
+		((unsigned short*)*buffer)[1] = (unsigned short)htons((unsigned short)*bufferSize);		// Write the size
+		((unsigned short*)*buffer)[2] = (unsigned short)htons((unsigned short)x);				// X position
+		((unsigned short*)*buffer)[3] = (unsigned short)htons((unsigned short)y);				// Y position
+	}
+}
+
 // This function returns 0 and *buffer != NULL if everything was good. retval = jpegsize if the captured image was too large.
 int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void* desktop, void ** buffer, long long *bufferSize) 
 {
@@ -141,6 +302,33 @@ int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void*
 	*bufferSize = 0;
 
 	KVMDEBUG("calc_opt_compr_send()", 0);
+
+	// JPEG goes through libjpeg, which reads the desktop buffer in place, and GDI+ below stays for PNG, TIFF and 16-bit screens
+	int encoderType = (int)tileEncoderType;
+	if (encoderType == 1 && (PIXEL_SIZE == 4 || PIXEL_SIZE == 3))
+	{
+		unsigned long encodedSize = 0;
+		char *packet = tile_jpeg_encode(x, y, captureWidth, captureHeight, desktop, &encodedSize);
+		if (packet == NULL)
+		{
+			KVMDEBUG("tile_jpeg_encode() failed", 0);
+			ILibCriticalLog(NULL, __FILE__, __LINE__, 252, 0);
+			return 0;
+		}
+		set_tile_header(packet, (DWORD)encodedSize, x, y, buffer, bufferSize);
+		return 0;
+	}
+
+	if (encoderClsidType != encoderType)
+	{
+		switch (encoderType)
+		{
+			case 2: { GetEncoderClsid(L"image/png", &encoderClsid); break; }
+			case 3: { GetEncoderClsid(L"image/tiff", &encoderClsid); break; }
+			default: { GetEncoderClsid(L"image/jpeg", &encoderClsid); break; }
+		}
+		encoderClsidType = encoderType;
+	}
 
 	// Get the bmpInfo structure
 	bmpInfo = get_bmp_info(captureWidth, captureHeight);
@@ -267,27 +455,7 @@ int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void*
 	bmpStream->Release();
 	jpegStream->Release();
 
-	*buffer = (unsigned char*)Tile;
-	*bufferSize = jpegSize + (jpegSize > 65500 ? 16 : 8);
-
-	// Place the header
-	if (jpegSize > 65500)
-	{
-		((unsigned short*)*buffer)[0] = (unsigned short)htons((unsigned short)MNG_JUMBO);		// Write the type
-		((unsigned short*)*buffer)[1] = (unsigned short)htons((unsigned short)8);				// Write the size
-		((unsigned int*)*buffer)[1]   = (unsigned int)htonl(jpegSize + 8);						// Size of the Next Packet
-		((unsigned short*)*buffer)[4] = (unsigned short)htons((unsigned short)MNG_KVM_PICTURE);	// Write the type
-		((unsigned short*)*buffer)[5] = 0;														// RESERVED
-		((unsigned short*)*buffer)[6] = (unsigned short)htons((unsigned short)x);				// X position
-		((unsigned short*)*buffer)[7] = (unsigned short)htons((unsigned short)y);				// Y position
-	}
-	else
-	{
-		((unsigned short*)*buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_PICTURE);	// Write the type
-		((unsigned short*)*buffer)[1] = (unsigned short)htons((unsigned short)*bufferSize);		// Write the size
-		((unsigned short*)*buffer)[2] = (unsigned short)htons((unsigned short)x);				// X position
-		((unsigned short*)*buffer)[3] = (unsigned short)htons((unsigned short)y);				// Y position
-	}
+	set_tile_header(Tile, jpegSize, x, y, buffer, bufferSize);
 	return 0;
 }
 
@@ -557,6 +725,15 @@ int get_desktop_buffer(void **buffer, long long *bufferSize, long* mouseMove)
 		return(1);
 	}
 
+	// Screens below 24 bits are captured as 32-bit BGRX, so their tiles go through libjpeg instead of GDI+.
+	// GetDIBits() converts the pixels, the screen itself keeps its depth.
+	if (bmpInfo.bmiHeader.biBitCount < 24)
+	{
+		bmpInfo.bmiHeader.biBitCount = 32;
+		bmpInfo.bmiHeader.biClrUsed = 0;
+		bmpInfo.bmiHeader.biSizeImage = 0;
+	}
+
 	if (bmpInfo.bmiHeader.biSizeImage <= 0)
 	{
 		bmpInfo.bmiHeader.biSizeImage = bmpInfo.bmiHeader.biWidth * abs(bmpInfo.bmiHeader.biHeight) * (bmpInfo.bmiHeader.biBitCount + 7) / 8;
@@ -609,7 +786,7 @@ short initialize_gdiplus()
 	if (SelectObject(hCaptureDC, hCapturedBitmap) == NULL) { KVMDEBUG("SelectObject() failed", 0); }
 	
 	// Find encoder and setup encoder parameters
-	GetEncoderClsid(L"image/jpeg", &encoderClsid);
+	encoderClsidType = 0; // Looked up by the first GDI+ encode, the viewer's type may already be set
 	encParam.Count = 1;
 	encParam.Parameter[0].Guid = EncoderQuality;
 	encParam.Parameter[0].Type = EncoderParameterValueTypeLong;
@@ -636,16 +813,11 @@ void set_tile_compression(int type, int level)
 	encCompression = level;
 	if (encCompression < 1) { encCompression = 1; } // Guard against bad values.
 	if (encCompression > 90) { encCompression = 90; }
-	if (tilebuffer == NULL) { KVMDEBUG("set_tile_compression(), tilebuffer == NULL.", 0); return; }
 	KVMDEBUG("set_tile_compression() type", type);
 	KVMDEBUG("set_tile_compression() level", level);
 
-	switch (type)
-	{
-		case 1: { GetEncoderClsid(L"image/jpeg", &encoderClsid); break; }
-		case 2: { GetEncoderClsid(L"image/png", &encoderClsid); break; }
-		case 3: { GetEncoderClsid(L"image/tiff", &encoderClsid); break; }
-	}
+	// Only the type is stored here, GDI+ may not be started yet and encoderClsid belongs to the KVM thread
+	if (type >= 1 && type <= 3) { tileEncoderType = type; }
 }
 
 }
