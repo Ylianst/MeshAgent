@@ -120,6 +120,9 @@ int g_shutdown = 999;
 int g_pause = 0;
 int g_remotepause = 1;
 int g_restartcount = 0;
+static long long g_lastKvmSpawn = 0;	// ILibGetUptime() when the current slave was started
+#define KVM_RESTART_MAX_BURST 5			// crashed slaves in a row before the session is ended
+#define KVM_RESTART_RESET_MS 30000		// a slave that ran this long was healthy, so the count starts again
 struct tileInfo_t **tileInfo = NULL;
 int g_slavekvm = 0;
 static ILibProcessPipe_Process gChildProcess;
@@ -1269,6 +1272,17 @@ DWORD WINAPI kvm_server_mainloop(LPVOID parm)
 }
 
 #ifdef _WINSERVICE
+// Only crashes count: on a desktop switch the slave exits with 0 and is restarted with the other token, which can happen often.
+// A clean exit, or a slave that ran long enough, starts the count again, so only a slave that keeps crashing ends the session.
+static int kvm_relay_should_restart(int exitCode)
+{
+	if (exitCode == 0 || (g_lastKvmSpawn != 0 && ILibGetUptime() - g_lastKvmSpawn >= KVM_RESTART_RESET_MS)) { g_restartcount = 0; }
+	if (exitCode == 0) { return 1; }
+	if (g_restartcount >= KVM_RESTART_MAX_BURST) { return 0; }
+	g_restartcount++;
+	return 1;
+}
+
 void kvm_relay_ExitHandler(ILibProcessPipe_Process sender, int exitCode, void *user)
 {
 	ILibKVM_WriteHandler writeHandler = (ILibKVM_WriteHandler)((void **)user)[0];
@@ -1276,11 +1290,10 @@ void kvm_relay_ExitHandler(ILibProcessPipe_Process sender, int exitCode, void *u
 	void *pipeMgr = ((void **)user)[2];
 	char *exePath = (char *)((void **)user)[3];
 
-	ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "Agent KVM: KVM Child Process(%d) [EXITED]", g_slavekvm);
-	UNREFERENCED_PARAMETER(exitCode);
+	ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "Agent KVM: KVM Child Process(%d) [EXITED] code 0x%08X", g_slavekvm, (unsigned int)exitCode);
 	UNREFERENCED_PARAMETER(sender);
 
-	if (g_restartcount < 4 && g_shutdown == 0)
+	if (g_shutdown == 0 && kvm_relay_should_restart(exitCode))
 	{
 		kvm_relay_restart(1, pipeMgr, exePath, writeHandler, reserved);
 	}
@@ -1385,6 +1398,7 @@ int kvm_relay_restart(int paused, void *pipeMgr, char *exePath, ILibKVM_WriteHan
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "KVM [Master]: Spawning Slave as %s", gProcessSpawnType == ILibProcessPipe_SpawnTypes_USER ? "USER" : "WIN_LOGON");
 	gChildProcess = ILibProcessPipe_Manager_SpawnProcessEx3(pipeMgr, exePath, paused == 0 ? parms0 : parms1, gProcessSpawnType, (void *)(ULONG_PTR)gProcessTSID, 0);
+	g_lastKvmSpawn = ILibGetUptime();
 	gProcessSpawnType = (gProcessSpawnType == ILibProcessPipe_SpawnTypes_SPECIFIED_USER || gProcessSpawnType == ILibProcessPipe_SpawnTypes_USER) ? ILibProcessPipe_SpawnTypes_WINLOGON : (gProcessTSID < 0 ? ILibProcessPipe_SpawnTypes_USER : ILibProcessPipe_SpawnTypes_SPECIFIED_USER);
 
 	g_slavekvm = ILibProcessPipe_Process_GetPID(gChildProcess);
