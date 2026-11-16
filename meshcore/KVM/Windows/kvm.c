@@ -1005,6 +1005,12 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	Sleep(100); // Pausing here seems to fix connection issues, especially with WebRTC. TODO: Investigate why.
 	KVMDEBUG("kvm_server_mainloop / start3", (int)GetCurrentThreadId());
 
+	LARGE_INTEGER frameFreq, frameNow;
+	long long frameDeadline, frameMinIdle;
+	QueryPerformanceFrequency(&frameFreq);
+	QueryPerformanceCounter(&frameNow);
+	frameDeadline = frameNow.QuadPart;
+
 	// Loop and send only when a tile changes.
 	while (!g_shutdown)
 	{
@@ -1186,22 +1192,19 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 
 		KVMDEBUG("kvm_server_mainloop / loop3", (int)GetCurrentThreadId());
 
-		// We can't go full speed here, we need to slow this down.
-		height = FRAME_RATE_TIMER;
-		while (!g_shutdown && height > 0)
+		// The frame timer is the frame period, so the work of this frame comes off the wait and a late Sleep() is made up in the next frame.
+		// At least a quarter of the timer is always slept, for a machine where the work alone takes longer than the timer.
+		QueryPerformanceCounter(&frameNow);
+		frameDeadline += (long long)FRAME_RATE_TIMER * frameFreq.QuadPart / 1000;
+		frameMinIdle = frameNow.QuadPart + (long long)(FRAME_RATE_TIMER / 4) * frameFreq.QuadPart / 1000;
+		if (frameDeadline < frameMinIdle) { frameDeadline = frameMinIdle; }
+		do
 		{
-			if (height > 50)
-			{
-				height -= 50;
-				Sleep(50);
-			}
-			else
-			{
-				Sleep(height);
-				height = 0;
-			}
+			QueryPerformanceCounter(&frameNow);
+			height = (int)((frameDeadline - frameNow.QuadPart) * 1000 / frameFreq.QuadPart);
+			if (height > 0) { Sleep(height > 50 ? 50 : height); }
 			SleepEx(0, TRUE);
-		}
+		} while (!g_shutdown && height > 0);
 	}
 
 	KVMDEBUG("kvm_server_mainloop / end3", (int)GetCurrentThreadId());
