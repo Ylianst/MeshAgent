@@ -116,8 +116,6 @@ int g_pause = 0;
 int g_shutdown = 0;
 int g_resetipc = 0;
 int kvm_clientProcessId = 0;
-int g_restartcount = 0;
-int g_totalRestartCount = 0;
 int restartKvm = 0;
 extern void* tilebuffer;
 pid_t g_slavekvm = 0;

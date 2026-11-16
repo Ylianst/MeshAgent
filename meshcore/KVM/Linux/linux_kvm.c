@@ -128,7 +128,6 @@ Display *eventdisplay = NULL;
 int g_remotepause = 0;
 int g_pause = 0;
 int g_restartcount = 0;
-int g_totalRestartCount = 0;
 int g_shutdown = 0;
 int change_display = 0;
 pid_t g_slavekvm = 0;
@@ -1758,7 +1757,6 @@ static int kvm_relay_should_autorecover(void)
 	}
 	if (g_restartcount >= KVM_AUTORECOVER_MAX_BURST) { return 0; }	// give up; fall back to the viewer notice
 	g_restartcount++;
-	g_totalRestartCount++;
 	return 1;
 }
 
@@ -1930,5 +1928,4 @@ void kvm_cleanup()
 {
 	g_shutdown = 1;
 	kvm_relay_stop_child(SIGTERM);
-	g_totalRestartCount = 0;
 }
