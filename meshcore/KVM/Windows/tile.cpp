@@ -149,8 +149,9 @@ int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void*
 	if (tilebuffersize != bmpInfo.bmiHeader.biSizeImage)
 	{
 		if (tilebuffer != NULL) free(tilebuffer);
+		tilebuffersize = 0;
+		if ((tilebuffer = malloc(bmpInfo.bmiHeader.biSizeImage)) == NULL) return 0;
 		tilebuffersize = bmpInfo.bmiHeader.biSizeImage;
-		if ((tilebuffer = malloc(tilebuffersize)) == NULL) return 0;
 	}
 
 	// Get the final coalesced tile
