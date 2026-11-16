@@ -143,6 +143,7 @@ int tile_crc(int x, int y, void *desktop, int tilewidth, int tileheight)
 #define TILE_JUMBO_HEADER_SIZE 16
 #define TILE_JUMBO_LIMIT 65500
 #define TILE_JPEG_START_SIZE 4096
+#define TILE_JPEG_OPTIMIZE_MAX_AREA (128 * 128)
 
 // libjpeg writes the JPEG straight into the tile packet, behind room for the 8-byte header.
 // Static, because the error branch reads it after the longjmp(), and only the KVM thread encodes.
@@ -236,6 +237,9 @@ static char* tile_jpeg_encode(int x, int y, int width, int height, void *desktop
 	for (int c = 0; c < 3; c++) { tileJpeg.cinfo.comp_info[c].h_samp_factor = 1; tileJpeg.cinfo.comp_info[c].v_samp_factor = 1; }
 	// No 18-byte JFIF block in every tile. Without it, decoders still take 3 components with IDs 1 to 3 as YCbCr.
 	tileJpeg.cinfo.write_JFIF_header = FALSE;
+	// Huffman tables built for each rectangle up to 128x128, where the standard tables are a large share of a small JPEG.
+	// Larger rectangles gain less for the second pass over the data.
+	if ((long long)width * height <= TILE_JPEG_OPTIMIZE_MAX_AREA) { tileJpeg.cinfo.optimize_coding = TRUE; }
 	jpeg_set_quality(&tileJpeg.cinfo, (int)encCompression, TRUE);
 	jpeg_start_compress(&tileJpeg.cinfo, TRUE);
 
