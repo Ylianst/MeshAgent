@@ -22,6 +22,7 @@ limitations under the License.
 #else
 	#define MAX_TILE_SIZE 65500
 #endif
+#define TILE_JPEG_OPTIMIZE_MAX_AREA (128 * 128)
 
 unsigned char *jpeg_buffer = NULL;
 int jpeg_buffer_length = 0;
@@ -115,6 +116,11 @@ int write_JPEG_buffer(JSAMPLE * image_buffer, int image_width, int image_height,
 	cinfo.comp_info[2].h_samp_factor = 1;
 
 	jpeg_set_quality(&cinfo, quality, TRUE);
+#if MAX_TILE_SIZE == 0
+	// Huffman tables built for each rectangle up to 128x128, where the standard tables are a large share of a small JPEG. Larger rectangles gain less for the second pass over the data.
+	// Not with a tile size limit, because optimized tables write all output in jpeg_finish_compress(), which cannot suspend, and a suspension there ends in exit().
+	if ((long)image_width * image_height <= TILE_JPEG_OPTIMIZE_MAX_AREA) { cinfo.optimize_coding = TRUE; }
+#endif
 	jpeg_start_compress(&cinfo, TRUE);
 	row_stride = image_width * 3;
 
