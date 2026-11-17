@@ -628,10 +628,10 @@ int kvm_server_inputdata(char *block, int blocklen, ILibKVM_WriteHandler writeHa
 		{
 			for (col = 0; col < TILE_WIDTH_COUNT; col++)
 			{
-				tileInfo[row][col].crc = 0xFF;
-				tileInfo[row][col].flags = 0;
+				tileInfo[row][col].flags = TILE_TODO;
 			}
 		}
+		tile_mark_all_stale();
 
 		break;
 	}
@@ -830,10 +830,10 @@ void kvm_server_SetResolution(ILibKVM_WriteHandler writeHandler, void *reserved)
 	{
 		for (col = 0; col < TILE_WIDTH_COUNT; col++)
 		{
-			tileInfo[row][col].crc = 0xFF;
-			tileInfo[row][col].flags = 0;
+			tileInfo[row][col].flags = TILE_TODO;
 		}
 	}
+	tile_mark_all_stale();
 }
 
 #define BUFSIZE 65535
@@ -993,14 +993,8 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	}
 #endif
 
-	// Set all CRCs to 0xFF
-	for (row = 0; row < TILE_HEIGHT_COUNT; row++)
-	{
-		for (col = 0; col < TILE_WIDTH_COUNT; col++)
-		{
-			tileInfo[row][col].crc = 0xFF;
-		}
-	}
+	// The first pass sends the whole screen
+	tile_mark_all_stale();
 
 	// Send the list of displays
 	kvm_send_display_list(writeHandler, reserved);
@@ -1024,12 +1018,12 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 		{
 			for (col = 0; col < TILE_WIDTH_COUNT; col++)
 			{
-				tileInfo[row][col].flags = (char)TILE_TODO;
-#ifdef KVM_ALL_TILES
-				tileInfo[row][col].crc = 0xFF;
-#endif
+				tileInfo[row][col].flags = TILE_TODO;
 			}
 		}
+#ifdef KVM_ALL_TILES
+		tile_mark_all_stale();
+#endif
 		CheckDesktopSwitch(1, writeHandler, reserved);
 		if (g_shutdown)
 			break;
@@ -1152,8 +1146,8 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 						break;
 					}
 
-					// Skip the tile if it has already been sent or if the CRC is same as before
-					if (tileInfo[row][col].flags == (char)TILE_SENT || tileInfo[row][col].flags == (char)TILE_DONT_SEND)
+					// Skip the tile if it was already sent or found unchanged in this pass
+					if (tileInfo[row][col].flags == TILE_DONE)
 					{
 						continue;
 					}

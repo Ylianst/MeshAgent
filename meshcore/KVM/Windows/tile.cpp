@@ -129,16 +129,6 @@ int get_tile_buffer(int x, int y, void **buffer, void *desktop, int tilewidth, i
 	return 0;
 }
 
-int tile_crc(int x, int y, void *desktop, int tilewidth, int tileheight) 
-{
-	int crc = 0;
-	for (int height = adjust_screen_size(SCALED_HEIGHT) - y - tileheight; height < adjust_screen_size(SCALED_HEIGHT) - y; height++)
-	{
-		crc = util_crc(((unsigned char *)desktop + (((height * adjust_screen_size(SCALED_WIDTH)) + x) * PIXEL_SIZE) ), (size_t)(tilewidth * PIXEL_SIZE), crc);
-	}
-	return crc;
-}
-
 #define TILE_HEADER_SIZE 8
 #define TILE_JUMBO_HEADER_SIZE 16
 #define TILE_JUMBO_LIMIT 65500
@@ -296,7 +286,7 @@ static void set_tile_header(char *Tile, DWORD jpegSize, int x, int y, void **buf
 	}
 }
 
-// This function returns 0 and *buffer != NULL if everything was good. retval = jpegsize if the captured image was too large.
+// This function always returns 0 since jumbo support, and *buffer != NULL if everything was good
 int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void* desktop, void ** buffer, long long *bufferSize) 
 {
 	BITMAPINFO bmpInfo;
@@ -430,17 +420,8 @@ int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void*
 		return 0;
 	}        
 
-	// Check if the tile is too large to send
+	// A JPEG over 65500 bytes goes out as a jumbo packet
 	DWORD jpegSize = (DWORD)Size.QuadPart;
-
-	//if (jpegSize > 65500)
-	//{
-	//	KVMDEBUG("jpegSize > 65500", jpegSize);
-	//	delete DIBImage;
-	//	*bufferSize = 0;
-	//	// ILibCriticalLog(NULL, __FILE__, __LINE__, 252, GetLastError());
-	//	return jpegSize;
-	//}
 
 	// Save the image stream in memory.
 	char* Tile = (char*)ILibMemory_Allocate(jpegSize > 65500 ? (jpegSize + 16):(jpegSize + 8), 0, NULL, NULL);
@@ -464,14 +445,67 @@ int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void*
 	return 0;
 }
 
+// The tiles as they were when last found changed, in the layout of the desktop buffer
+static unsigned char *refFrame = NULL;
+static long long refFrameSize = 0;
+static int refPixelSize = 0;
+
+// Reallocated when the frame size or pixel format changes, and then every tile counts as changed
+static unsigned char *tile_reference(void)
+{
+	long long size = (long long)adjust_screen_size(SCALED_WIDTH) * adjust_screen_size(SCALED_HEIGHT) * PIXEL_SIZE;
+	if (refFrame != NULL && refFrameSize == size && refPixelSize == PIXEL_SIZE) { return refFrame; }
+	free(refFrame);
+	refFrameSize = 0;
+	if ((refFrame = (unsigned char *)malloc((size_t)size)) == NULL) { return NULL; }
+	refFrameSize = size;
+	refPixelSize = PIXEL_SIZE;
+	tile_mark_all_stale();
+	return refFrame;
+}
+
+// Returns 1 and updates the reference when the tile is stale or differs from it, 0 when it is unchanged.
+// Exact, a hash could miss a change. Rows before the first difference are equal already, so only the rest is copied.
+static int tile_changed(int x, int y, void *desktop, int row, int col)
+{
+	size_t stride = (size_t)adjust_screen_size(SCALED_WIDTH) * PIXEL_SIZE;
+	size_t len = (size_t)TILE_WIDTH * PIXEL_SIZE;
+	size_t offset = (size_t)(adjust_screen_size(SCALED_HEIGHT) - y - TILE_HEIGHT) * stride + (size_t)x * PIXEL_SIZE;
+	unsigned char *cur = (unsigned char *)desktop + offset;
+	unsigned char *ref = tile_reference();
+	int r = 0;
+
+	if (ref == NULL) { return 1; } // Without a reference every tile counts as changed, which costs data but loses nothing
+	ref += offset;
+	if (tileInfo[row][col].stale == 0)
+	{
+		while (r < TILE_HEIGHT && memcmp(cur + r * stride, ref + r * stride, len) == 0) { r++; }
+		if (r == TILE_HEIGHT) { return 0; }
+	}
+	for (; r < TILE_HEIGHT; r++) { memcpy(ref + r * stride, cur + r * stride, len); }
+	tileInfo[row][col].stale = 0;
+	return 1;
+}
+
+// A tile is pending when it changed in this pass and has not been sent yet
+static int tile_pending(int x, int y, void *desktop, int row, int col)
+{
+	if (tileInfo[row][col].flags == TILE_TODO) { return tile_changed(x, y, desktop, row, col); }
+	return tileInfo[row][col].flags == TILE_CHANGED;
+}
 
 extern "C"
 {
 
+// Makes every tile count as changed on its next compare, so the next pass sends the whole screen
+void tile_mark_all_stale(void)
+{
+	for (int r = 0; r < TILE_HEIGHT_COUNT; r++) { for (int c = 0; c < TILE_WIDTH_COUNT; c++) { tileInfo[r][c].stale = 1; } }
+}
+
 //Fetches the encoded jpeg tile at the given location. The neighboring tiles are coalesed to form a larger jpeg before returning.
 int get_tile_at(int x, int y, void** buffer, long long *bufferSize, void *desktop, int row, int col)
-{	
-	int CRC;
+{
 	int rightcol = col;		// Used in coalescing. Indicates the right-most column to be coalesced.
 	int botrow = row;		// Used in coalescing. Indicates the bottom-most row to be coalesced.
 	int r_x = x;
@@ -482,14 +516,10 @@ int get_tile_at(int x, int y, void** buffer, long long *bufferSize, void *deskto
 	*buffer = NULL;			// If anything fails, this will be the indication.
 	*bufferSize = 0;
 
-	if (tileInfo[row][col].flags == (char)TILE_TODO) // First check whether the tile-crc needs to be calcualted or not.
-	{ 
-		// Compute CRC on the contents of the bitmap; Proceed with image encoding only if the CRC is different.
-		if ((CRC = tile_crc(x, y, desktop, TILE_WIDTH, TILE_HEIGHT)) == tileInfo[row][col].crc) return 0;
-		tileInfo[row][col].crc = CRC; // Update the tile CRC in the global data structure.
-	}
+	// Nothing to send when the tile is unchanged
+	if (tileInfo[row][col].flags == TILE_TODO && !tile_changed(x, y, desktop, row, col)) return 0;
 
-	tileInfo[row][col].flags = (char)TILE_MARKED_NOT_SENT;
+	tileInfo[row][col].flags = TILE_CHANGED;
 
 
 	// COALESCING SECTION
@@ -500,38 +530,20 @@ int get_tile_at(int x, int y, void** buffer, long long *bufferSize, void *deskto
 		rightcol++;
 		r_x = rightcol * TILE_WIDTH;
 		
-		CRC = tileInfo[row][rightcol].crc;
-
-		if (tileInfo[row][rightcol].flags == (char)TILE_TODO) {
-			// Compute CRC on the contents of the bitmap.
-			CRC = tile_crc(r_x, y, desktop, TILE_WIDTH, TILE_HEIGHT);
-		}
-
-		if (CRC != tileInfo[row][rightcol].crc || tileInfo[row][rightcol].flags == (char)TILE_MARKED_NOT_SENT) // If the tile has changed, increment the capturewidth.
+		if (tile_pending(r_x, y, desktop, row, rightcol)) // If the tile has changed, increment the capturewidth
 		{
-			tileInfo[row][rightcol].crc = CRC; 
-			// Here we check whether the size of the coalesced bitmap is greater than the threshold (65500)
-			//if ((captureWidth + TILE_WIDTH) * TILE_HEIGHT * PIXEL_SIZE / COMPRESSION_RATIO > 65500) { 
-			//	tileInfo[row][rightcol].flags = (char)TILE_MARKED_NOT_SENT;
-			//	--rightcol;
-			//	break;
-			//}
-
-			tileInfo[row][rightcol].flags = (char)TILE_MARKED_NOT_SENT;
+			tileInfo[row][rightcol].flags = TILE_CHANGED;
 			captureWidth += TILE_WIDTH;
 		} 
 		else
 		{
-			tileInfo[row][rightcol].flags = (char)TILE_DONT_SEND;
+			tileInfo[row][rightcol].flags = TILE_DONE;
 			--rightcol;
 			break;
 		}
 	}
 
-	// int TOLERANCE = (rightcol - col) / 4;
-
 	// Now go to the bottom tiles, check if they have changed and record them
-	//while ((botrow + 1 < TILE_HEIGHT_COUNT) && ((captureHeight + TILE_HEIGHT) * captureWidth * PIXEL_SIZE / COMPRESSION_RATIO <= 65500))
 	while ((botrow + 1 < TILE_HEIGHT_COUNT))
 	{
 		botrow++;
@@ -539,53 +551,21 @@ int get_tile_at(int x, int y, void** buffer, long long *bufferSize, void *deskto
 		int fail = 0;
 		r_x = x;
 
-		// int missCount = 0;
-
 		for (int rcol = col; rcol <= rightcol; rcol++) {
 
-			CRC = tileInfo[botrow][rcol].crc;
-			if (tileInfo[botrow][rcol].flags == (char)TILE_TODO)
+			if (tile_pending(r_x, r_y, desktop, botrow, rcol))
 			{
-				// Compute CRC on the contents of the bitmap; Proceed with image encoding only if the CRC is different.
-				CRC = tile_crc(r_x, r_y, desktop, TILE_WIDTH, TILE_HEIGHT);
-			}
-
-			if (CRC != tileInfo[botrow][rcol].crc || tileInfo[botrow][rcol].flags == (char)TILE_MARKED_NOT_SENT)
-			{
-				tileInfo[botrow][rcol].flags = (char)TILE_MARKED_NOT_SENT;
-				tileInfo[botrow][rcol].crc = CRC;
+				tileInfo[botrow][rcol].flags = TILE_CHANGED;
 				r_x += TILE_WIDTH;
 			}
 			else
 			{
-				/*// Keep this part commented. Adding tolerance adds to the complexity of this code.
-				missCount++;
-
-				if (missCount > TOLERANCE) {
-					fail = 1;
-					for (int i = col; i < rcol; i++) {
-						if (tileInfo[botrow][i].flags == (char)TILE_SKIPPED) {
-							tileInfo[botrow][i].flags = (char)TILE_DONT_SEND;
-						} 
-						else {
-							tileInfo[botrow][i].flags = (char)TILE_MARKED_NOT_SENT;
-						}
-					}
-					tileInfo[botrow][rcol].flags = (char)TILE_DONT_SEND;
-					botrow--;
-					break;
-				}
-				else {
-					tileInfo[botrow][rcol].flags = (char)TILE_SKIPPED;
-					tileInfo[botrow][rcol].crc = CRC;
-					r_x += TILE_WIDTH;
-				}*/
 				fail = 1;
 				for (int i = col; i < rcol; i++)
 				{
-					tileInfo[botrow][i].flags = (char)TILE_MARKED_NOT_SENT;
+					tileInfo[botrow][i].flags = TILE_CHANGED;
 				}
-				tileInfo[botrow][rcol].flags = (char)TILE_DONT_SEND;
+				tileInfo[botrow][rcol].flags = TILE_DONE;
 				botrow--;
 				break;
 			}
@@ -601,53 +581,17 @@ int get_tile_at(int x, int y, void** buffer, long long *bufferSize, void *deskto
 		}
 	}
 
-	int retval = 0;
-	int firstTime = 1;
+	// One encode for the whole region, whatever its size
+	calc_opt_compr_send(x, y, captureWidth, captureHeight, desktop, buffer, bufferSize);
 
-	// This loop is used to adjust the COMPRESSION_RATIO. This loop runs only once most of the time.
-	do {
-		// retval here is 0 if everything was good. It is > 0 if it contains the size of the jpeg that was created and not sent.
-		retval = calc_opt_compr_send(x, y, captureWidth, captureHeight, desktop, buffer, bufferSize);
-		if (retval == 0 && *bufferSize == 0) break;
-		if (retval != 0)
-		{
-			if (firstTime)
-			{
-				// Re-adjust the compression ratio.
-				//COMPRESSION_RATIO = (int)(((double)COMPRESSION_RATIO/(double)retval) * 60000);//Magic number: 60000 ~= 65500
-				//if (COMPRESSION_RATIO <= 1) COMPRESSION_RATIO = 2;
-				firstTime = 0;
-			}
-
-			if (botrow > row) // First time, try reducing the height.
-			{ 
-				botrow = row + ((botrow - row + 1) / 2);
-				captureHeight = (botrow - row + 1) * TILE_HEIGHT;
-			}
-			else if (rightcol > col) // If it is not possible, reduce the width
-			{
-				rightcol = col + ((rightcol - col + 1) / 2);
-				captureWidth = (rightcol - col + 1) * TILE_WIDTH;
-			} 
-			else
-			{   // This never happens, but just in case.
-				retval = 0;
-				break;
-			}
-
-		}
-	} while (*buffer == NULL);
-
-	// Set the flags to TILE_SENT
-	if (*buffer != NULL) {
-		for (int r = row; r <= botrow; r++) {
-			for (int c = col; c <= rightcol; c++) {
-				tileInfo[r][c].flags = (char)TILE_SENT;
-			}
+	// After an encode the tiles of the region are done for this pass, after a failed one they are stale so the next pass tries them again
+	for (int r = row; r <= botrow; r++) {
+		for (int c = col; c <= rightcol; c++) {
+			if (*buffer != NULL) { tileInfo[r][c].flags = TILE_DONE; } else { tileInfo[r][c].stale = 1; }
 		}
 	}
 
-	return retval;
+	return 0;
 }
 
 // This function captures the entire desktop buffer to scan.
@@ -806,6 +750,9 @@ void teardown_gdiplus()
 	if (tilebuffer) free(tilebuffer);
 	tilebuffersize = 0;
 	tilebuffer = NULL;
+	free(refFrame);
+	refFrame = NULL;
+	refFrameSize = 0;
 	GdiplusShutdown(gdiplusToken);
 	DeleteDC(hCaptureDC);
 	DeleteObject(hCapturedBitmap);
