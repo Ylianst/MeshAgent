@@ -741,7 +741,14 @@ void* kvm_server_mainloop(void* param)
 		}
 		else {
 			//senddebug(100);
-			getScreenBuffer((unsigned char **)&desktop, &desktopsize, image);
+			if (getScreenBuffer((unsigned char **)&desktop, &desktopsize, image) != 0)
+			{
+				// The image did not fit the screen size, so the size is read again as after a display change, after a short pause in case it stays so
+				CGImageRelease(image);
+				usleep(100000);
+				kvm_init();
+				continue;
+			}
 
 			KvmDebugLog("...Enter for loop\n");
 
