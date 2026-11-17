@@ -168,10 +168,11 @@ function macPs(format)
 function macGuiSessionUids()
 {
     var str = macPs('uid=,ucomm=');
-    var re = /^\s*([0-9]+)\s+loginwindow\s*$/gm, ret = [], m;
+    var re = /^\s*([0-9]+)\s+loginwindow\s*$/gm, ret = [], m, uid;
     while ((m = re.exec(str)) != null)
     {
-        if (m[1] != '0' && ret.indexOf(parseInt(m[1])) < 0) { ret.push(parseInt(m[1])); }
+        uid = parseInt(m[1]);
+        if (uid != 0 && ret.indexOf(uid) < 0) { ret.push(uid); }
     }
     return (ret);
 }
@@ -359,6 +360,14 @@ function installService(params)
                 for (var u = 0; u < uids.length; ++u)
                 {
                     process.stdout.write('   -> bootstrapping launch agent into gui/' + uids[u] + '...');
+                    // Bootstrap fails while the label is still loaded, for example after an uninstall by an older agent
+                    if (launchagent.isLoaded(uids[u]))
+                    {
+                        try { launchagent.unload(uids[u]); } catch (ue) { }
+                        // The bootout can return before the job is gone, so wait for that, 3 seconds at most
+                        var until = Date.now() + 3000;
+                        while (launchagent.isLoaded(uids[u]) && Date.now() < until) { }
+                    }
                     launchagent.load(uids[u]);
                     process.stdout.write(launchagent.isLoaded(uids[u]) ? ' [DONE]\n' : ' [FAILED — bootstrap on next login]\n');
                 }
