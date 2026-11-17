@@ -409,17 +409,29 @@ int getScreenBuffer(unsigned char **desktop, long long *desktopsize, CGImageRef 
 	unsigned char *output;
 	int height = CGImageGetHeight(image);
 	int width = CGImageGetWidth(image);
+	int targetWidth = adjust_screen_size(SCREEN_WIDTH);
+	int targetHeight = adjust_screen_size(SCREEN_HEIGHT);
+	long long need;
 
 	CGImageAlphaInfo alphaInfo = CGImageGetAlphaInfo(image);
-	
+
 	CFDataRef dataRef = CGDataProviderCopyData(CGImageGetDataProvider(image));
+	if (dataRef == NULL) { return -1; }
 	const unsigned char *sourceBytesPtr = CFDataGetBytePtr(dataRef);
 	len = CFDataGetLength(dataRef);
-	
-	if (*desktopsize != len) {
+
+	// The image can be larger than the screen size the caller read just before the capture, for example while a fast user switch changes the display mode.
+	// The paddings below are unsigned, so a negative one became about 4 GB, and the zero fill ran past the buffer (SIGSEGV in __bzero on macOS 26.7, an image 3420 pixels wide).
+	if (width > targetWidth || height > targetHeight) { CFRelease(dataRef); return -1; }
+
+	// The buffer holds the padded screen at 3 bytes per pixel, which a small image's own data length need not cover
+	need = (long long)targetWidth * targetHeight * 3;
+	if (need < len) { need = len; }
+	if (*desktopsize != need) {
 		if (*desktop != NULL) { free(*desktop); }
-		*desktopsize = len;
+		*desktopsize = need;
 		*desktop = (unsigned char *) malloc (*desktopsize);
+		if (*desktop == NULL) { *desktopsize = 0; CFRelease(dataRef); return -1; }
 	}
 	
 	output = *desktop;
