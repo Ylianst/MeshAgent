@@ -403,13 +403,13 @@ int kvm_server_inputdata(char* block, int blocklen)
 		}
 		case MNG_KVM_MOUSE: // Mouse
 		{
-			int x, y;
+			double x, y;
 			short w = 0;
 			// Same as above — process mouse locally in -kvmagent mode.
 			if (size == 10 || size == 12)
 			{
-				x = ((int)ntohs(((unsigned short*)(block))[3])) / SCREEN_SCALE;
-				y = ((int)ntohs(((unsigned short*)(block))[4])) / SCREEN_SCALE;
+				x = ((int)ntohs(((unsigned short*)(block))[3])) / (double)SCREEN_SCALE;
+				y = ((int)ntohs(((unsigned short*)(block))[4])) / (double)SCREEN_SCALE;
 				
 				if (size == 12) w = ((short)ntohs(((short*)(block))[5]));
 				
