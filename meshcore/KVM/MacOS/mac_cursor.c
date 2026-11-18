@@ -17,6 +17,7 @@ limitations under the License.
 // Objective-C runtime, so only the KVM processes load it and the build needs no Objective-C and no extra framework.
 
 #include "mac_cursor.h"
+#include "mac_inputlock.h"
 #include "../../meshdefines.h"
 #include <CoreGraphics/CoreGraphics.h>
 #include <objc/objc.h>
@@ -216,6 +217,8 @@ void kvm_cursor_check(ILibQueue queue)
 	unsigned char *buffer;
 	int cur;
 
+	// The pointer belongs to the local user during the backoff, so its shape is not the viewer's business
+	if (kvm_local_input_active()) { return; }
 	// Compared as a sum, because a mouse event stored after now was read would make now minus it wrap around
 	if (now >= __atomic_load_n(&g_cursorMouseMs, __ATOMIC_RELAXED) + KVM_CURSOR_ACTIVE_MS && now - lastCheck < KVM_CURSOR_INTERVAL_MS) { return; }
 	lastCheck = now;
