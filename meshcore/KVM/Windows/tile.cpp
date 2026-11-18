@@ -44,8 +44,10 @@ extern void KvmCriticalLog(const char* msg, const char* file, int line, int user
 extern "C"
 {
 #include "microstack/ILibCrypto.h"
-extern int TILE_WIDTH;
-extern int TILE_HEIGHT;
+int TILE_WIDTH = 0;			// Set in initialize_gdiplus()
+int TILE_HEIGHT = 0;
+int TILE_WIDTH_COUNT = 0;	// Set in tile_info_alloc() for the scaled screen
+int TILE_HEIGHT_COUNT = 0;
 extern int SCREEN_WIDTH;
 extern int SCREEN_HEIGHT;
 extern int SCREEN_X;
@@ -53,13 +55,9 @@ extern int SCREEN_Y;
 extern int SCALED_WIDTH;
 extern int SCALED_HEIGHT;
 extern int PIXEL_SIZE;
-extern int TILE_WIDTH_COUNT;
-extern int TILE_HEIGHT_COUNT;
-extern int COMPRESSION_RATIO;
 extern int SCALING_FACTOR;
 extern int SCALING_FACTOR_NEW;
 extern int FRAME_RATE_TIMER;
-extern tileInfo_t **tileInfo;
 }
 
 // Used with setting up a GDI+ session.
@@ -272,23 +270,36 @@ int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void*
 	return 0;
 }
 
+struct tileInfo_t {
+	unsigned char stale;	// 1 when the reference frame does not hold this tile, so it counts as changed
+	unsigned char flags;	// See TILE_FLAGS_ENUM
+};
+
+enum TILE_FLAGS_ENUM {
+	TILE_TODO = 0,			// The tile needs to be compared with the reference frame
+	TILE_CHANGED,			// The tile has changed, but was not sent yet
+	TILE_DONE				// The tile was handled this pass, nothing is left to send
+};
+
+static tileInfo_t **tileInfo = NULL;			// One block that holds the row pointers and behind them the tiles
+static volatile LONG tileRefreshPending = 0;
+
 // The tiles as they were when last found changed, in the layout of the desktop buffer
 static unsigned char *refFrame = NULL;
 static long long refFrameSize = 0;
 static int refPixelSize = 0;
 
-// Reallocated when the frame size or pixel format changes, and then every tile counts as changed
-static unsigned char *tile_reference(void)
+// Reallocates the reference when the frame size or pixel format changed, and returns 1 then because it holds no tile anymore
+static int tile_check_reference(void)
 {
 	long long size = (long long)adjust_screen_size(SCALED_WIDTH) * adjust_screen_size(SCALED_HEIGHT) * PIXEL_SIZE;
-	if (refFrame != NULL && refFrameSize == size && refPixelSize == PIXEL_SIZE) { return refFrame; }
+	if (refFrame != NULL && refFrameSize == size && refPixelSize == PIXEL_SIZE) { return 0; }
 	free(refFrame);
 	refFrameSize = 0;
-	if ((refFrame = (unsigned char *)malloc((size_t)size)) == NULL) { return NULL; }
+	if ((refFrame = (unsigned char *)malloc((size_t)size)) == NULL) { return 0; }
 	refFrameSize = size;
 	refPixelSize = PIXEL_SIZE;
-	tile_mark_all_stale();
-	return refFrame;
+	return 1;
 }
 
 // Returns 1 and updates the reference when the tile is stale or differs from it, 0 when it is unchanged.
@@ -299,7 +310,7 @@ static int tile_changed(int x, int y, void *desktop, int row, int col)
 	size_t len = (size_t)TILE_WIDTH * PIXEL_SIZE;
 	size_t offset = (size_t)(adjust_screen_size(SCALED_HEIGHT) - y - TILE_HEIGHT) * stride + (size_t)x * PIXEL_SIZE;
 	unsigned char *cur = (unsigned char *)desktop + offset;
-	unsigned char *ref = tile_reference();
+	unsigned char *ref = refFrame;
 	int r = 0;
 
 	if (ref == NULL) { return 1; } // Without a reference every tile counts as changed, which costs data but loses nothing
@@ -324,15 +335,56 @@ static int tile_pending(int x, int y, void *desktop, int row, int col)
 extern "C"
 {
 
-// Makes every tile count as changed on its next compare, so the next pass sends the whole screen
-void tile_mark_all_stale(void)
+void tile_info_free(void)
 {
-	for (int r = 0; r < TILE_HEIGHT_COUNT; r++) { for (int c = 0; c < TILE_WIDTH_COUNT; c++) { tileInfo[r][c].stale = 1; } }
+	free(tileInfo);
+	tileInfo = NULL;
+}
+
+// Every tile starts stale, so the next pass sends the whole screen
+void tile_info_alloc(void)
+{
+	tile_info_free();
+	TILE_WIDTH_COUNT = (SCALED_WIDTH + TILE_WIDTH - 1) / TILE_WIDTH;
+	TILE_HEIGHT_COUNT = (SCALED_HEIGHT + TILE_HEIGHT - 1) / TILE_HEIGHT;
+
+	size_t rows = (size_t)TILE_HEIGHT_COUNT * sizeof(tileInfo_t *);
+	if ((tileInfo = (tileInfo_t **)malloc(rows + (size_t)TILE_HEIGHT_COUNT * TILE_WIDTH_COUNT * sizeof(tileInfo_t))) == NULL) { ILIBCRITICALEXIT(254); }
+	tileInfo_t *tiles = (tileInfo_t *)((char *)tileInfo + rows);
+	for (int r = 0; r < TILE_HEIGHT_COUNT; r++)
+	{
+		tileInfo[r] = tiles + (size_t)r * TILE_WIDTH_COUNT;
+		for (int c = 0; c < TILE_WIDTH_COUNT; c++) { tileInfo[r][c].stale = 1; tileInfo[r][c].flags = TILE_TODO; }
+	}
+}
+
+// The input thread only sets a flag, so the table is touched by the capture thread alone
+void tile_request_refresh(void)
+{
+	InterlockedExchange(&tileRefreshPending, 1);
+}
+
+// Called by the capture loop before it walks the tiles of a new frame
+void tile_start_pass(void)
+{
+	int all = (int)InterlockedExchange(&tileRefreshPending, 0);
+#ifdef KVM_ALL_TILES
+	all = 1;
+#endif
+	if (tile_check_reference()) { all = 1; }
+	for (int r = 0; r < TILE_HEIGHT_COUNT; r++) {
+		for (int c = 0; c < TILE_WIDTH_COUNT; c++) {
+			tileInfo[r][c].flags = TILE_TODO;
+			if (all) { tileInfo[r][c].stale = 1; }
+		}
+	}
 }
 
 //Fetches the encoded jpeg tile at the given location. The neighboring tiles are coalesed to form a larger jpeg before returning.
-int get_tile_at(int x, int y, void** buffer, long long *bufferSize, void *desktop, int row, int col)
+void get_tile_at(void** buffer, long long *bufferSize, void *desktop, int row, int col)
 {
+	int x = col * TILE_WIDTH;
+	int y = row * TILE_HEIGHT;
 	int rightcol = col;		// Used in coalescing. Indicates the right-most column to be coalesced.
 	int botrow = row;		// Used in coalescing. Indicates the bottom-most row to be coalesced.
 	int r_x = x;
@@ -343,8 +395,11 @@ int get_tile_at(int x, int y, void** buffer, long long *bufferSize, void *deskto
 	*buffer = NULL;			// If anything fails, this will be the indication.
 	*bufferSize = 0;
 
+	// Nothing to do when the tile was already sent or found unchanged in this pass
+	if (tileInfo[row][col].flags == TILE_DONE) return;
+
 	// Nothing to send when the tile is unchanged
-	if (tileInfo[row][col].flags == TILE_TODO && !tile_changed(x, y, desktop, row, col)) return 0;
+	if (tileInfo[row][col].flags == TILE_TODO && !tile_changed(x, y, desktop, row, col)) return;
 
 	tileInfo[row][col].flags = TILE_CHANGED;
 
@@ -417,8 +472,6 @@ int get_tile_at(int x, int y, void** buffer, long long *bufferSize, void *deskto
 			if (*buffer != NULL) { tileInfo[r][c].flags = TILE_DONE; } else { tileInfo[r][c].stale = 1; }
 		}
 	}
-
-	return 0;
 }
 
 // This function captures the entire desktop buffer to scan.
@@ -539,7 +592,6 @@ short initialize_gdiplus()
 
 	TILE_WIDTH = 32;
 	TILE_HEIGHT = 32;
-	COMPRESSION_RATIO = 100;
 	FRAME_RATE_TIMER = 50;
 	SCALING_FACTOR = 1024;
 	SCALING_FACTOR_NEW = 1024;

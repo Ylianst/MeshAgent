@@ -92,8 +92,6 @@ void KvmCriticalLog(const char *msg, const char *file, int line, int user1, int 
 #define KVMDEBUG2(...)
 #endif
 
-int TILE_WIDTH = 0;
-int TILE_HEIGHT = 0;
 int SCREEN_COUNT = -1;		// Total number of displays
 int SCREEN_SEL = 0;			// Currently selected display (0 = all)
 int SCREEN_SEL_TARGET = 0;	// Desired selected display (0 = all)
@@ -109,9 +107,6 @@ int VSCREEN_HEIGHT = 0;		// Height of virtual screen
 int SCALED_WIDTH = 0;
 int SCALED_HEIGHT = 0;
 int PIXEL_SIZE = 0;
-int TILE_WIDTH_COUNT = 0;
-int TILE_HEIGHT_COUNT = 0;
-int COMPRESSION_RATIO = 0;
 int SCALING_FACTOR = 1024;	   // Scaling factor, 1024 = 100%
 int SCALING_FACTOR_NEW = 1024; // Desired scaling factor, 1024 = 100%
 int FRAME_RATE_TIMER = 0;
@@ -120,7 +115,6 @@ int g_shutdown = 999;
 int g_pause = 0;
 int g_remotepause = 1;
 int g_restartcount = 0;
-struct tileInfo_t **tileInfo = NULL;
 int g_slavekvm = 0;
 static ILibProcessPipe_Process gChildProcess;
 int kvm_relay_restart(int paused, void *pipeMgr, char *exePath, ILibKVM_WriteHandler writeHandler, void *reserved);
@@ -590,12 +584,10 @@ int kvm_server_inputdata(char *block, int blocklen, ILibKVM_WriteHandler writeHa
 		{
 			set_tile_compression((int)block[4], (int)block[5]);
 		}
-		COMPRESSION_RATIO = 100;
 		break;
 	}
 	case MNG_KVM_REFRESH: // Refresh
 	{
-		int row, col;
 		char buffer[8];
 		if (size != 4)
 			break;
@@ -610,25 +602,8 @@ int kvm_server_inputdata(char *block, int blocklen, ILibKVM_WriteHandler writeHa
 		// Send the list of available displays
 		kvm_send_display_list(writeHandler, reserved);
 
-		// Reset all tile information
-		if (tileInfo == NULL)
-		{
-			if ((tileInfo = (struct tileInfo_t **)malloc(TILE_HEIGHT_COUNT * sizeof(struct tileInfo_t *))) == NULL)
-				ILIBCRITICALEXIT(254);
-			for (row = 0; row < TILE_HEIGHT_COUNT; row++)
-			{
-				if ((tileInfo[row] = (struct tileInfo_t *)malloc(TILE_WIDTH_COUNT * sizeof(struct tileInfo_t))) == NULL)
-					ILIBCRITICALEXIT(254);
-			}
-		}
-		for (row = 0; row < TILE_HEIGHT_COUNT; row++)
-		{
-			for (col = 0; col < TILE_WIDTH_COUNT; col++)
-			{
-				tileInfo[row][col].flags = TILE_TODO;
-			}
-		}
-		tile_mark_all_stale();
+		// The next pass sends the whole screen again
+		tile_request_refresh();
 
 		break;
 	}
@@ -781,33 +756,16 @@ void kvm_pause(int pause)
 void kvm_server_SetResolution(ILibKVM_WriteHandler writeHandler, void *reserved)
 {
 	char buffer[8];
-	int row, col;
 
 	KVMDEBUG("kvm_server_SetResolution", 0);
-
-	// Free the tileInfo before you manipulate the TILE_HEIGHT_COUNT
-	if (tileInfo != NULL)
-	{
-		for (row = 0; row < TILE_HEIGHT_COUNT; row++)
-		{
-			free(tileInfo[row]);
-		}
-		free(tileInfo);
-		tileInfo = NULL;
-	}
 
 	// Setup scaling
 	SCALING_FACTOR = SCALING_FACTOR_NEW;
 	SCALED_WIDTH = (SCREEN_WIDTH * SCALING_FACTOR) / 1024;
 	SCALED_HEIGHT = (SCREEN_HEIGHT * SCALING_FACTOR) / 1024;
 
-	// Compute the tile count
-	TILE_WIDTH_COUNT = SCALED_WIDTH / TILE_WIDTH;
-	TILE_HEIGHT_COUNT = SCALED_HEIGHT / TILE_HEIGHT;
-	if (SCALED_WIDTH % TILE_WIDTH)
-		TILE_WIDTH_COUNT++;
-	if (SCALED_HEIGHT % TILE_HEIGHT)
-		TILE_HEIGHT_COUNT++;
+	// A new table of stale tiles, so the next pass sends the whole screen
+	tile_info_alloc();
 
 	((unsigned short *)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_SCREEN); // Write the type
 	((unsigned short *)buffer)[1] = (unsigned short)htons((unsigned short)8);			   // Write the size
@@ -815,22 +773,6 @@ void kvm_server_SetResolution(ILibKVM_WriteHandler writeHandler, void *reserved)
 	((unsigned short *)buffer)[3] = (unsigned short)htons((unsigned short)SCALED_HEIGHT);  // Y position
 
 	writeHandler((char *)buffer, 8, reserved);
-
-	if ((tileInfo = (struct tileInfo_t **)malloc(TILE_HEIGHT_COUNT * sizeof(struct tileInfo_t *))) == NULL)
-		ILIBCRITICALEXIT(254);
-	for (row = 0; row < TILE_HEIGHT_COUNT; row++)
-	{
-		if ((tileInfo[row] = (struct tileInfo_t *)malloc(TILE_WIDTH_COUNT * sizeof(struct tileInfo_t))) == NULL)
-			ILIBCRITICALEXIT(254);
-	}
-	for (row = 0; row < TILE_HEIGHT_COUNT; row++)
-	{
-		for (col = 0; col < TILE_WIDTH_COUNT; col++)
-		{
-			tileInfo[row][col].flags = TILE_TODO;
-		}
-	}
-	tile_mark_all_stale();
 }
 
 #define BUFSIZE 65535
@@ -912,10 +854,9 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	// long prev_timestamp = 0;
 	// long time_diff = 50;
 	long long tilesize;
-	int width, height = 0;
+	int height = 0;
 	void *buf, *desktop;
 	long long desktopsize;
-	BITMAPINFO bmpInfo;
 	int row, col;
 	ILibKVM_WriteHandler writeHandler = (ILibKVM_WriteHandler)((void **)parm)[0];
 	void *reserved = ((void **)parm)[1];
@@ -990,9 +931,6 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	}
 #endif
 
-	// The first pass sends the whole screen
-	tile_mark_all_stale();
-
 	// Send the list of displays
 	kvm_send_display_list(writeHandler, reserved);
 
@@ -1004,17 +942,6 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	{
 		KVMDEBUG("kvm_server_mainloop / loop1", (int)GetCurrentThreadId());
 
-		// Reset all the flags to TILE_TODO
-		for (row = 0; row < TILE_HEIGHT_COUNT; row++)
-		{
-			for (col = 0; col < TILE_WIDTH_COUNT; col++)
-			{
-				tileInfo[row][col].flags = TILE_TODO;
-			}
-		}
-#ifdef KVM_ALL_TILES
-		tile_mark_all_stale();
-#endif
 		CheckDesktopSwitch(1, writeHandler, reserved);
 		if (g_shutdown)
 			break;
@@ -1117,14 +1044,11 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 		else
 		{
 			captureFailedSince = 0;
-			bmpInfo = get_bmp_info(TILE_WIDTH, TILE_HEIGHT);
+			tile_start_pass();
 			for (row = 0; row < TILE_HEIGHT_COUNT; row++)
 			{
 				for (col = 0; col < TILE_WIDTH_COUNT; col++)
 				{
-					height = TILE_HEIGHT * row;
-					width = TILE_WIDTH * col;
-
 					while (!g_shutdown && (g_pause))
 					{
 						Sleep(50); /*printf(".");*/
@@ -1132,22 +1056,10 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 
 					if (g_shutdown || SCALING_FACTOR != SCALING_FACTOR_NEW)
 					{
-						height = SCALED_HEIGHT;
-						width = SCALED_WIDTH;
 						break;
 					}
 
-					// Skip the tile if it was already sent or found unchanged in this pass
-					if (tileInfo[row][col].flags == TILE_DONE)
-					{
-						continue;
-					}
-
-					if (get_tile_at(width, height, &buf, &tilesize, desktop, row, col) == 1)
-					{
-						// GetTileAt failed, lets not send the tile
-						continue;
-					}
+					get_tile_at(&buf, &tilesize, desktop, row, col);
 					if (buf && !g_shutdown)
 					{
 						KVMDEBUG2("Writing JPEG: %llu bytes", tilesize);
@@ -1160,8 +1072,6 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 							break;
 						case ILibTransport_DoneState_ERROR:
 							g_shutdown = 1;
-							height = SCALED_HEIGHT;
-							width = SCALED_WIDTH;
 							KVMDEBUG2("JPEG WRITE resulted in ERROR");
 							break;
 						}
@@ -1201,13 +1111,7 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	KVMDEBUG("kvm_server_mainloop / end3", (int)GetCurrentThreadId());
 	KVMDEBUG("kvm_server_mainloop / end2", (int)GetCurrentThreadId());
 
-	if (tileInfo != NULL)
-	{
-		for (row = 0; row < TILE_HEIGHT_COUNT; row++)
-			free(tileInfo[row]);
-		free(tileInfo);
-		tileInfo = NULL;
-	}
+	tile_info_free();
 	KVMDEBUG("kvm_server_mainloop / end1", (int)GetCurrentThreadId());
 	teardown_gdiplus();
 
