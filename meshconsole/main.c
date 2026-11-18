@@ -281,6 +281,9 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		return(0);
 	}
 #if defined(_LINKVM) && defined(__APPLE__)
+	// The KVM modes return before the SIGPIPE handling further down, and a write after the daemon closed the socket killed the -kvmagent (launchd: "Broken pipe: 13").
+	// Ignored, the write fails with EPIPE, the read side sees the closed socket and the -kvmagent waits for the next session, while -kvm0 and -kvm1 end as before.
+	if (argc > 1 && (strcasecmp(argv[1], "-kvm0") == 0 || strcasecmp(argv[1], "-kvm1") == 0 || strcasecmp(argv[1], "-kvmagent") == 0)) { signal(SIGPIPE, SIG_IGN); }
 	if (argc > 1 && strcasecmp(argv[1], "-kvm0") == 0)
 	{
 		// Tahoe audit-session join: pre-exec in SpawnProcessEx4 (as
@@ -330,7 +333,8 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		// The login window instance runs as root and has nobody to ask
 		if (getuid() != 0) { kvm_permission_prompt_start(KVM_PROMPT_RESTART); }
 		kvm_server_mainloop((void*)(uint64_t)getpid());
-		return 0;
+		// The plist's KeepAlive SuccessfulExit = false restarts only a non-zero exit, and launchd removes the job before a bootout ends it, so uninstall is unaffected
+		return 3;
 	}
 	else if (argc > 1 && strcasecmp(argv[1], "-kvmpermcheck") == 0)
 	{
