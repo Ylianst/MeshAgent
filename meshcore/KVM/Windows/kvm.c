@@ -1044,7 +1044,7 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 		else
 		{
 			captureFailedSince = 0;
-			tile_start_pass();
+			tile_start_pass(desktop);
 			for (row = 0; row < TILE_HEIGHT_COUNT; row++)
 			{
 				for (col = 0; col < TILE_WIDTH_COUNT; col++)

@@ -276,9 +276,8 @@ struct tileInfo_t {
 };
 
 enum TILE_FLAGS_ENUM {
-	TILE_TODO = 0,			// The tile needs to be compared with the reference frame
-	TILE_CHANGED,			// The tile has changed, but was not sent yet
-	TILE_DONE				// The tile was handled this pass, nothing is left to send
+	TILE_DONE = 0,			// Nothing to send, the tile is unchanged or was sent in this pass
+	TILE_CHANGED			// The tile differs from the reference and was not sent yet
 };
 
 static tileInfo_t **tileInfo = NULL;			// One block that holds the row pointers and behind them the tiles
@@ -300,36 +299,6 @@ static int tile_check_reference(void)
 	refFrameSize = size;
 	refPixelSize = PIXEL_SIZE;
 	return 1;
-}
-
-// Returns 1 and updates the reference when the tile is stale or differs from it, 0 when it is unchanged.
-// Exact, a hash could miss a change. Rows before the first difference are equal already, so only the rest is copied.
-static int tile_changed(int x, int y, void *desktop, int row, int col)
-{
-	size_t stride = (size_t)adjust_screen_size(SCALED_WIDTH) * PIXEL_SIZE;
-	size_t len = (size_t)TILE_WIDTH * PIXEL_SIZE;
-	size_t offset = (size_t)(adjust_screen_size(SCALED_HEIGHT) - y - TILE_HEIGHT) * stride + (size_t)x * PIXEL_SIZE;
-	unsigned char *cur = (unsigned char *)desktop + offset;
-	unsigned char *ref = refFrame;
-	int r = 0;
-
-	if (ref == NULL) { return 1; } // Without a reference every tile counts as changed, which costs data but loses nothing
-	ref += offset;
-	if (tileInfo[row][col].stale == 0)
-	{
-		while (r < TILE_HEIGHT && memcmp(cur + r * stride, ref + r * stride, len) == 0) { r++; }
-		if (r == TILE_HEIGHT) { return 0; }
-	}
-	for (; r < TILE_HEIGHT; r++) { memcpy(ref + r * stride, cur + r * stride, len); }
-	tileInfo[row][col].stale = 0;
-	return 1;
-}
-
-// A tile is pending when it changed in this pass and has not been sent yet
-static int tile_pending(int x, int y, void *desktop, int row, int col)
-{
-	if (tileInfo[row][col].flags == TILE_TODO) { return tile_changed(x, y, desktop, row, col); }
-	return tileInfo[row][col].flags == TILE_CHANGED;
 }
 
 extern "C"
@@ -354,7 +323,7 @@ void tile_info_alloc(void)
 	for (int r = 0; r < TILE_HEIGHT_COUNT; r++)
 	{
 		tileInfo[r] = tiles + (size_t)r * TILE_WIDTH_COUNT;
-		for (int c = 0; c < TILE_WIDTH_COUNT; c++) { tileInfo[r][c].stale = 1; tileInfo[r][c].flags = TILE_TODO; }
+		for (int c = 0; c < TILE_WIDTH_COUNT; c++) { tileInfo[r][c].stale = 1; tileInfo[r][c].flags = TILE_DONE; }
 	}
 }
 
@@ -364,19 +333,44 @@ void tile_request_refresh(void)
 	InterlockedExchange(&tileRefreshPending, 1);
 }
 
-// Called by the capture loop before it walks the tiles of a new frame
-void tile_start_pass(void)
+// Called by the capture loop before it walks the tiles of a new frame. Marks the tiles that differ from the reference.
+// The frame is compared in memory order, a pixel row at a time, because tile by tile is several times slower on some processors.
+// Exact, a hash could miss a change. Only the parts that differ are copied, so the reference holds the frame afterwards.
+void tile_start_pass(void *desktop)
 {
 	int all = (int)InterlockedExchange(&tileRefreshPending, 0);
 #ifdef KVM_ALL_TILES
 	all = 1;
 #endif
 	if (tile_check_reference()) { all = 1; }
-	for (int r = 0; r < TILE_HEIGHT_COUNT; r++) {
-		for (int c = 0; c < TILE_WIDTH_COUNT; c++) {
-			tileInfo[r][c].flags = TILE_TODO;
-			if (all) { tileInfo[r][c].stale = 1; }
+	if (refFrame == NULL) { all = 1; } // Without a reference every tile counts as changed, which costs data but loses nothing
+
+	size_t stride = (size_t)adjust_screen_size(SCALED_WIDTH) * PIXEL_SIZE;
+	size_t len = (size_t)TILE_WIDTH * PIXEL_SIZE;
+	for (int row = TILE_HEIGHT_COUNT - 1; row >= 0; row--) // The last tile row lies first in the bottom-up frame
+	{
+		size_t offset = (size_t)(adjust_screen_size(SCALED_HEIGHT) - (row + 1) * TILE_HEIGHT) * stride;
+		unsigned char *cur = (unsigned char *)desktop + offset;
+		tileInfo_t *tiles = tileInfo[row];
+
+		for (int col = 0; col < TILE_WIDTH_COUNT; col++)
+		{
+			if (all) { tiles[col].stale = 1; }
+			tiles[col].flags = tiles[col].stale ? TILE_CHANGED : TILE_DONE;
 		}
+		if (refFrame == NULL) { continue; }
+
+		unsigned char *ref = refFrame + offset;
+		for (int r = 0; r < TILE_HEIGHT; r++, cur += stride, ref += stride)
+		{
+			for (int col = 0; col < TILE_WIDTH_COUNT; col++)
+			{
+				if (!tiles[col].stale && memcmp(cur + col * len, ref + col * len, len) == 0) { continue; }
+				memcpy(ref + col * len, cur + col * len, len);
+				tiles[col].flags = TILE_CHANGED;
+			}
+		}
+		for (int col = 0; col < TILE_WIDTH_COUNT; col++) { tiles[col].stale = 0; }
 	}
 }
 
@@ -387,80 +381,33 @@ void get_tile_at(void** buffer, long long *bufferSize, void *desktop, int row, i
 	int y = row * TILE_HEIGHT;
 	int rightcol = col;		// Used in coalescing. Indicates the right-most column to be coalesced.
 	int botrow = row;		// Used in coalescing. Indicates the bottom-most row to be coalesced.
-	int r_x = x;
-	int r_y = y;
 	int captureWidth = TILE_WIDTH;
 	int captureHeight = TILE_HEIGHT;
 
 	*buffer = NULL;			// If anything fails, this will be the indication.
 	*bufferSize = 0;
 
-	// Nothing to do when the tile was already sent or found unchanged in this pass
-	if (tileInfo[row][col].flags == TILE_DONE) return;
-
-	// Nothing to send when the tile is unchanged
-	if (tileInfo[row][col].flags == TILE_TODO && !tile_changed(x, y, desktop, row, col)) return;
-
-	tileInfo[row][col].flags = TILE_CHANGED;
+	// Nothing to send when the tile is unchanged or was already sent in this pass
+	if (tileInfo[row][col].flags != TILE_CHANGED) return;
 
 
 	// COALESCING SECTION
 
-	// First got to the right most changed tile and record it
-	while (rightcol + 1 < TILE_WIDTH_COUNT)
+	// First go to the right most changed tile
+	while (rightcol + 1 < TILE_WIDTH_COUNT && tileInfo[row][rightcol + 1].flags == TILE_CHANGED)
 	{
 		rightcol++;
-		r_x = rightcol * TILE_WIDTH;
-		
-		if (tile_pending(r_x, y, desktop, row, rightcol)) // If the tile has changed, increment the capturewidth
-		{
-			tileInfo[row][rightcol].flags = TILE_CHANGED;
-			captureWidth += TILE_WIDTH;
-		} 
-		else
-		{
-			tileInfo[row][rightcol].flags = TILE_DONE;
-			--rightcol;
-			break;
-		}
+		captureWidth += TILE_WIDTH;
 	}
 
-	// Now go to the bottom tiles, check if they have changed and record them
-	while ((botrow + 1 < TILE_HEIGHT_COUNT))
+	// Now go to the bottom tiles, a row of them is added when all of its tiles have changed
+	while (botrow + 1 < TILE_HEIGHT_COUNT)
 	{
+		int rcol = col;
+		while (rcol <= rightcol && tileInfo[botrow + 1][rcol].flags == TILE_CHANGED) { rcol++; }
+		if (rcol <= rightcol) { break; }
 		botrow++;
-		r_y = botrow * TILE_HEIGHT;
-		int fail = 0;
-		r_x = x;
-
-		for (int rcol = col; rcol <= rightcol; rcol++) {
-
-			if (tile_pending(r_x, r_y, desktop, botrow, rcol))
-			{
-				tileInfo[botrow][rcol].flags = TILE_CHANGED;
-				r_x += TILE_WIDTH;
-			}
-			else
-			{
-				fail = 1;
-				for (int i = col; i < rcol; i++)
-				{
-					tileInfo[botrow][i].flags = TILE_CHANGED;
-				}
-				tileInfo[botrow][rcol].flags = TILE_DONE;
-				botrow--;
-				break;
-			}
-		}
-
-		if (!fail)
-		{
-			captureHeight += TILE_HEIGHT;
-		}
-		else
-		{
-			break;
-		}
+		captureHeight += TILE_HEIGHT;
 	}
 
 	// One encode for the whole region, whatever its size

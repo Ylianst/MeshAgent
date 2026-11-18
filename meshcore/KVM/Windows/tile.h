@@ -35,7 +35,7 @@ void teardown_gdiplus();
 void get_tile_at(void** buffer, long long *bufferSize, void *desktop, int row, int col);
 void tile_info_alloc(void);			// Sizes the tile table for the current scaled screen
 void tile_info_free(void);
-void tile_start_pass(void);			// Called by the capture loop before it walks the tiles
+void tile_start_pass(void *desktop);	// Called by the capture loop before it walks the tiles, marks the changed ones
 void tile_request_refresh(void);	// Safe from any thread
 int get_desktop_buffer(void **buffer, long long *bufferSize, long*);
 BITMAPINFO get_bmp_info(int width, int height);
