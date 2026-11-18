@@ -15,6 +15,8 @@ limitations under the License.
 */
 
 #include "mac_kvm.h"
+#include "mac_cursor.h"
+#include "mac_inputlock.h"
 #include "../../meshdefines.h"
 #include "../../meshinfo.h"
 #include "../../../microstack/ILibParsers.h"
@@ -375,6 +377,21 @@ int kvm_server_inputdata(char* block, int blocklen)
 			if (size != 7) break;
 			KeyActionUnicode(((((unsigned char)block[5]) << 8) + ((unsigned char)block[6])), block[4]);
 			break;
+		case MNG_KVM_INPUT_LOCK:
+		{
+			// 0 unlocks, 1 locks, 2 only asks, and the reply carries the state now in force, as on Windows
+			unsigned char *buffer;
+			if (size != 5 || (unsigned char)block[4] > 2) { break; }
+			if (block[4] != 2) { kvm_inputlock_set(block[4]); }
+			buffer = ILibMemory_SmartAllocate(5);
+			((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_INPUT_LOCK);
+			((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);
+			buffer[4] = (unsigned char)kvm_inputlock_get();
+			ILibQueue_Lock(g_messageQ);
+			ILibQueue_EnQueue(g_messageQ, buffer);
+			ILibQueue_UnLock(g_messageQ);
+			break;
+		}
 		case MNG_KVM_KEY: // Key
 		{
 			// Removed `KVM_AGENT_FD != -1` skip — in our user-LaunchAgent
@@ -400,6 +417,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 				
 				//printf("x:%d, y:%d, b:%d, w:%d\n", x, y, block[5], w);
 				MouseAction(x, y, (int)(unsigned char)(block[5]), w);
+				kvm_cursor_moved();
 			}
 			break;
 		}
@@ -514,6 +532,7 @@ void* kvm_mainloopinput(void* param)
 		flags = fcntl(STDIN_FILENO, F_GETFL, 0);
 		if (fcntl(STDIN_FILENO, F_SETFL, (O_NONBLOCK | flags) ^ O_NONBLOCK) == -1) { senddebug(-999); }
 	}
+	kvm_inputlock_watch(1);
 
 	while (!g_shutdown)
 	{
@@ -545,6 +564,9 @@ void* kvm_mainloopinput(void* param)
 		// TODO: else move the reminder.
 	}
 
+	// The viewer is gone, so the local user gets the keyboard and mouse back
+	kvm_inputlock_set(0);
+	kvm_inputlock_watch(0);
 	return 0;
 }
 void ExitSink(int s)
@@ -657,6 +679,7 @@ void* kvm_server_mainloop(void* param)
 		if (g_resetipc != 0)
 		{
 			g_resetipc = 0;
+			kvm_cursor_reset();
 			close(KVM_AGENT_FD);
 
 			SCREEN_HEIGHT = SCREEN_WIDTH = 0;
@@ -694,6 +717,7 @@ void* kvm_server_mainloop(void* param)
 			}
 		}
 		ILibQueue_UnLock(g_messageQ);
+		kvm_cursor_check(g_messageQ);
 
 
 		for (r = 0; r < TILE_HEIGHT_COUNT; r++) 
