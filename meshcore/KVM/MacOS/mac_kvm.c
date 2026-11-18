@@ -15,6 +15,7 @@ limitations under the License.
 */
 
 #include "mac_kvm.h"
+#include "mac_cursor.h"
 #include "../../meshdefines.h"
 #include "../../meshinfo.h"
 #include "../../../microstack/ILibParsers.h"
@@ -400,6 +401,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 				
 				//printf("x:%d, y:%d, b:%d, w:%d\n", x, y, block[5], w);
 				MouseAction(x, y, (int)(unsigned char)(block[5]), w);
+				kvm_cursor_moved();
 			}
 			break;
 		}
@@ -657,6 +659,7 @@ void* kvm_server_mainloop(void* param)
 		if (g_resetipc != 0)
 		{
 			g_resetipc = 0;
+			kvm_cursor_reset();
 			close(KVM_AGENT_FD);
 
 			SCREEN_HEIGHT = SCREEN_WIDTH = 0;
@@ -694,6 +697,7 @@ void* kvm_server_mainloop(void* param)
 			}
 		}
 		ILibQueue_UnLock(g_messageQ);
+		kvm_cursor_check(g_messageQ);
 
 
 		for (r = 0; r < TILE_HEIGHT_COUNT; r++) 
