@@ -34,8 +34,20 @@ limitations under the License.
 
 #include <string.h>
 #include <pwd.h>
+#include <grp.h>
+#include <fcntl.h>
+#include <membership.h>
+#include <libproc.h>
+#include <time.h>
 #include <unistd.h>
 #include <errno.h>
+#include <limits.h>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <mach-o/dyld.h>
+#include <notify.h>
+
+extern char **environ;
 
 // Some macOS SDKs (notably older Xcode / SDK 10.x) did not export
 // LOCAL_PEERPID in <sys/un.h> even though the kernel supports it.
@@ -588,6 +600,8 @@ void* kvm_mainloopinput(void* param)
 
 	return 0;
 }
+static void kvm_permission_watch_start(void);
+
 void ExitSink(int s)
 {
 	UNREFERENCED_PARAMETER(s);
@@ -688,6 +702,7 @@ void* kvm_server_mainloop(void* param)
 
 
 	g_shutdown = 0;
+	kvm_permission_watch_start();
 	pthread_create(&kvmthread, NULL, kvm_mainloopinput, param);
 
 
@@ -720,6 +735,7 @@ void* kvm_server_mainloop(void* param)
 				int tmpLen = sprintf_s(tmp, sizeof(tmp), "ACCEPTed new connection %d on Domain Socket\n", KVM_AGENT_FD);
 				written = write(STDOUT_FILENO, tmp, tmpLen);
 				fsync(STDOUT_FILENO);
+				kvm_permission_watch_start();
 				pthread_create(&kvmthread, NULL, kvm_mainloopinput, param);
 			}
 		}
@@ -1208,102 +1224,512 @@ void kvm_cleanup()
 }
 
 
-typedef enum {
-    MPAuthorizationStatusNotDetermined,
-    MPAuthorizationStatusAuthorized,
-    MPAuthorizationStatusDenied
-} MPAuthorizationStatus;
+#define KVM_PERM_SCREEN 1
+#define KVM_PERM_INPUT 2
 
-
-
-
-MPAuthorizationStatus _checkFDAUsingFile(const char *path) {
-    int fd = open(path, O_RDONLY);
-    if (fd != -1)
-    {
-        close(fd);
-        return MPAuthorizationStatusAuthorized;
-    }
-
-    if (errno == EPERM || errno == EACCES)
-    {
-        return MPAuthorizationStatusDenied;
-    }
-
-    return MPAuthorizationStatusNotDetermined;
-}
-
-MPAuthorizationStatus _fullDiskAuthorizationStatus() {
-    char *userHomeFolderPath = getenv("HOME");
-    if (userHomeFolderPath == NULL) {
-        struct passwd *pw = getpwuid(getuid());
-        if (pw == NULL) {
-            return MPAuthorizationStatusNotDetermined;
-        }
-        userHomeFolderPath = pw->pw_dir;
-    }
-
-    const char *testFiles[] = {
-        strcat(strcpy(malloc(strlen(userHomeFolderPath) + 30), userHomeFolderPath), "/Library/Safari/CloudTabs.db"),
-        strcat(strcpy(malloc(strlen(userHomeFolderPath) + 30), userHomeFolderPath), "/Library/Safari/Bookmarks.plist"),
-        "/Library/Application Support/com.apple.TCC/TCC.db",
-        "/Library/Preferences/com.apple.TimeMachine.plist",
-    };
-
-    MPAuthorizationStatus resultStatus = MPAuthorizationStatusNotDetermined;
-    for (int i = 0; i < 4; i++) {
-        MPAuthorizationStatus status = _checkFDAUsingFile(testFiles[i]);
-        if (status == MPAuthorizationStatusAuthorized) {
-            resultStatus = MPAuthorizationStatusAuthorized;
-            break;
-        }
-        if (status == MPAuthorizationStatusDenied) {
-            resultStatus = MPAuthorizationStatusDenied;
-        }
-    }
-
-    return resultStatus;
-}
-
-
-void kvm_check_permission()
+int kvm_permissions(void)
 {
+	int ret = AXIsProcessTrusted() ? KVM_PERM_INPUT : 0;
+	if (CGPreflightScreenCaptureAccess()) { ret |= KVM_PERM_SCREEN; }
+	return(ret);
+}
 
-    //Request screen recording access
-    if(__builtin_available(macOS 10.15, *)){
-        if(!CGPreflightScreenCaptureAccess()) {
-            CGRequestScreenCaptureAccess();
-        }
-    }
+// Screen Recording access is only read once per process, so a new child is asked what is granted now
+static int kvm_permissions_fresh(void)
+{
+	char path[PATH_MAX];
+	uint32_t len = sizeof(path);
+	char *args[] = { path, "-kvmpermcheck", NULL };
+	pid_t pid;
+	int status;
 
+	if (_NSGetExecutablePath(path, &len) != 0) { return(-1); }
+	if (posix_spawn(&pid, path, NULL, NULL, args, environ) != 0) { return(-1); }
+	while (waitpid(pid, &status, 0) < 0) { if (errno != EINTR) { return(-1); } }
+	return(WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+}
 
-    // Request accessibility access
-    if(__builtin_available(macOS 10.9, *)){
-        const void * keys[] = { kAXTrustedCheckOptionPrompt };
-        const void * values[] = { kCFBooleanTrue };
+// The prompt flags are one name per line in "<executable>.kvmprefs", shared by every user of this install, because the Screen Recording and Accessibility grants are machine-wide too.
+// The uninstall deletes it with the other "<executable>.*" files, so a new install asks again.
+static int kvm_flags_path(char *buf, size_t bufLen)
+{
+	uint32_t len = (uint32_t)bufLen;
+	if (_NSGetExecutablePath(buf, &len) != 0) { return(0); }
+	return(strlcat(buf, ".kvmprefs", bufLen) < bufLen);
+}
 
-        CFDictionaryRef options = CFDictionaryCreate(
-            kCFAllocatorDefault,
-            keys,
-            values,
-            sizeof(keys) / sizeof(*keys),
-            &kCFCopyStringDictionaryKeyCallBacks,
-            &kCFTypeDictionaryValueCallBacks);
+// The user's processes cannot create files in the install folder, so the root daemon creates the file at start, writable by the staff group
+void kvm_flags_prepare(void)
+{
+	char path[PATH_MAX];
+	struct group *staff;
+	int fd;
 
-        AXIsProcessTrustedWithOptions(options);
-    }
+	if (getuid() != 0 || kvm_service_label() == NULL || !kvm_flags_path(path, sizeof(path))) { return; }
+	if ((fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0664)) < 0) { return; }
+	if ((staff = getgrnam("staff")) != NULL) { fchown(fd, 0, staff->gr_gid); }
+	fchmod(fd, 0664);
+	close(fd);
+}
 
-    // Request full disk access
-    if(__builtin_available(macOS 10.14, *)) {
-        if(_fullDiskAuthorizationStatus() != MPAuthorizationStatusAuthorized) {
-            CFStringRef URL =  CFStringCreateWithCString(NULL, "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles", kCFStringEncodingASCII);
-            CFURLRef pathRef = CFURLCreateWithString( NULL, URL, NULL );
-            if( pathRef )
-            {
-                LSOpenCFURLRef(pathRef, NULL);
-                CFRelease(pathRef);
-            }
-            CFRelease(URL);
-        }
-    }
+// Reads a flag and adds it when "set" is not 0. Returns the value it had.
+// Any login user can write the file, so it is only searched for whole lines and nothing else is taken from it.
+static int kvm_pref_flag(const char *name, int set)
+{
+	char path[PATH_MAX], data[512];
+	char line[64];
+	struct stat st;
+	ssize_t got = 0;
+	int fd, lineLen, was = 0;
+
+	lineLen = snprintf(line, sizeof(line), "\n%s\n", name);
+	if (lineLen <= 0 || lineLen >= (int)sizeof(line) || !kvm_flags_path(path, sizeof(path))) { return(0); }
+	if ((fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)) >= 0)
+	{
+		if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode))
+		{
+			data[0] = '\n';
+			got = read(fd, data + 1, sizeof(data) - 3);
+			if (got < 0) { got = 0; }
+			if (got > 0 && data[got] != '\n') { data[++got] = '\n'; }
+			data[got + 1] = 0;
+			was = strstr(data, line) != NULL;
+		}
+		close(fd);
+	}
+	if (set && !was && (fd = open(path, O_WRONLY | O_APPEND | O_NOFOLLOW | O_CLOEXEC)) >= 0)
+	{
+		if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode)) { write(fd, line + 1, lineLen - 1); }
+		close(fd);
+	}
+	return(was);
+}
+
+// System Settings lists the file name, and the -kvm0 child is started with argv[0] "meshagent_osx64" instead
+static const char* kvm_program_name(void)
+{
+	static char name[PATH_MAX];
+	char path[PATH_MAX];
+	uint32_t len = sizeof(path);
+	const char *slash;
+
+	if (name[0] == 0)
+	{
+		slash = _NSGetExecutablePath(path, &len) == 0 ? strrchr(path, '/') : NULL;
+		strlcpy(name, slash != NULL ? slash + 1 : getprogname(), sizeof(name));
+	}
+	return(name);
+}
+
+static void kvm_open_pane(const char *url)
+{
+	CFURLRef ref = CFURLCreateWithBytes(NULL, (const UInt8*)url, strlen(url), kCFStringEncodingASCII, NULL);
+	if (ref != NULL) { LSOpenCFURLRef(ref, NULL); CFRelease(ref); }
+}
+
+// Restart through launchd, because a new Screen Recording grant only works in a new process.
+// kickstart -k kills this process, so reaching _exit(3) means it failed and KeepAlive has to restart it.
+static void kvm_restart_self(void)
+{
+	char target[160];
+	char *args[] = { "/bin/launchctl", "kickstart", "-k", target, NULL };
+	const char *label = kvm_service_label();
+	pid_t pid;
+	int status;
+
+	if (label != NULL)
+	{
+		snprintf(target, sizeof(target), "gui/%u/%s", (unsigned int)getuid(), label);
+		if (posix_spawn(&pid, args[0], NULL, NULL, args, environ) == 0)
+		{
+			while (waitpid(pid, &status, 0) < 0 && errno == EINTR) { }
+		}
+	}
+	_exit(3);
+}
+
+static int g_permissionOnGrant = 0;
+static volatile int g_permissionWatching = 0;
+static volatile int g_permissionGranted = 0;
+
+// The Screen Recording grant is machine-wide but only works in a process started after it, so the process that sees it tells the -kvmagent of every other user.
+// The name is per service, for the LaunchAgent and the -kvm0 child alike, the same way kvm_socket_path() names the socket.
+static int kvm_grant_name(char *buf, size_t bufLen)
+{
+	static const char suffix[] = "-launchagent";
+	const char *label = kvm_service_label();
+	size_t len = label != NULL ? strlen(label) : 0;
+	int written;
+
+	if (len > sizeof(suffix) - 1 && strcmp(label + len - (sizeof(suffix) - 1), suffix) == 0) { len -= sizeof(suffix) - 1; }
+	written = len > 0 ? snprintf(buf, bufLen, "meshagent.kvm.%.*s.screen", (int)len, label) : snprintf(buf, bufLen, "meshagent.kvm.screen");
+	return(written > 0 && (size_t)written < bufLen);
+}
+
+// The prompt, the silent check and the notification can all see the grant, and only the first may restart, or a second kickstart hits the new process
+static void kvm_permission_granted(int onGrant)
+{
+	char name[200];
+
+	if (!__sync_bool_compare_and_swap(&g_permissionGranted, 0, 1)) { return; }
+	if (kvm_grant_name(name, sizeof(name))) { notify_post(name); }
+	if (onGrant == KVM_PROMPT_RESTART) { kvm_restart_self(); }
+	_exit(3);
+}
+
+static void* kvm_grant_listen_thread(void *arg)
+{
+	int fd = (int)(intptr_t)arg, token, now;
+	time_t last = 0;
+
+	while (read(fd, &token, sizeof(token)) == sizeof(token))
+	{
+		// Any process can post the name, so a post only starts a check, at most one every 5 s
+		if (time(NULL) - last < 5) { continue; }
+		last = time(NULL);
+		if ((now = kvm_permissions_fresh()) >= 0 && (now & KVM_PERM_SCREEN)) { kvm_permission_granted(g_permissionOnGrant); }
+	}
+	return(NULL);
+}
+
+// Also runs after "Not now" and "Don't ask again", because that user's process needs the restart just as well
+static void kvm_grant_listen_start(void)
+{
+	char name[200];
+	int fd, token;
+	pthread_t t;
+
+	if (g_permissionOnGrant == 0 || (kvm_permissions() & KVM_PERM_SCREEN) || !kvm_grant_name(name, sizeof(name))) { return; }
+	if (notify_register_file_descriptor(name, &fd, 0, &token) != NOTIFY_STATUS_OK) { return; }
+	fcntl(fd, F_SETFD, FD_CLOEXEC);
+	if (pthread_create(&t, NULL, kvm_grant_listen_thread, (void*)(intptr_t)fd) == 0) { pthread_detach(t); }
+	else { notify_cancel(token); }
+}
+
+// Checks every 5 s, at most "rounds" times, whether the grant is on
+static int kvm_permission_poll(int bit, int rounds)
+{
+	int i, now;
+	for (i = 0; i < rounds; ++i)
+	{
+		if ((now = kvm_permissions_fresh()) >= 0 && (now & bit)) { return(1); }
+		sleep(5);
+	}
+	return(0);
+}
+
+// macOS shows its own Screen Recording and Accessibility requests in windows of this process, measured on macOS 15.8 and 26.7
+#define KVM_REQUEST_OWNER CFSTR("universalAccessAuthWarn")
+#define KVM_WINDOW_REQUEST 1
+#define KVM_WINDOW_SETTINGS 2
+#define KVM_WINDOW_MAX 16
+
+static int kvm_path_ends_with(const char *path, const char *tail)
+{
+	size_t len = strlen(path), tailLen = strlen(tail);
+	return(len >= tailLen && strcmp(path + len - tailLen, tail) == 0);
+}
+
+static int kvm_settings_path(const char *path)
+{
+	return(kvm_path_ends_with(path, "/System Settings.app/Contents/MacOS/System Settings"));
+}
+
+// Returns 1 when System Settings of this user started at or after "since", which is how macOS's request opens it
+static int kvm_settings_started(time_t since)
+{
+	char path[PROC_PIDPATHINFO_MAXSIZE];
+	struct proc_bsdinfo info;
+	pid_t *pids;
+	int i, count, found = 0;
+
+	if ((count = proc_listallpids(NULL, 0)) <= 0 || (pids = (pid_t*)calloc((size_t)count + 16, sizeof(pid_t))) == NULL) { return(0); }
+	count = proc_listallpids(pids, (int)((count + 16) * sizeof(pid_t)));
+	for (i = 0; i < count && !found; ++i)
+	{
+		if (proc_pidpath(pids[i], path, sizeof(path)) <= 0 || !kvm_settings_path(path)) { continue; }
+		found = proc_pidinfo(pids[i], PROC_PIDTBSDINFO, 0, &info, sizeof(info)) == (int)sizeof(info) && info.pbi_uid == getuid() && (time_t)info.pbi_start_tvsec >= since;
+	}
+	free(pids);
+	return(found);
+}
+
+static int kvm_window_is(CFDictionaryRef w, int kind)
+{
+	char path[PROC_PIDPATHINFO_MAXSIZE];
+	CFStringRef owner;
+	CFNumberRef pid;
+	int p = 0;
+
+	if (kind == KVM_WINDOW_REQUEST)
+	{
+		owner = (CFStringRef)CFDictionaryGetValue(w, kCGWindowOwnerName);
+		return(owner != NULL && CFStringCompare(owner, KVM_REQUEST_OWNER, 0) == kCFCompareEqualTo);
+	}
+
+	// The owner name of Settings is translated, the path of its executable is not
+	pid = (CFNumberRef)CFDictionaryGetValue(w, kCGWindowOwnerPID);
+	if (pid == NULL || !CFNumberGetValue(pid, kCFNumberIntType, &p) || proc_pidpath(p, path, sizeof(path)) <= 0) { return(0); }
+	return(kvm_settings_path(path));
+}
+
+// Writes the numbers of the windows of that kind on screen now and returns how many there are
+static int kvm_windows(int kind, CGWindowID *ids, int max)
+{
+	CFArrayRef list = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
+	CFIndex i;
+	int count = 0;
+
+	if (list == NULL) { return(0); }
+	for (i = 0; i < CFArrayGetCount(list) && count < max; ++i)
+	{
+		CFDictionaryRef w = (CFDictionaryRef)CFArrayGetValueAtIndex(list, i);
+		CFNumberRef number = (CFNumberRef)CFDictionaryGetValue(w, kCGWindowNumber);
+		if (number != NULL && kvm_window_is(w, kind) && CFNumberGetValue(number, kCFNumberSInt32Type, &ids[count])) { ++count; }
+	}
+	CFRelease(list);
+	return(count);
+}
+
+// Returns 1 when a window of that kind is on screen that is not in "before"
+static int kvm_window_new(int kind, const CGWindowID *before, int beforeCount)
+{
+	CGWindowID now[KVM_WINDOW_MAX];
+	int i, j, count = kvm_windows(kind, now, KVM_WINDOW_MAX);
+
+	for (i = 0; i < count; ++i)
+	{
+		for (j = 0; j < beforeCount && before[j] != now[i]; ++j) { }
+		if (j == beforeCount) { return(1); }
+	}
+	return(0);
+}
+
+// Looks for a window of that kind for appearChecks times 250 ms, then waits while it is open, at most 5 minutes. Returns 1 as soon as the grant is on.
+// Only a request window that was not there before counts, because a Screen Recording request stays open after the grant until the asking process exits.
+static int kvm_window_wait(int kind, int bit, const CGWindowID *before, int beforeCount, int appearChecks)
+{
+	int i, now, open = 0;
+
+	for (i = 0; i < appearChecks && !open; ++i) { usleep(250000); open = kvm_window_new(kind, before, beforeCount); }
+	for (i = 0; open && i < 600; ++i)
+	{
+		if (i % 10 == 0 && (now = kvm_permissions_fresh()) >= 0 && (now & bit)) { return(1); }
+		usleep(500000);
+		open = kvm_window_new(kind, before, beforeCount);
+	}
+	return((now = kvm_permissions_fresh()) >= 0 && (now & bit));
+}
+
+static int kvm_permission_wait(int bit, const char *name, const char *paneUrl, int admin);
+
+// One permission: macOS's own request first, then a window of the agent only when macOS showed none or it was closed without the grant.
+// After "Open System Settings" in macOS's request the agent's window would only repeat it, so it waits without a window while Settings is open.
+// The agent's window stays on top of every other window, which is why it closes by itself after 15 s, followed by 5 minutes of checks.
+// Returns 1 when granted, 0 after Skip or when the time is up.
+static int kvm_permission_step(int bit, const char *name, const char *paneUrl, int admin)
+{
+	const void *axKeys[] = { kAXTrustedCheckOptionPrompt };
+	const void *axValues[] = { kCFBooleanTrue };
+	CFDictionaryRef axOptions;
+	CGWindowID before[KVM_WINDOW_MAX];
+	int beforeCount = kvm_windows(KVM_WINDOW_REQUEST, before, KVM_WINDOW_MAX);
+	time_t started = time(NULL);
+
+	if (bit == KVM_PERM_SCREEN)
+	{
+		CGRequestScreenCaptureAccess();
+	}
+	else if ((axOptions = CFDictionaryCreate(NULL, axKeys, axValues, 1, &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks)) != NULL)
+	{
+		AXIsProcessTrustedWithOptions(axOptions);
+		CFRelease(axOptions);
+	}
+	// macOS needs a moment to show its request, and Settings a moment to open
+	if (kvm_window_wait(KVM_WINDOW_REQUEST, bit, before, beforeCount, 8)) { return(1); }
+	// Settings that the request just started gets 10 s instead of 3 s, because on a 2013 MacBook Air with macOS 15.8 its window was not there 4 s after the process started
+	if (kvm_window_wait(KVM_WINDOW_SETTINGS, bit, NULL, 0, kvm_settings_started(started) ? 40 : 12)) { return(1); }
+	return(kvm_permission_wait(bit, name, paneUrl, admin));
+}
+
+// The window of the agent for one permission, see kvm_permission_step()
+static int kvm_permission_wait(int bit, const char *name, const char *paneUrl, int admin)
+{
+	CFStringRef header = CFStringCreateWithFormat(NULL, NULL, CFSTR("Turn on %s"), name);
+	CFStringRef text = CFStringCreateWithFormat(NULL, NULL, CFSTR("In System Settings, Privacy & Security, %s, turn on \"%s\".%s This window closes after a few seconds, the agent notices the switch by itself.\n\n"
+		      "If it is already on, remove it with the - button and add it again with +. A switch from an older version of the agent stays on in Settings but no longer counts."), name, kvm_program_name(),
+		admin ? "" : " macOS then asks for an administrator's name and password.");
+	const void *keys[] = { kCFUserNotificationAlertHeaderKey, kCFUserNotificationAlertMessageKey, kCFUserNotificationDefaultButtonTitleKey, kCFUserNotificationAlternateButtonTitleKey };
+	const void *values[] = { header, text, CFSTR("Skip"), CFSTR("Open Settings") };
+	CFDictionaryRef dict = (header != NULL && text != NULL) ? CFDictionaryCreate(NULL, keys, values, 4, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks) : NULL;
+	CFUserNotificationRef note = NULL;
+	CFOptionFlags response = 0;
+	int i, now, answered = 0, skipped;
+	int granted = 0;
+
+	if (dict != NULL) { note = CFUserNotificationCreate(NULL, 0, kCFUserNotificationNoteAlertLevel, NULL, dict); }
+	for (i = 0; i < 3 && note != NULL && !granted && !answered; ++i)
+	{
+		if ((now = kvm_permissions_fresh()) >= 0 && (now & bit)) { granted = 1; }
+		else { answered = (CFUserNotificationReceiveResponse(note, 5, &response) == 0); }
+	}
+	if (note != NULL)
+	{
+		if (!answered) { CFUserNotificationCancel(note); }
+		CFRelease(note);
+	}
+	if (dict != NULL) { CFRelease(dict); }
+	if (text != NULL) { CFRelease(text); }
+	if (header != NULL) { CFRelease(header); }
+
+	skipped = answered && (response & 0x3) != kCFUserNotificationAlternateResponse;
+	if (answered && !skipped) { kvm_open_pane(paneUrl); }
+	if (!granted && !skipped) { granted = kvm_permission_poll(bit, 60); }
+	return(granted);
+}
+
+// The grants are machine-wide, so a standard user can only turn the switches on with an administrator's name and password.
+// When the membership cannot be read, the user counts as an administrator, which is how the prompt behaved before.
+static int kvm_user_is_admin(void)
+{
+	struct group entry, *admin = NULL;
+	char buf[4096];
+	uuid_t user, group;
+	int member = 0;
+
+	if (getgrnam_r("admin", &entry, buf, sizeof(buf), &admin) != 0 || admin == NULL) { return(1); }
+	if (mbr_uid_to_uuid(getuid(), user) != 0 || mbr_gid_to_uuid(admin->gr_gid, group) != 0) { return(1); }
+	if (mbr_check_membership(user, group, &member) != 0) { return(1); }
+	return(member != 0);
+}
+
+// The restart after the Screen Recording grant leaves this marker in the user's temporary folder, so the new process goes on with Accessibility without the first dialog
+static int kvm_resume_path(char *buf, size_t bufLen)
+{
+	const char *label = kvm_service_label();
+	size_t len = confstr(_CS_DARWIN_USER_TEMP_DIR, buf, bufLen);
+	if (len == 0 || len > bufLen) { return(0); }
+	return(strlcat(buf, "meshagent-kvm-", bufLen) < bufLen && strlcat(buf, label != NULL && strchr(label, '/') == NULL ? label : "default", bufLen) < bufLen && strlcat(buf, ".resume", bufLen) < bufLen);
+}
+
+static void kvm_resume_mark(void)
+{
+	char path[PATH_MAX];
+	int fd;
+	if (kvm_resume_path(path, sizeof(path)) && (fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600)) >= 0) { close(fd); }
+}
+
+// Removes the marker and returns 1 when it was left less than 2 minutes ago
+static int kvm_resume_take(void)
+{
+	char path[PATH_MAX];
+	struct stat st;
+	int fresh;
+	if (!kvm_resume_path(path, sizeof(path)) || lstat(path, &st) != 0) { return(0); }
+	fresh = S_ISREG(st.st_mode) && st.st_uid == getuid() && time(NULL) - st.st_mtime < 120;
+	unlink(path);
+	return(fresh);
+}
+
+// The first dialog. Returns 1 after Continue.
+static int kvm_permission_intro(int admin)
+{
+	CFOptionFlags response = kCFUserNotificationCancelResponse;
+	CFStringRef message = CFStringCreateWithFormat(NULL, NULL,
+		CFSTR("To show this screen and use mouse and keyboard in a remote session, macOS needs you to allow \"%s\" under Screen Recording and Accessibility.\n\n"
+		      "%sAfter Continue, macOS asks for each permission in turn, and the agent restarts once after Screen Recording. If macOS does not ask, a window shows which switch to turn on."),
+		kvm_program_name(), admin ? "" : "Turning these on needs an administrator's name and password. ");
+	if (message == NULL) { return(0); }
+
+	// "Don't ask again" holds for every user, so a standard user, who cannot grant anything, does not get it
+	CFUserNotificationDisplayAlert(300, kCFUserNotificationNoteAlertLevel, NULL, NULL, NULL,
+		CFSTR("Remote desktop needs your permission"), message,
+		CFSTR("Continue"), CFSTR("Not now"), admin ? CFSTR("Don't ask again") : NULL, &response);
+	CFRelease(message);
+	response &= 0x3;
+
+	if (response == kCFUserNotificationOtherResponse) { kvm_pref_flag("noPermissionPrompt", 1); }
+	return(response == kCFUserNotificationDefaultResponse);
+}
+
+// Returns 0 while another user's session is on the screen, and 1 without a window server session, as before
+static int kvm_session_on_console(void)
+{
+	CFDictionaryRef session = CGSessionCopyCurrentDictionary();
+	CFTypeRef onConsole;
+	int ret = 1;
+
+	if (session == NULL) { return(1); }
+	onConsole = CFDictionaryGetValue(session, kCGSessionOnConsoleKey);
+	if (onConsole != NULL && CFGetTypeID(onConsole) == CFBooleanGetTypeID()) { ret = CFBooleanGetValue((CFBooleanRef)onConsole); }
+	CFRelease(session);
+	return(ret);
+}
+
+static void* kvm_permission_thread(void *arg)
+{
+	int onGrant = (int)(intptr_t)arg;
+	int had = kvm_permissions();
+	int now, have = had;
+	int admin, resume = kvm_resume_take();
+
+	if (had == (KVM_PERM_SCREEN | KVM_PERM_INPUT) || kvm_pref_flag("noPermissionPrompt", 0)) { return(NULL); }
+	admin = kvm_user_is_admin();
+	if (!resume)
+	{
+		// A user who is logged in behind another one would find the dialog later, often after the user at the screen turned both switches on, so it waits for this session to be on the screen.
+		// The grants are machine-wide, so they are read again after the wait. A Screen Recording grant made meanwhile needs the restart.
+		while (!kvm_session_on_console()) { sleep(2); }
+		if ((now = kvm_permissions_fresh()) >= 0)
+		{
+			if ((now & KVM_PERM_SCREEN) && !(had & KVM_PERM_SCREEN)) { kvm_permission_granted(onGrant); return(NULL); }
+			if (now == (KVM_PERM_SCREEN | KVM_PERM_INPUT)) { return(NULL); }
+			have = now;
+		}
+		if (kvm_pref_flag("noPermissionPrompt", 0) || !kvm_permission_intro(admin)) { return(NULL); }
+	}
+
+	// One permission at a time, so macOS's own request and the window of the agent never pile up.
+	// A new Screen Recording grant only works in a new process, and the restart also closes macOS's request, which stays open until this process exits.
+	if (!(had & KVM_PERM_SCREEN) && kvm_permission_step(KVM_PERM_SCREEN, "Screen Recording", "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture", admin))
+	{
+		if ((now = kvm_permissions_fresh()) >= 0 && !(now & KVM_PERM_INPUT)) { kvm_resume_mark(); }
+		kvm_permission_granted(onGrant);
+		return(NULL);
+	}
+	if ((now = kvm_permissions_fresh()) >= 0) { have = now; }
+	if (!(have & KVM_PERM_INPUT))
+	{
+		kvm_permission_step(KVM_PERM_INPUT, "Accessibility", "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility", admin);
+	}
+
+	// Screen Recording can also be turned on during the Accessibility step
+	if (!(had & KVM_PERM_SCREEN) && (now = kvm_permissions_fresh()) >= 0 && (now & KVM_PERM_SCREEN)) { kvm_permission_granted(onGrant); }
+	return(NULL);
+}
+
+void kvm_permission_prompt_start(int onGrant)
+{
+	pthread_t t;
+	g_permissionOnGrant = onGrant;
+	kvm_grant_listen_start();
+	if (pthread_create(&t, NULL, kvm_permission_thread, (void*)(intptr_t)onGrant) == 0) { pthread_detach(t); }
+}
+
+static void* kvm_permission_watch_thread(void *arg)
+{
+	if (kvm_permission_poll(KVM_PERM_SCREEN, 60)) { kvm_permission_granted((int)(intptr_t)arg); }
+	__sync_lock_release(&g_permissionWatching);
+	return(NULL);
+}
+
+// A session's capture can make macOS ask for Screen Recording by itself, also after "Not now" or "Don't ask again".
+// That grant needs a new process as well, so a session without Screen Recording checks for it for 5 minutes, without any window.
+static void kvm_permission_watch_start(void)
+{
+	pthread_t t;
+	if (g_permissionOnGrant == 0 || (kvm_permissions() & KVM_PERM_SCREEN)) { return; }
+	if (!__sync_bool_compare_and_swap(&g_permissionWatching, 0, 1)) { return; }
+	if (pthread_create(&t, NULL, kvm_permission_watch_thread, (void*)(intptr_t)g_permissionOnGrant) == 0) { pthread_detach(t); }
+	else { __sync_lock_release(&g_permissionWatching); }
 }
