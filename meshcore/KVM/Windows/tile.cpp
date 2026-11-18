@@ -622,35 +622,16 @@ int get_desktop_buffer(void **buffer, long long *bufferSize, long* mouseMove)
 		if (mouseMove[0] != 0)
 		{
 			CURSORINFO info = { 0 };
-			BITMAP bm;
 			ICONINFO ii = { 0 };
 			info.cbSize = sizeof(info);
-			GetCursorInfo(&info);
-			GetIconInfo(info.hCursor, &ii);
-			if (GetObject(ii.hbmMask, sizeof(bm), &bm) == sizeof(bm))
+			if (GetCursorInfo(&info) && (info.flags & CURSOR_SHOWING) != 0 && GetIconInfo(info.hCursor, &ii))
 			{
-				HDC hdcScreen = GetDC(NULL);
-				if (hdcScreen != NULL)
-				{
-					HDC hdcMem = CreateCompatibleDC(hdcScreen);
-					HBITMAP hbmCanvas = CreateCompatibleBitmap(hdcScreen, bm.bmWidth, ii.hbmColor ? bm.bmHeight : (bm.bmHeight / 2));
-					if(hdcMem!=NULL && hbmCanvas != NULL)
-					{
-						HGDIOBJ hbmold = SelectObject(hdcMem, hbmCanvas);
-
-						DrawIconEx(hdcMem, 0, 0, info.hCursor, bm.bmWidth, ii.hbmColor ? bm.bmHeight : (bm.bmHeight / 2), 0, NULL, DI_NORMAL);
-						BitBlt(hCaptureDC, mouseMove[1], mouseMove[2], bm.bmWidth, ii.hbmColor ? bm.bmHeight : (bm.bmHeight / 2), hdcMem, 0, 0, SRCINVERT);
-
-						SelectObject(hdcMem, hbmold);
-					}
-					if (hbmCanvas != NULL) { DeleteObject(hbmCanvas); }
-					if (hdcMem != NULL) { DeleteDC(hdcMem); }
-					if (hdcScreen != NULL) { ReleaseDC(NULL, hdcScreen); }
-				}
+				// DrawIconEx() applies the cursor's masks and alpha to the captured pixels, as Windows does on the screen
+				DrawIconEx(hCaptureDC, mouseMove[1] - (int)ii.xHotspot, mouseMove[2] - (int)ii.yHotspot, info.hCursor, 0, 0, 0, NULL, DI_NORMAL);
+				// GetIconInfo returns copies of the cursor bitmaps that we own
+				if (ii.hbmMask != NULL) { DeleteObject(ii.hbmMask); }
+				if (ii.hbmColor != NULL) { DeleteObject(ii.hbmColor); }
 			}
-			// GetIconInfo returns copies of the cursor bitmaps that we own
-			if (ii.hbmMask != NULL) { DeleteObject(ii.hbmMask); }
-			if (ii.hbmColor != NULL) { DeleteObject(ii.hbmColor); }
 		}
 	}
 	else
