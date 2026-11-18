@@ -40,6 +40,8 @@ void kvm_set_listener_path(const char *path);
 void kvm_socket_path(char *buf, size_t bufLen, unsigned int uid, int legacy);
 void kvm_relay_reset();
 void kvm_cleanup();
+// In agentcore.c, called when the -kvm0 child of a session exits
+void ILibDuktape_MeshAgent_RemoteDesktop_KVM_Exited(void *reserved);
 
 #endif /* LINUX_KVM_H_ */
 
