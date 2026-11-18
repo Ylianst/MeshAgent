@@ -921,6 +921,17 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(char *
 	}
 	return ILibTransport_DoneState_ERROR;
 }
+#if defined(_LINKVM) && defined(__APPLE__)
+// The pause sink of the viewer's unpipe used the freed stdout pipe of an exited -kvm0 child and crashed the daemon with SIGSEGV.
+// Ending the stream closes the viewer's session, and the next connect starts a new child.
+void ILibDuktape_MeshAgent_RemoteDesktop_KVM_Exited(void *reserved)
+{
+	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)reserved;
+	if (!ILibMemory_CanaryOK(ptrs)) { return; }
+	ptrs->kvmPipe = NULL;
+	if (ptrs->ctx != NULL && ptrs->stream != NULL) { ILibDuktape_DuplexStream_WriteEnd(ptrs->stream); }
+}
+#endif
 ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_WriteSink(ILibDuktape_DuplexStream *stream, char *buffer, int bufferLen, void *user)
 {
 #ifdef _LINKVM
@@ -1153,12 +1164,25 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop_DomainIPC_DataSink(duk_context 
 	// We need to properly frame the data before we propagate it up
 	if (bufferLen > 4)
 	{
-		size = ntohs(ILibUnaligned_Read16(buffer + 2));
-		if (size <= bufferLen)
+		if (ntohs(ILibUnaligned_Read16(buffer)) == MNG_JUMBO)
 		{
-			// We have all the data, to be able to frame it
-			consumed = size;
-			ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(buffer, (int)size, ptrs);
+			// A tile over 65500 bytes comes as an 8-byte jumbo header with the 32-bit length of the packet behind it, whose own size field is 0.
+			// Framed by the 16-bit size, the header went out alone and the next read of size 0 consumed nothing, so the stream stopped and the login screen stayed black.
+			if (bufferLen >= 8 && bufferLen >= 8 + (duk_size_t)ntohl(ILibUnaligned_Read32(buffer + 4)))
+			{
+				consumed = 8 + (duk_size_t)ntohl(ILibUnaligned_Read32(buffer + 4));
+				ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(buffer, (int)consumed, ptrs);
+			}
+		}
+		else
+		{
+			size = ntohs(ILibUnaligned_Read16(buffer + 2));
+			if (size <= bufferLen)
+			{
+				// We have all the data, to be able to frame it
+				consumed = size;
+				ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(buffer, (int)size, ptrs);
+			}
 		}
 	}
 
@@ -1392,7 +1416,7 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 			ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
 			if (ptrs->kvmPipe == NULL)
 			{
-				// Only report the failure here. kvm_relay_setup() returns NULL when /tmp/meshagent-kvm-<uid>.sock is still on disk but the user LaunchAgent is stopped, so nothing accepts on it.
+				// Only report the failure here. kvm_relay_setup() returns NULL when the KVM socket of the uid is still on disk but the user LaunchAgent is stopped, so nothing accepts on it.
 				// The session object stays cached on purpose. The end sink already deletes REMOTE_DESKTOP_STREAM when the tunnel closes, and deleting it here makes that same end sink read a property off undefined and kill the agent the same way.
 				MeshAgent_sendConsoleText(ctx, "KVM: no connection to the user agent for uid %d, is the user service running?", console_uid);
 			}
@@ -4751,13 +4775,6 @@ void agentDumpKeysSink(ILibSimpleDataStore sender, char* Key, int KeyLen, void *
 
 MeshAgentHostContainer* MeshAgent_Create(MeshCommand_AuthInfo_CapabilitiesMask capabilities)
 {
-
-#if defined(_LINKVM) && defined(__APPLE__)
-    //Before anything, check for permissions (macos requirement)
-    kvm_check_permission();
-#endif
-
-
 	MeshAgentHostContainer* retVal = (MeshAgentHostContainer*)ILibMemory_Allocate(sizeof(MeshAgentHostContainer), 0, NULL, NULL);
 #ifdef WIN32
 	SYSTEM_POWER_STATUS stats;
