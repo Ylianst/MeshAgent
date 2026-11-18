@@ -586,6 +586,20 @@ void kvm_pause(int pause)
 }
 
 
+// Before login the window server refuses this process the connection that posting events needs, and CGEventCreateKeyboardEvent() then blocked the thread on the first key packet.
+// So the login window instance drops mouse and keyboard packets, the picture keeps working and the input thread keeps reading. Posting from the main thread blocked that thread too.
+static int kvm_input_packet(char *block, int blocklen)
+{
+	unsigned short type, size;
+
+	if (getuid() != 0 || blocklen < 4) { return(kvm_server_inputdata(block, blocklen)); }
+	type = ntohs(((unsigned short*)(block))[0]);
+	size = ntohs(((unsigned short*)(block))[1]);
+	if (size == 0 || size > blocklen) { return(0); }
+	if (type == MNG_KVM_KEY || type == MNG_KVM_KEY_UNICODE || type == MNG_KVM_MOUSE) { return(size); }
+	return(kvm_server_inputdata(block, blocklen));
+}
+
 void* kvm_mainloopinput(void* param)
 {
 	int ptr = 0;
@@ -625,7 +639,7 @@ void* kvm_mainloopinput(void* param)
 		ptr2 = 0;
 		
 		KvmDebugLog("enter while\n");
-		while ((ptr2 = kvm_server_inputdata((char*)pchRequest2 + ptr, cbBytesRead - ptr)) != 0) { ptr += ptr2; }
+		while ((ptr2 = kvm_input_packet((char*)pchRequest2 + ptr, cbBytesRead - ptr)) != 0) { ptr += ptr2; }
 		KvmDebugLog("exited while\n");
 
 		if (ptr == len) { len = 0; ptr = 0; }
