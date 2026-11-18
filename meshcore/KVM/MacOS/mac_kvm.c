@@ -44,7 +44,7 @@ limitations under the License.
 // validate that the daemon's IPC peer really is the user-LaunchAgent
 // meshagent process (and not, e.g., a stale socket file from a
 // crashed helper that was re-bound by an unrelated process). See
-// issue #359: stale /tmp/meshagent-kvm-<uid>.sock files used to
+// issue #359: stale KVM socket files of the uid used to
 // cause the daemon to wrap a phantom socket in ILibProcessPipe_Pipe
 // and then crash on the first .write() with "of undefined".
 #ifndef LOCAL_PEERPID
@@ -67,6 +67,47 @@ void kvm_set_listener_path(const char *path)
 	if (len >= sizeof(kvm_listener_path)) return;
 	memcpy(kvm_listener_path, path, len);
 	kvm_listener_path[len] = '\0';
+}
+
+// The launchd job label of this process, or NULL when launchd did not start it. A process started from Terminal has "0".
+static const char* kvm_service_label(void)
+{
+	const char *label = getenv("XPC_SERVICE_NAME");
+	return((label != NULL && label[0] != 0 && strcmp(label, "0") != 0) ? label : NULL);
+}
+
+// Two agent services on one Mac shared /tmp/meshagent-kvm-<uid>.sock, so the LaunchAgent started last got the desktop of every service's daemon.
+// launchd sets XPC_SERVICE_NAME to the job label, "<service>" for the daemon and "<service>-launchagent" for the LaunchAgent, so both sides name the socket after the service.
+// Without a label or with legacy set, it writes the shared path.
+void kvm_socket_path(char *buf, size_t bufLen, unsigned int uid, int legacy)
+{
+	static const char suffix[] = "-launchagent";
+	const char *label = legacy ? NULL : kvm_service_label();
+	size_t len = label != NULL ? strlen(label) : 0;
+	size_t maxLen = bufLen < sizeof(((struct sockaddr_un*)0)->sun_path) ? bufLen : sizeof(((struct sockaddr_un*)0)->sun_path);
+	int written;
+
+	if (len > sizeof(suffix) - 1 && strcmp(label + len - (sizeof(suffix) - 1), suffix) == 0) { len -= sizeof(suffix) - 1; }
+	if (len > 0 && memchr(label, '/', len) == NULL)
+	{
+		written = snprintf(buf, bufLen, "/tmp/meshagent-kvm-%.*s-%u.sock", (int)len, label, uid);
+		if (written > 0 && (size_t)written < maxLen) { return; }
+	}
+	snprintf(buf, bufLen, "/tmp/meshagent-kvm-%u.sock", uid);
+}
+
+// Writes the socket the daemon should connect to for the uid: the service socket, or the shared one a LaunchAgent started before the update still listens on.
+// Returns 1 when a socket owned by the uid is there. Anybody can bind a name in /tmp while the agent is not listening, so another owner is not the agent.
+static int kvm_find_socket(char *buf, size_t bufLen, unsigned int uid)
+{
+	struct stat s;
+	int legacy;
+	for (legacy = 0; legacy < 2; ++legacy)
+	{
+		kvm_socket_path(buf, bufLen, uid, legacy);
+		if (stat(buf, &s) == 0 && S_ISSOCK(s.st_mode) && s.st_uid == uid) { return(1); }
+	}
+	return(0);
 }
 #if defined(_TLSLOG)
 #define TLSLOG1 printf
@@ -449,7 +490,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 
 
 // Socket-mode (user-LaunchAgent) state. When the daemon successfully
-// connects to /tmp/meshagent-kvm-<uid>.sock at session-init time,
+// connects to the KVM socket of the uid at session-init time,
 // kvm_relay_setup() leaves these populated and the write/read paths
 // fall through to the socket pipe instead of the legacy fork-exec
 // helper's stdio.
@@ -1004,9 +1045,7 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 		// the helper in the wrong audit session and produces black
 		// frames.
 		char socketPath[128];
-		snprintf(socketPath, sizeof(socketPath), "/tmp/meshagent-kvm-%d.sock", uid);
-		struct stat sockStat;
-		int agentInstalled = (stat(socketPath, &sockStat) == 0 && S_ISSOCK(sockStat.st_mode));
+		int agentInstalled = kvm_find_socket(socketPath, sizeof(socketPath), (unsigned int)uid);
 
 		if (agentInstalled)
 		{
@@ -1041,7 +1080,7 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 					// Connected. Before wrapping the fd in a Pipe, confirm
 					// the peer is actually the user-LaunchAgent we expect.
 					// This blocks a whole class of crashes where a stale
-					// /tmp/meshagent-kvm-<uid>.sock (left behind by a
+					// KVM socket of the uid (left behind by a
 					// crashed helper) gets re-bound by an unrelated
 					// process, the daemon connects, and the very first
 					// .write() through ILibProcessPipe_Pipe becomes a
@@ -1138,7 +1177,11 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 		//		return((void*)(uint64_t)fd);
 		//	}
 		//}
-		return((void*)kvm_listener_path);
+		// The login window instance of the launch agent runs -kvmagent as root, so it listens on the uid 0 socket and not on kvm_listener_path
+		// Without a root owned socket it returns kvm_listener_path, which no user can create, so the caller's connect just fails.
+		static char loginWindowPath[128];
+		ILibMemory_Free(user);
+		return((void*)(kvm_find_socket(loginWindowPath, sizeof(loginWindowPath), 0) ? loginWindowPath : kvm_listener_path));
 	}
 }
 
