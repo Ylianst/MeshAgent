@@ -76,6 +76,7 @@ void BreakSink(int s)
 #endif
 
 #if defined(_LINKVM) && defined(__APPLE__)
+#include "meshcore/KVM/MacOS/mac_kvm.h"
 extern void* kvm_server_mainloop(void *parm);
 extern void senddebug(int val);
 ILibTransport_DoneState kvm_serviceWriteSink(char *buffer, int bufferLen, void *reserved)
@@ -314,7 +315,6 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		// opens, instead of fork+exec'ing a -kvm0 helper.
 		// Optional argv[2] = socket path; defaults to a tmp-dir path
 		// keyed by uid so the agent can bind it as a non-root user.
-		extern void kvm_set_listener_path(const char *path);
 		char defaultPath[128];
 		if (argc > 2 && argv[2] != NULL && argv[2][0] != '\0')
 		{
@@ -322,8 +322,7 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		}
 		else
 		{
-			snprintf(defaultPath, sizeof(defaultPath),
-				"/tmp/meshagent-kvm-%u.sock", (unsigned)getuid());
+			kvm_socket_path(defaultPath, sizeof(defaultPath), (unsigned int)getuid(), 0);
 			kvm_set_listener_path(defaultPath);
 		}
 		kvm_server_mainloop((void*)(uint64_t)getpid());

@@ -31,6 +31,8 @@ void kvm_check_permission();
 int kvm_relay_feeddata(char* buf, int len);
 void kvm_pause(int pause);
 void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid);
+void kvm_set_listener_path(const char *path);
+void kvm_socket_path(char *buf, size_t bufLen, unsigned int uid, int legacy);
 void kvm_relay_reset();
 void kvm_cleanup();
 

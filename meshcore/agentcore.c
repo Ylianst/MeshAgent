@@ -1392,7 +1392,7 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 			ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
 			if (ptrs->kvmPipe == NULL)
 			{
-				// Only report the failure here. kvm_relay_setup() returns NULL when /tmp/meshagent-kvm-<uid>.sock is still on disk but the user LaunchAgent is stopped, so nothing accepts on it.
+				// Only report the failure here. kvm_relay_setup() returns NULL when the KVM socket of the uid is still on disk but the user LaunchAgent is stopped, so nothing accepts on it.
 				// The session object stays cached on purpose. The end sink already deletes REMOTE_DESKTOP_STREAM when the tunnel closes, and deleting it here makes that same end sink read a property off undefined and kill the agent the same way.
 				MeshAgent_sendConsoleText(ctx, "KVM: no connection to the user agent for uid %d, is the user service running?", console_uid);
 			}
