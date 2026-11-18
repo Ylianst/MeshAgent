@@ -24,21 +24,19 @@ extern "C"
 {
 #endif
 
-struct tileInfo_t {
-	unsigned char stale;	// 1 when the reference frame in tile.cpp does not hold this tile, so it counts as changed
-	unsigned char flags;	// See TILE_FLAGS_ENUM
-};
-
-enum TILE_FLAGS_ENUM {
-	TILE_TODO = 0,			// The tile needs to be compared with the reference frame
-	TILE_CHANGED,			// The tile has changed, but was not sent yet
-	TILE_DONE				// The tile was handled this pass, nothing is left to send
-};
+// Owned by tile.cpp, the capture loop in kvm.c only reads them
+extern int TILE_WIDTH;
+extern int TILE_HEIGHT;
+extern int TILE_WIDTH_COUNT;
+extern int TILE_HEIGHT_COUNT;
 
 short initialize_gdiplus();
 void teardown_gdiplus();
-int get_tile_at(int x, int y, void** buffer, long long *bufferSize, void *desktop, int row, int col);
-void tile_mark_all_stale(void);
+void get_tile_at(void** buffer, long long *bufferSize, void *desktop, int row, int col);
+void tile_info_alloc(void);			// Sizes the tile table for the current scaled screen
+void tile_info_free(void);
+void tile_start_pass(void);			// Called by the capture loop before it walks the tiles
+void tile_request_refresh(void);	// Safe from any thread
 int get_desktop_buffer(void **buffer, long long *bufferSize, long*);
 BITMAPINFO get_bmp_info(int width, int height);
 void set_tile_compression(int type, int level);
