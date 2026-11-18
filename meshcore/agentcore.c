@@ -921,6 +921,17 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(char *
 	}
 	return ILibTransport_DoneState_ERROR;
 }
+#if defined(_LINKVM) && defined(__APPLE__)
+// The pause sink of the viewer's unpipe used the freed stdout pipe of an exited -kvm0 child and crashed the daemon with SIGSEGV.
+// Ending the stream closes the viewer's session, and the next connect starts a new child.
+void ILibDuktape_MeshAgent_RemoteDesktop_KVM_Exited(void *reserved)
+{
+	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)reserved;
+	if (!ILibMemory_CanaryOK(ptrs)) { return; }
+	ptrs->kvmPipe = NULL;
+	if (ptrs->ctx != NULL && ptrs->stream != NULL) { ILibDuktape_DuplexStream_WriteEnd(ptrs->stream); }
+}
+#endif
 ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_WriteSink(ILibDuktape_DuplexStream *stream, char *buffer, int bufferLen, void *user)
 {
 #ifdef _LINKVM
