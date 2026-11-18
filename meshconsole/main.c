@@ -295,6 +295,8 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		// arbitrary asids on Tahoe).
 		extern int ILibProcessPipe_JoinUserAuditSession_OSX_PostExec(uid_t uid);
 		ILibProcessPipe_JoinUserAuditSession_OSX_PostExec(getuid());
+		// Without a LaunchAgent this child is the only process of the user that can ask
+		if (getuid() != 0) { kvm_permission_prompt_start(KVM_PROMPT_EXIT); }
 		kvm_server_mainloop(NULL);
 		return 0;
 	}
@@ -325,8 +327,14 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 			kvm_socket_path(defaultPath, sizeof(defaultPath), (unsigned int)getuid(), 0);
 			kvm_set_listener_path(defaultPath);
 		}
+		// The login window instance runs as root and has nobody to ask
+		if (getuid() != 0) { kvm_permission_prompt_start(KVM_PROMPT_RESTART); }
 		kvm_server_mainloop((void*)(uint64_t)getpid());
 		return 0;
+	}
+	else if (argc > 1 && strcasecmp(argv[1], "-kvmpermcheck") == 0)
+	{
+		return(kvm_permissions());
 	}
 #endif
 
@@ -420,6 +428,9 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	wmain_free(argv);
 	_CrtDumpMemoryLeaks();
 #else
+#if defined(_LINKVM) && defined(__APPLE__)
+	kvm_flags_prepare();
+#endif
 	agentHost = MeshAgent_Create(capabilities);
 	agentHost->meshCoreCtx_embeddedScript = integratedJavaScript;
 	agentHost->meshCoreCtx_embeddedScriptLen = integratedJavaScriptLen;

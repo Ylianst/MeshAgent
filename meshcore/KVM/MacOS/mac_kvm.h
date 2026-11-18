@@ -26,7 +26,12 @@
 
 typedef ILibTransport_DoneState(*ILibKVM_WriteHandler)(char *buffer, int bufferLen, void *reserved);
 
-void kvm_check_permission();
+int kvm_permissions(void);
+// What the prompt does with its own process once Screen Recording was granted, which only a new process can use
+#define KVM_PROMPT_RESTART 1		// The LaunchAgent, restarted through launchd
+#define KVM_PROMPT_EXIT 2			// The -kvm0 child, the next session starts a new one
+void kvm_permission_prompt_start(int onGrant);
+void kvm_flags_prepare(void);
 
 int kvm_relay_feeddata(char* buf, int len);
 void kvm_pause(int pause);
