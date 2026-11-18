@@ -1164,12 +1164,25 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop_DomainIPC_DataSink(duk_context 
 	// We need to properly frame the data before we propagate it up
 	if (bufferLen > 4)
 	{
-		size = ntohs(ILibUnaligned_Read16(buffer + 2));
-		if (size <= bufferLen)
+		if (ntohs(ILibUnaligned_Read16(buffer)) == MNG_JUMBO)
 		{
-			// We have all the data, to be able to frame it
-			consumed = size;
-			ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(buffer, (int)size, ptrs);
+			// A tile over 65500 bytes comes as an 8-byte jumbo header with the 32-bit length of the packet behind it, whose own size field is 0.
+			// Framed by the 16-bit size, the header went out alone and the next read of size 0 consumed nothing, so the stream stopped and the login screen stayed black.
+			if (bufferLen >= 8 && bufferLen >= 8 + (duk_size_t)ntohl(ILibUnaligned_Read32(buffer + 4)))
+			{
+				consumed = 8 + (duk_size_t)ntohl(ILibUnaligned_Read32(buffer + 4));
+				ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(buffer, (int)consumed, ptrs);
+			}
+		}
+		else
+		{
+			size = ntohs(ILibUnaligned_Read16(buffer + 2));
+			if (size <= bufferLen)
+			{
+				// We have all the data, to be able to frame it
+				consumed = size;
+				ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(buffer, (int)size, ptrs);
+			}
 		}
 	}
 
