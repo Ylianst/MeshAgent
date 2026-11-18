@@ -601,10 +601,12 @@ void* kvm_mainloopinput(void* param)
 	return 0;
 }
 static void kvm_permission_watch_start(void);
+static volatile int g_exiting = 0;
 
 void ExitSink(int s)
 {
 	UNREFERENCED_PARAMETER(s);
+	g_exiting = 1;
 
 	signal(SIGTERM, SIG_IGN);	
 	
@@ -616,6 +618,20 @@ void ExitSink(int s)
 	}
 	g_shutdown = 1;
 }
+
+static int kvm_session_on_console(void);
+
+// 1 when this session is not on the screen, read at most once a second
+static int kvm_session_left_console(void)
+{
+	static uint64_t lastCheck = 0;
+	uint64_t now = clock_gettime_nsec_np(CLOCK_MONOTONIC) / 1000000;
+
+	if (now - lastCheck < 1000) { return(0); }
+	lastCheck = now;
+	return(!kvm_session_on_console());
+}
+
 void* kvm_server_mainloop(void* param)
 {
 	int x, y, height, width, r, c = 0;
@@ -708,7 +724,8 @@ void* kvm_server_mainloop(void* param)
 
 	KvmDebugLog("Starting Loop [] TILE_HEIGHT_COUNT=%d, TILE_WIDTH_COUNT=%d\n", TILE_HEIGHT_COUNT, TILE_WIDTH_COUNT);
 
-	while (!g_shutdown) 
+kvm_next_session:
+	while (!g_shutdown)
 	{
 		if (g_resetipc != 0)
 		{
@@ -739,7 +756,17 @@ void* kvm_server_mainloop(void* param)
 				pthread_create(&kvmthread, NULL, kvm_mainloopinput, param);
 			}
 		}
-		
+
+		// After a fast user switch the capture of this session no longer fits, so the session ends and the next connect reaches the user now at the screen.
+		// For the -kvmagent the closed socket ends the input thread's read, which sets g_resetipc, and the block above then waits for the next connection.
+		if (kvm_session_left_console())
+		{
+			if (KVM_AGENT_FD == -1) { g_shutdown = 1; break; }
+			shutdown(KVM_AGENT_FD, SHUT_RDWR);
+			while (!g_resetipc && !g_shutdown) { usleep(50000); }
+			continue;
+		}
+
 		// Check if there are pending messages to be sent
 		ILibQueue_Lock(g_messageQ);
 		while (ILibQueue_IsEmpty(g_messageQ) == 0)
@@ -852,7 +879,18 @@ void* kvm_server_mainloop(void* param)
 		}
 		CGImageRelease(image);
 	}
-	
+
+	// A capture fails once the session left the screen (NULL image or display 0), which ended the whole -kvmagent with exit 0 and kept the socket open, so the viewer froze.
+	// Unless SIGTERM ended it, a -kvmagent closes only the session, waits for its input thread and takes the next connection.
+	if (KVM_AGENT_FD != -1 && !g_exiting)
+	{
+		shutdown(KVM_AGENT_FD, SHUT_RDWR);
+		pthread_join(kvmthread, NULL);
+		g_shutdown = 0;
+		g_resetipc = 1;
+		goto kvm_next_session;
+	}
+
 	pthread_join(kvmthread, NULL);
 	kvmthread = (pthread_t)NULL;
 
@@ -979,8 +1017,12 @@ static void kvm_relay_socket_ReadHandler(ILibProcessPipe_Pipe sender, char *buff
 // session re-runs kvm_relay_setup() (which reconnects).
 static void kvm_relay_socket_BrokenHandler(ILibProcessPipe_Pipe sender)
 {
+	void *reserved = g_kvmSocketReserved;
 	UNREFERENCED_PARAMETER(sender);
 	kvm_relay_socket_ResetState(0);
+	// ProcessPipe frees this pipe right after the handler, and the session kept pausing and freeing it, while the viewer waited on a stream that sent nothing.
+	// The LaunchAgent ends the socket when its user leaves the screen or it restarts after a grant, so the session ends as for an exited -kvm0 child.
+	if (reserved != NULL) { ILibDuktape_MeshAgent_RemoteDesktop_KVM_Exited(reserved); }
 }
 
 // Validate that the connected peer of an AF_UNIX socket really is the
