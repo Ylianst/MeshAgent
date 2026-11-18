@@ -1,4 +1,5 @@
 #include "mac_events.h"
+#include "mac_inputlock.h"
 #include <assert.h>
 #include <SystemConfiguration/SystemConfiguration.h>
 #include <string.h>
@@ -174,6 +175,23 @@ void MouseAction(double absX, double absY, int button, short wheel)
 	curPos.x = absX;
 	curPos.y = absY;
 
+	if (kvm_local_input_active())
+	{
+		// A button the viewer holds is released where the local user has the pointer, so it does not stay pressed
+		if (g_lMouseDown || g_rMouseDown)
+		{
+			CGEventRef here = CGEventCreate(NULL);
+			if (here != NULL)
+			{
+				e = CGEventCreateMouseEvent(NULL, g_lMouseDown ? kCGEventLeftMouseUp : kCGEventRightMouseUp, CGEventGetLocation(here), g_lMouseDown ? kCGMouseButtonLeft : kCGMouseButtonRight);
+				if (e != NULL) { CGEventPost(kCGHIDEventTap, e); CFRelease(e); }
+				CFRelease(here);
+			}
+			g_lMouseDown = g_rMouseDown = 0;
+		}
+		return;
+	}
+
 	source = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
 	
 	
@@ -257,6 +275,8 @@ void KeyAction(unsigned char vk, int up)
 {
 	//ILIBLOGMESSAGEX("NORMAL: %u [%d]", vk, up);
 	if (up == 4) { up = 0; }
+	// Key-ups still pass, so a key the viewer holds is released, but the lock keys toggle on key-up and are dropped too
+	if (kvm_local_input_active() && (!up || vk == 0x14 || vk == 0x90 || vk == 0x91)) { return; }
 
 	if (up && (vk == 0x14 || vk == 0x90 || vk == 0x91))
 	{
@@ -313,6 +333,7 @@ void KeyAction(unsigned char vk, int up)
 }
 void KeyActionUnicode(uint16_t unicode, int up)
 {
+	if (kvm_local_input_active()) { return; }
 	if (up == 0)
 	{
 		//ILIBLOGMESSAGEX("UNICODE: %u [%d]", unicode, up);
