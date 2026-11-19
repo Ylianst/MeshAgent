@@ -20,6 +20,7 @@ limitations under the License.
 #include "tile.h"
 #include <gdiplus.h>
 #include "meshcore/meshdefines.h"
+#include "dxgi_capture.h"
 using namespace Gdiplus;
 
 #if defined(WIN32) && !defined(_WIN32_WCE) && !defined(_MINCORE)
@@ -74,6 +75,15 @@ ULONG encCompression = 50; // Image compression
 EncoderParameters encParam;
 LPVOID tilebuffer = NULL;
 unsigned int tilebuffersize = 0;
+
+// The captured frame, kept across frames and freed in teardown_gdiplus()
+void *captureBuffer = NULL;
+long long captureBufferSize = 0;
+int capturedWidth = 0;
+int capturedHeight = 0;
+
+// Set while captureBuffer holds the last DXGI frame, cleared when GDI writes into it
+int captureHoldsDxgiFrame = 0;
 
 // Used to obtain the GUID for the image encoder.
 int GetEncoderClsid(const WCHAR* format, CLSID* pClsid)
@@ -477,23 +487,184 @@ int get_tile_at(int x, int y, void** buffer, long long *bufferSize, void *deskto
 	return retval;
 }
 
+// The pixels under the cursor drawn into the last DXGI frame. A frame without changes leaves the buffer as it is,
+// so they are put back before the next capture.
+static unsigned char *cursorSave = NULL;
+static size_t cursorSaveSize = 0;
+static int cursorSaveX = 0, cursorSaveY = 0, cursorSaveW = 0, cursorSaveH = 0;
+static HDC hCursorDC = NULL;
+static HBITMAP hCursorBitmap = NULL;
+static HGDIOBJ hCursorOldBitmap = NULL;
+static unsigned char *cursorBits = NULL;
+static int cursorDibW = 0, cursorDibH = 0;
+
+// The capture buffer is a bottom-up DIB, so screen row y is buffer row (bufH - 1 - y)
+static unsigned char *capture_row(int y, int bufW, int bufH)
+{
+	return (unsigned char *)captureBuffer + (size_t)(bufH - 1 - y) * bufW * 4;
+}
+
+static void dxgi_cursor_restore(int bufW, int bufH)
+{
+	for (int r = 0; r < cursorSaveH; r++)
+	{
+		memcpy(capture_row(cursorSaveY + r, bufW, bufH) + (size_t)cursorSaveX * 4, cursorSave + (size_t)r * cursorSaveW * 4, (size_t)cursorSaveW * 4);
+	}
+	cursorSaveW = cursorSaveH = 0;
+}
+
+// A top-down 32 bpp DIB section of the cursor's size, kept until the size changes
+static int dxgi_cursor_dib(int cw, int ch)
+{
+	BITMAPINFO bi;
+
+	if (hCursorBitmap != NULL && cursorDibW == cw && cursorDibH == ch) { return 0; }
+	if (hCursorDC == NULL && (hCursorDC = CreateCompatibleDC(NULL)) == NULL) { return 1; }
+	if (hCursorBitmap != NULL)
+	{
+		SelectObject(hCursorDC, hCursorOldBitmap);
+		DeleteObject(hCursorBitmap);
+		hCursorBitmap = NULL;
+	}
+	cursorDibW = cursorDibH = 0;
+	ZeroMemory(&bi, sizeof(bi));
+	bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	bi.bmiHeader.biWidth = cw;
+	bi.bmiHeader.biHeight = -ch;
+	bi.bmiHeader.biPlanes = 1;
+	bi.bmiHeader.biBitCount = 32;
+	bi.bmiHeader.biCompression = BI_RGB;
+	if ((hCursorBitmap = CreateDIBSection(hCursorDC, &bi, DIB_RGB_COLORS, (void **)&cursorBits, NULL, 0)) == NULL) { return 1; }
+	hCursorOldBitmap = SelectObject(hCursorDC, hCursorBitmap);
+	cursorDibW = cw;
+	cursorDibH = ch;
+	return 0;
+}
+
+// Draws the cursor at (x, y) into the DXGI frame. DrawIconEx() draws on a copy of the pixels under it, so masks, alpha
+// and inverting cursors such as the text cursor come out as on the screen. The covered pixels are kept for the restore.
+static void dxgi_cursor_draw(int x, int y, int bufW, int bufH)
+{
+	CURSORINFO info = { 0 };
+	ICONINFO ii = { 0 };
+	BITMAP bm;
+
+	info.cbSize = sizeof(info);
+	if (!GetCursorInfo(&info) || (info.flags & CURSOR_SHOWING) == 0 || !GetIconInfo(info.hCursor, &ii)) { return; }
+	// (x, y) is the hotspot, the image starts that far up and left of it
+	x -= (int)ii.xHotspot;
+	y -= (int)ii.yHotspot;
+	if (GetObject(ii.hbmMask, sizeof(bm), &bm) == sizeof(bm))
+	{
+		int cw = bm.bmWidth, ch = ii.hbmColor ? bm.bmHeight : (bm.bmHeight / 2);
+		int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
+		int x1 = x + cw > SCREEN_WIDTH ? SCREEN_WIDTH : x + cw;
+		int y1 = y + ch > SCREEN_HEIGHT ? SCREEN_HEIGHT : y + ch;
+		size_t need = (size_t)(x1 > x0 ? x1 - x0 : 0) * (y1 > y0 ? y1 - y0 : 0) * 4;
+
+		if (need > 0 && dxgi_cursor_dib(cw, ch) == 0)
+		{
+			if (need > cursorSaveSize)
+			{
+				unsigned char *grown = (unsigned char *)realloc(cursorSave, need);
+				if (grown != NULL) { cursorSave = grown; cursorSaveSize = need; }
+			}
+			if (need <= cursorSaveSize)
+			{
+				cursorSaveX = x0;
+				cursorSaveY = y0;
+				cursorSaveW = x1 - x0;
+				cursorSaveH = y1 - y0;
+				for (int r = y0; r < y1; r++)
+				{
+					unsigned char *row = capture_row(r, bufW, bufH) + (size_t)x0 * 4;
+					memcpy(cursorSave + (size_t)(r - y0) * cursorSaveW * 4, row, (size_t)cursorSaveW * 4);
+					memcpy(cursorBits + ((size_t)(r - y) * cw + (x0 - x)) * 4, row, (size_t)cursorSaveW * 4);
+				}
+				DrawIconEx(hCursorDC, 0, 0, info.hCursor, cw, ch, 0, NULL, DI_NORMAL);
+				GdiFlush();
+				for (int r = y0; r < y1; r++)
+				{
+					memcpy(capture_row(r, bufW, bufH) + (size_t)x0 * 4, cursorBits + ((size_t)(r - y) * cw + (x0 - x)) * 4, (size_t)cursorSaveW * 4);
+				}
+			}
+		}
+	}
+	// GetIconInfo returns copies of the cursor bitmaps that we own
+	if (ii.hbmMask != NULL) { DeleteObject(ii.hbmMask); }
+	if (ii.hbmColor != NULL) { DeleteObject(ii.hbmColor); }
+}
+
+static void dxgi_cursor_free(void)
+{
+	if (hCursorDC != NULL)
+	{
+		if (hCursorBitmap != NULL) { SelectObject(hCursorDC, hCursorOldBitmap); }
+		DeleteDC(hCursorDC);
+		hCursorDC = NULL;
+	}
+	if (hCursorBitmap != NULL) { DeleteObject(hCursorBitmap); hCursorBitmap = NULL; }
+	cursorBits = NULL;
+	cursorDibW = cursorDibH = 0;
+	free(cursorSave);
+	cursorSave = NULL;
+	cursorSaveSize = 0;
+	cursorSaveW = cursorSaveH = 0;
+}
+
 // This function captures the entire desktop buffer to scan.
 int get_desktop_buffer(void **buffer, long long *bufferSize, long* mouseMove)
 {
 	BITMAPINFO bmpInfo;
+	int w = adjust_screen_size(SCALED_WIDTH);
+	int h = adjust_screen_size(SCALED_HEIGHT);
 
 	*buffer = NULL; // If anything fails, this will be the indication.
 	*bufferSize = 0;
 
+	// Scaled frames stay on GDI. DXGI frames carry no cursor, so dxgi_cursor_draw() adds it when it has to be drawn in.
+	if (SCALING_FACTOR == 1024 && !dxgi_capture_unsupported())
+	{
+		long long size = (long long)w * h * 4;
+		if (captureBufferSize != size)
+		{
+			free(captureBuffer);
+			captureHoldsDxgiFrame = 0;
+			cursorSaveW = cursorSaveH = 0;
+			if ((captureBuffer = calloc(1, (size_t)size)) == NULL) { captureBufferSize = 0; return 1; }
+			captureBufferSize = size;
+		}
+		dxgi_cursor_restore(w, h);
+		if (dxgi_capture_frame(SCREEN_X, SCREEN_Y, SCREEN_WIDTH, SCREEN_HEIGHT, (unsigned char *)captureBuffer, w, h, captureHoldsDxgiFrame) == 0)
+		{
+			captureHoldsDxgiFrame = 1;
+			if (mouseMove[0] != 0) { dxgi_cursor_draw(mouseMove[1], mouseMove[2], w, h); }
+			PIXEL_SIZE = 4;
+			*buffer = captureBuffer;
+			*bufferSize = captureBufferSize;
+			return 0;
+		}
+	}
+	captureHoldsDxgiFrame = 0;
+	cursorSaveW = cursorSaveH = 0;
+
 	if (hDesktopDC) ReleaseDC(NULL, hDesktopDC);
 	if ((hDesktopDC = GetDC(NULL)) == NULL) { KVMDEBUG("GetDC(NULL) returned NULL", 0); return 1; } // We need to do this incase the current desktop changes.
-	if (hCapturedBitmap) DeleteObject(hCapturedBitmap);	
-	if ((hCapturedBitmap = CreateCompatibleBitmap(hDesktopDC, adjust_screen_size(SCALED_WIDTH), adjust_screen_size(SCALED_HEIGHT))) == NULL)
+
+	// Recreated only when the size changes, it used to be a new bitmap every frame
+	if (hCapturedBitmap == NULL || capturedWidth != w || capturedHeight != h)
 	{
-		KVMDEBUG("CreateCompatibleBitmap() returned NULL", 0);
-		return 1;
+		if (hCapturedBitmap) DeleteObject(hCapturedBitmap);
+		if ((hCapturedBitmap = CreateCompatibleBitmap(hDesktopDC, w, h)) == NULL)
+		{
+			KVMDEBUG("CreateCompatibleBitmap() returned NULL", 0);
+			capturedWidth = capturedHeight = 0;
+			return 1;
+		}
+		capturedWidth = w;
+		capturedHeight = h;
 	}
-	
+
 	if (SelectObject(hCaptureDC, hCapturedBitmap) == NULL) { KVMDEBUG("SelectObject() failed", 0); return(1); }
 	if (SCALING_FACTOR == 1024)
 	{
@@ -562,13 +733,21 @@ int get_desktop_buffer(void **buffer, long long *bufferSize, long* mouseMove)
 		bmpInfo.bmiHeader.biSizeImage = bmpInfo.bmiHeader.biWidth * abs(bmpInfo.bmiHeader.biHeight) * (bmpInfo.bmiHeader.biBitCount + 7) / 8;
 	}
 
-	*bufferSize = bmpInfo.bmiHeader.biSizeImage;
 	PIXEL_SIZE = bmpInfo.bmiHeader.biBitCount / 8;
-	if ((*buffer = malloc((size_t)*bufferSize)) == NULL) { KVMDEBUG("malloc() failed", 0); return 1; }
-	
-	bmpInfo.bmiHeader.biCompression = BI_RGB;
-	if (GetDIBits(hDesktopDC, hCapturedBitmap, 0, bmpInfo.bmiHeader.biHeight, *buffer, &bmpInfo, DIB_RGB_COLORS) == 0) { KVMDEBUG("GetDIBits() failed", 0); free(*buffer); return(1); }
 
+	// Kept across frames, it used to be a malloc and free per frame
+	if (captureBufferSize != (long long)bmpInfo.bmiHeader.biSizeImage)
+	{
+		free(captureBuffer);
+		if ((captureBuffer = malloc((size_t)bmpInfo.bmiHeader.biSizeImage)) == NULL) { KVMDEBUG("malloc() failed", 0); captureBufferSize = 0; return 1; }
+		captureBufferSize = bmpInfo.bmiHeader.biSizeImage;
+	}
+
+	bmpInfo.bmiHeader.biCompression = BI_RGB;
+	if (GetDIBits(hDesktopDC, hCapturedBitmap, 0, bmpInfo.bmiHeader.biHeight, captureBuffer, &bmpInfo, DIB_RGB_COLORS) == 0) { KVMDEBUG("GetDIBits() failed", 0); return(1); }
+
+	*buffer = captureBuffer;
+	*bufferSize = captureBufferSize;
 	return 0;
 }
 
@@ -627,8 +806,16 @@ void teardown_gdiplus()
 	GdiplusShutdown(gdiplusToken);
 	DeleteDC(hCaptureDC);
 	DeleteObject(hCapturedBitmap);
+	hCapturedBitmap = NULL;
+	capturedWidth = capturedHeight = 0;
 	if (hDesktopDC) ReleaseDC(NULL, hDesktopDC);
 	hDesktopDC = NULL;
+	dxgi_capture_release();
+	dxgi_cursor_free();
+	free(captureBuffer);
+	captureBuffer = NULL;
+	captureBufferSize = 0;
+	captureHoldsDxgiFrame = 0;
 }
 
 void set_tile_compression(int type, int level)

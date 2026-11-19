@@ -22,6 +22,7 @@
     <ClCompile Include="..\meshcore\agentcore.c" />
     <ClCompile Include="..\meshcore\KVM\Windows\input.c" />
     <ClCompile Include="..\meshcore\KVM\Windows\kvm.c" />
+    <ClCompile Include="..\meshcore\KVM\Windows\dxgi_capture.cpp" />
     <ClCompile Include="..\meshcore\KVM\Windows\tile.cpp" />
     <ClCompile Include="..\meshcore\meshinfo.c" />
     <ClCompile Include="..\meshcore\wincrypto.cpp" />
@@ -76,6 +77,7 @@
     <ClInclude Include="..\meshcore\agentcore.h" />
     <ClInclude Include="..\meshcore\KVM\Windows\input.h" />
     <ClInclude Include="..\meshcore\KVM\Windows\kvm.h" />
+    <ClInclude Include="..\meshcore\KVM\Windows\dxgi_capture.h" />
     <ClInclude Include="..\meshcore\KVM\Windows\tile.h" />
     <ClInclude Include="..\meshcore\meshdefines.h" />
     <ClInclude Include="..\meshcore\meshinfo.h" />
