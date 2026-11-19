@@ -455,6 +455,7 @@ int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void*
 
 struct tileInfo_t {
 	unsigned char stale;	// 1 when the reference frame does not hold this tile, so it counts as changed
+	unsigned char check;	// 1 when the capture reported a change under this tile, so the next pass compares it
 	unsigned char flags;	// See TILE_FLAGS_ENUM
 };
 
@@ -465,6 +466,7 @@ enum TILE_FLAGS_ENUM {
 
 static tileInfo_t **tileInfo = NULL;			// One block that holds the row pointers and behind them the tiles
 static volatile LONG tileRefreshPending = 0;
+static int tileCheckAll = 1;					// The capture gave no changed areas, so the next pass compares every tile
 
 // The tiles as they were when last found changed, in the layout of the desktop buffer
 static unsigned char *refFrame = NULL;
@@ -482,6 +484,20 @@ static int tile_check_reference(void)
 	refFrameSize = size;
 	refPixelSize = PIXEL_SIZE;
 	return 1;
+}
+
+// Screen coordinates with exclusive right and bottom, marks every tile the rectangle touches for the next compare
+static void tile_check_rect(int x0, int y0, int x1, int y1)
+{
+	if (tileInfo == NULL || x1 <= x0 || y1 <= y0) { return; }
+	int c1 = (x1 - 1) / TILE_WIDTH;
+	int r1 = (y1 - 1) / TILE_HEIGHT;
+	if (c1 >= TILE_WIDTH_COUNT) { c1 = TILE_WIDTH_COUNT - 1; }
+	if (r1 >= TILE_HEIGHT_COUNT) { r1 = TILE_HEIGHT_COUNT - 1; }
+	for (int r = y0 / TILE_HEIGHT; r <= r1; r++)
+	{
+		for (int c = x0 / TILE_WIDTH; c <= c1; c++) { tileInfo[r][c].check = 1; }
+	}
 }
 
 extern "C"
@@ -506,7 +522,7 @@ void tile_info_alloc(void)
 	for (int r = 0; r < TILE_HEIGHT_COUNT; r++)
 	{
 		tileInfo[r] = tiles + (size_t)r * TILE_WIDTH_COUNT;
-		for (int c = 0; c < TILE_WIDTH_COUNT; c++) { tileInfo[r][c].stale = 1; tileInfo[r][c].flags = TILE_DONE; }
+		for (int c = 0; c < TILE_WIDTH_COUNT; c++) { tileInfo[r][c].stale = 1; tileInfo[r][c].check = 0; tileInfo[r][c].flags = TILE_DONE; }
 	}
 }
 
@@ -519,14 +535,17 @@ void tile_request_refresh(void)
 // Called by the capture loop before it walks the tiles of a new frame. Marks the tiles that differ from the reference.
 // The frame is compared in memory order, a pixel row at a time, because tile by tile is several times slower on some processors.
 // Exact, a hash could miss a change. Only the parts that differ are copied, so the reference holds the frame afterwards.
+// With changed areas from the capture only the tiles under them are compared, the others are unchanged in the frame.
 void tile_start_pass(void *desktop)
 {
 	int all = (int)InterlockedExchange(&tileRefreshPending, 0);
+	int checkAll = tileCheckAll;
 #ifdef KVM_ALL_TILES
 	all = 1;
 #endif
 	if (tile_check_reference()) { all = 1; }
 	if (refFrame == NULL) { all = 1; } // Without a reference every tile counts as changed, which costs data but loses nothing
+	tileCheckAll = 0;
 
 	size_t stride = (size_t)adjust_screen_size(SCALED_WIDTH) * PIXEL_SIZE;
 	size_t len = (size_t)TILE_WIDTH * PIXEL_SIZE;
@@ -535,25 +554,29 @@ void tile_start_pass(void *desktop)
 		size_t offset = (size_t)(adjust_screen_size(SCALED_HEIGHT) - (row + 1) * TILE_HEIGHT) * stride;
 		unsigned char *cur = (unsigned char *)desktop + offset;
 		tileInfo_t *tiles = tileInfo[row];
+		int any = 0;
 
 		for (int col = 0; col < TILE_WIDTH_COUNT; col++)
 		{
 			if (all) { tiles[col].stale = 1; }
+			if (checkAll || tiles[col].stale) { tiles[col].check = 1; }
 			tiles[col].flags = tiles[col].stale ? TILE_CHANGED : TILE_DONE;
+			any |= tiles[col].check;
 		}
 		if (refFrame == NULL) { continue; }
 
 		unsigned char *ref = refFrame + offset;
-		for (int r = 0; r < TILE_HEIGHT; r++, cur += stride, ref += stride)
+		for (int r = 0; any && r < TILE_HEIGHT; r++, cur += stride, ref += stride)
 		{
 			for (int col = 0; col < TILE_WIDTH_COUNT; col++)
 			{
+				if (!tiles[col].check) { continue; }
 				if (!tiles[col].stale && memcmp(cur + col * len, ref + col * len, len) == 0) { continue; }
 				memcpy(ref + col * len, cur + col * len, len);
 				tiles[col].flags = TILE_CHANGED;
 			}
 		}
-		for (int col = 0; col < TILE_WIDTH_COUNT; col++) { tiles[col].stale = 0; }
+		for (int col = 0; col < TILE_WIDTH_COUNT; col++) { tiles[col].stale = 0; tiles[col].check = 0; }
 	}
 }
 
@@ -751,11 +774,22 @@ int get_desktop_buffer(void **buffer, long long *bufferSize, long* mouseMove)
 			if ((captureBuffer = calloc(1, (size_t)size)) == NULL) { captureBufferSize = 0; return 1; }
 			captureBufferSize = size;
 		}
+		const RECT *rects;
+		int rectCount;
+
+		// The restore puts back what was under the old cursor, so those tiles changed too
+		tile_check_rect(cursorSaveX, cursorSaveY, cursorSaveX + cursorSaveW, cursorSaveY + cursorSaveH);
 		dxgi_cursor_restore(w, h);
-		if (dxgi_capture_frame(SCREEN_X, SCREEN_Y, SCREEN_WIDTH, SCREEN_HEIGHT, (unsigned char *)captureBuffer, w, h, captureHoldsDxgiFrame) == 0)
+		if (dxgi_capture_frame(SCREEN_X, SCREEN_Y, SCREEN_WIDTH, SCREEN_HEIGHT, (unsigned char *)captureBuffer, w, h, captureHoldsDxgiFrame, &rects, &rectCount) == 0)
 		{
+			if (rectCount < 0) { tileCheckAll = 1; }
+			for (int i = 0; i < rectCount; i++) { tile_check_rect(rects[i].left, rects[i].top, rects[i].right, rects[i].bottom); }
 			captureHoldsDxgiFrame = 1;
-			if (mouseMove[0] != 0) { dxgi_cursor_draw(mouseMove[1], mouseMove[2], w, h); }
+			if (mouseMove[0] != 0)
+			{
+				dxgi_cursor_draw(mouseMove[1], mouseMove[2], w, h);
+				tile_check_rect(cursorSaveX, cursorSaveY, cursorSaveX + cursorSaveW, cursorSaveY + cursorSaveH);
+			}
 			PIXEL_SIZE = 4;
 			*buffer = captureBuffer;
 			*bufferSize = captureBufferSize;
@@ -764,6 +798,7 @@ int get_desktop_buffer(void **buffer, long long *bufferSize, long* mouseMove)
 	}
 	captureHoldsDxgiFrame = 0;
 	cursorSaveW = cursorSaveH = 0;
+	tileCheckAll = 1; // GDI gives no changed areas
 
 	if (hDesktopDC) ReleaseDC(NULL, hDesktopDC);
 	if ((hDesktopDC = GetDC(NULL)) == NULL) { KVMDEBUG("GetDC(NULL) returned NULL", 0); return 1; } // We need to do this incase the current desktop changes.

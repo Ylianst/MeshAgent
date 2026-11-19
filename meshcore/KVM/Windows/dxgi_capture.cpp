@@ -39,6 +39,13 @@ static int failed = 0;
 static DWORD failedAt = 0;
 static int startNext = 0;
 
+// The changed areas of the last frame, as move and dirty rectangles from DXGI, and -1 for the whole screen
+static unsigned char *meta = NULL;
+static UINT metaSize = 0;
+static RECT *changed = NULL;
+static int changedCount = 0;
+static int changedCapacity = 0;
+
 #define DXGI_SAFE_RELEASE(p) if ((p) != NULL) { (p)->Release(); (p) = NULL; }
 
 extern "C" void dxgi_capture_release(void)
@@ -48,6 +55,12 @@ extern "C" void dxgi_capture_release(void)
 	DXGI_SAFE_RELEASE(ctx);
 	DXGI_SAFE_RELEASE(dev);
 	hasFrame = 0;
+	free(meta);
+	meta = NULL;
+	metaSize = 0;
+	free(changed);
+	changed = NULL;
+	changedCount = changedCapacity = 0;
 }
 
 extern "C" int dxgi_capture_unsupported(void)
@@ -148,23 +161,90 @@ static int dxgi_capture_init(int x, int y, int w, int h)
 	return 0;
 }
 
-// Copies the last frame from the staging texture into dest, returns 0 on success and -1 when Map() failed
+// Clamped to the output, empty rectangles are dropped, returns 1 when the list could not grow
+static int dxgi_changed_add(const RECT *r)
+{
+	RECT c;
+	c.left = r->left < 0 ? 0 : r->left;
+	c.top = r->top < 0 ? 0 : r->top;
+	c.right = r->right > dupW ? dupW : r->right;
+	c.bottom = r->bottom > dupH ? dupH : r->bottom;
+	if (c.right <= c.left || c.bottom <= c.top) { return 0; }
+	if (changedCount == changedCapacity)
+	{
+		RECT *grown = (RECT *)realloc(changed, sizeof(RECT) * (changedCapacity + 64));
+		if (grown == NULL) { return 1; }
+		changed = grown;
+		changedCapacity += 64;
+	}
+	changed[changedCount++] = c;
+	return 0;
+}
+
+// Collects the dirty rectangles and the destinations of the move rectangles of the acquired frame.
+// Returns 1 when they could not be read or cover more than half the screen, and then the caller takes the whole frame.
+static int dxgi_read_changes(const DXGI_OUTDUPL_FRAME_INFO *fi)
+{
+	UINT used, i;
+	long long area = 0;
+
+	changedCount = 0;
+	if (fi->TotalMetadataBufferSize == 0) { return 1; }
+	if (metaSize < fi->TotalMetadataBufferSize)
+	{
+		unsigned char *grown = (unsigned char *)realloc(meta, fi->TotalMetadataBufferSize);
+		if (grown == NULL) { return 1; }
+		meta = grown;
+		metaSize = fi->TotalMetadataBufferSize;
+	}
+	// Moves first, the dirty rectangles reuse the buffer afterwards
+	if (FAILED(dup->GetFrameMoveRects(metaSize, (DXGI_OUTDUPL_MOVE_RECT *)meta, &used))) { return 1; }
+	for (i = 0; i < used / sizeof(DXGI_OUTDUPL_MOVE_RECT); i++)
+	{
+		if (dxgi_changed_add(&((DXGI_OUTDUPL_MOVE_RECT *)meta)[i].DestinationRect)) { return 1; }
+	}
+	if (FAILED(dup->GetFrameDirtyRects(metaSize, (RECT *)meta, &used))) { return 1; }
+	for (i = 0; i < used / sizeof(RECT); i++)
+	{
+		if (dxgi_changed_add(&((RECT *)meta)[i])) { return 1; }
+	}
+	// Scattered changes in one window come as their bounding box, and copying a large part rectangle by rectangle
+	// costs more than one copy of the whole frame. Overlaps count twice, which only moves the switch a little earlier.
+	for (i = 0; i < (UINT)changedCount; i++) { area += (long long)(changed[i].right - changed[i].left) * (changed[i].bottom - changed[i].top); }
+	if (area * 2 > (long long)dupW * dupH) { return 1; }
+	return 0;
+}
+
+// Copies the changed areas of the last frame, or all of it when changedCount is -1, from the staging texture into dest.
+// Returns 0 on success and -1 when Map() failed.
 static int dxgi_capture_copy(unsigned char *dest, int destWidth, int destHeight)
 {
 	D3D11_MAPPED_SUBRESOURCE map;
-	int r;
+	int r, i;
 
+	if (changedCount == 0) { return 0; }
 	if (FAILED(ctx->Map(staging, 0, D3D11_MAP_READ, 0, &map))) { return -1; }
 	// The tile code reads a bottom-up DIB with adjust_screen_size() rows, so screen row r goes to DIB row (destHeight - 1 - r)
-	for (r = 0; r < dupH; r++)
+	if (changedCount < 0)
 	{
-		memcpy(dest + (size_t)(destHeight - 1 - r) * destWidth * 4, (unsigned char *)map.pData + (size_t)r * map.RowPitch, (size_t)dupW * 4);
+		for (r = 0; r < dupH; r++)
+		{
+			memcpy(dest + (size_t)(destHeight - 1 - r) * destWidth * 4, (unsigned char *)map.pData + (size_t)r * map.RowPitch, (size_t)dupW * 4);
+		}
+	}
+	for (i = 0; i < changedCount; i++)
+	{
+		const RECT *c = &changed[i];
+		for (r = c->top; r < c->bottom; r++)
+		{
+			memcpy(dest + ((size_t)(destHeight - 1 - r) * destWidth + c->left) * 4, (unsigned char *)map.pData + (size_t)r * map.RowPitch + (size_t)c->left * 4, (size_t)(c->right - c->left) * 4);
+		}
 	}
 	ctx->Unmap(staging, 0);
 	return 0;
 }
 
-extern "C" int dxgi_capture_frame(int x, int y, int w, int h, unsigned char *dest, int destWidth, int destHeight, int destCurrent)
+extern "C" int dxgi_capture_frame(int x, int y, int w, int h, unsigned char *dest, int destWidth, int destHeight, int destCurrent, const RECT **rects, int *rectCount)
 {
 	DXGI_OUTDUPL_FRAME_INFO fi;
 	IDXGIResource *res = NULL;
@@ -172,6 +252,8 @@ extern "C" int dxgi_capture_frame(int x, int y, int w, int h, unsigned char *des
 	HRESULT hr;
 	int result;
 
+	*rects = NULL;
+	*rectCount = -1;
 	if (unsupported || w > destWidth || h > destHeight) { return 1; }
 	if (dup != NULL && (x != dupX || y != dupY || w != dupW || h != dupH)) { dxgi_capture_release(); }
 	if (dup == NULL)
@@ -191,8 +273,10 @@ extern "C" int dxgi_capture_frame(int x, int y, int w, int h, unsigned char *des
 	{
 		// Nothing changed, but right after an init there may be no frame yet, and then GDI captures this one
 		if (!hasFrame) { return 1; }
-		if (destCurrent) { return 0; }
+		changedCount = destCurrent ? 0 : -1;
 		if (dxgi_capture_copy(dest, destWidth, destHeight) != 0) { dxgi_capture_failed(); return 1; }
+		*rects = changed;
+		*rectCount = changedCount;
 		return 0;
 	}
 	if (FAILED(hr)) { dxgi_capture_failed(); return 1; } // DXGI_ERROR_ACCESS_LOST on a desktop switch, UAC prompt or mode change
@@ -203,17 +287,36 @@ extern "C" int dxgi_capture_frame(int x, int y, int w, int h, unsigned char *des
 		result = -1;
 		if (SUCCEEDED(res->QueryInterface(__uuidof(ID3D11Texture2D), (void **)&tex)))
 		{
-			ctx->CopyResource(staging, tex);
+			// The whole frame after a start, after GDI wrote dest and when the rectangles cannot be read
+			if (!hasFrame || !destCurrent || dxgi_read_changes(&fi) != 0)
+			{
+				ctx->CopyResource(staging, tex);
+				changedCount = -1;
+			}
+			for (int i = 0; i < changedCount; i++)
+			{
+				D3D11_BOX b = { (UINT)changed[i].left, (UINT)changed[i].top, 0, (UINT)changed[i].right, (UINT)changed[i].bottom, 1 };
+				ctx->CopySubresourceRegion(staging, 0, b.left, b.top, 0, tex, 0, &b);
+			}
 			tex->Release();
 			hasFrame = 1;
 			result = dxgi_capture_copy(dest, destWidth, destHeight);
 		}
 	}
 	else if (!hasFrame) { result = 1; }
-	else { result = destCurrent ? 0 : dxgi_capture_copy(dest, destWidth, destHeight); }
+	else
+	{
+		changedCount = destCurrent ? 0 : -1;
+		result = dxgi_capture_copy(dest, destWidth, destHeight);
+	}
 	res->Release();
 	dup->ReleaseFrame();
 	if (result < 0) { dxgi_capture_failed(); return 1; }
+	if (result == 0)
+	{
+		*rects = changed;
+		*rectCount = changedCount;
+	}
 	return result;
 }
 

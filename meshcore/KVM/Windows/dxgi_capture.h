@@ -24,7 +24,8 @@ extern "C" {
 // Captures the screen rectangle (x, y, w, h) bottom-up into dest, starting the duplication when needed.
 // destCurrent says dest still holds the last frame this function wrote, so an unchanged screen needs no copy until the next release.
 // Returns 0 when dest holds the current screen, 1 when the caller has to capture this frame with GDI.
-int dxgi_capture_frame(int x, int y, int w, int h, unsigned char *dest, int destWidth, int destHeight, int destCurrent);
+// On 0, rects and rectCount give the screen areas that changed since the last call, and a rectCount of -1 means the whole screen.
+int dxgi_capture_frame(int x, int y, int w, int h, unsigned char *dest, int destWidth, int destHeight, int destCurrent, const RECT **rects, int *rectCount);
 
 void dxgi_capture_release(void);
 
