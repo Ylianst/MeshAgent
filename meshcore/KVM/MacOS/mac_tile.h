@@ -18,19 +18,19 @@
 #include "../Linux/linux_compression.h"
 
 enum TILE_FLAGS_ENUM {
-	TILE_TODO,						//The tile CRC needs to be calculated.
-	TILE_SENT,						//CRC has been calculated and the tile has been sent.
-	TILE_MARKED_NOT_SENT,   		//CRC has been calculated, but the tile was not sent.
-	TILE_DONT_SEND		  //CRC has been calculated, tile need not be sent.
-	//TILE_SKIPPED		  //CRC has been calculated, tile need not be sent, but was skipped to include a greater region
+	TILE_DONE = 0,			// Nothing to send, the tile is unchanged or was sent in this pass
+	TILE_CHANGED			// The tile differs from the reference and was not sent yet
 };
 
 struct tileInfo_t {
-	int crc;
-	enum TILE_FLAGS_ENUM flag;
+	unsigned char stale;	// 1 when the reference frame does not hold this tile, so it counts as changed
+	unsigned char flag;
 };
 
-extern int reset_tile_info(int old_height_count);
+extern void tile_info_alloc(void);
+extern void tile_info_free(void);
+extern void tile_request_refresh(void);
+extern void tile_start_pass(const unsigned char *desktop, long long desktopsize);
 extern int adjust_screen_size(int pixles);
 extern int getTileAt(int x, int y, void** buffer, long long *bufferSize, void *desktop, long long desktopsize, int row, int col);
 extern int getScreenBuffer(unsigned char **desktop, long long *desktopsize, CGImageRef image);

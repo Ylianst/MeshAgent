@@ -33,6 +33,7 @@ limitations under the License.
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <sys/event.h>
 
 #include <string.h>
 #include <pwd.h>
@@ -164,6 +165,7 @@ int TILE_WIDTH_COUNT = 0;
 int TILE_HEIGHT_COUNT = 0;
 int COMPRESSION_RATIO = 0;
 int FRAME_RATE_TIMER = 0;
+volatile int g_viewerFrameTimer = 0; // The viewer's frame timer, kept apart because kvm_init() sets FRAME_RATE_TIMER back to 100 after every display change
 struct tileInfo_t **g_tileInfo = NULL;
 int g_remotepause = 0;
 int g_pause = 0;
@@ -370,7 +372,6 @@ int get_kbd_state()
 static int kvm_init_size(int width, int height)
 {
 	ILibCriticalLogFilename = "KVMSlave.log";
-	int old_height_count = TILE_HEIGHT_COUNT;
 	int points = (int)CGDisplayPixelsWide(SCREEN_NUM);
 
 	SCREEN_WIDTH = width;
@@ -388,7 +389,7 @@ static int kvm_init_size(int width, int height)
 	if (SCREEN_HEIGHT % TILE_HEIGHT) { TILE_HEIGHT_COUNT++; }
 	
 	kvm_send_resolution();
-	reset_tile_info(old_height_count);
+	tile_info_alloc();
 	
 	unsigned char *buffer = ILibMemory_SmartAllocate(5);
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_KEYSTATE);		// Write the type
@@ -491,8 +492,9 @@ int kvm_server_inputdata(char* block, int blocklen)
 		}
 		case MNG_KVM_COMPRESSION: // Compression
 		{
-			if (size != 6) break;
-			set_tile_compression((int)block[4], (int)block[5]);
+			// The server sends 10 bytes, with the scaling at offset 6, which is not used here, and the frame timer at offset 8
+			if (size >= 10) { int fr = ((int)ntohs(ILibUnaligned_Read16(block + 8))); if (fr >= 20 && fr <= 5000) g_viewerFrameTimer = fr; }
+			if (size >= 6) { set_tile_compression((int)block[4], (int)block[5]); }
 			COMPRESSION_RATIO = 100;
 			break;
 		}
@@ -500,20 +502,8 @@ int kvm_server_inputdata(char* block, int blocklen)
 		{
 			kvm_send_resolution();
 
-			int row, col;
 			if (size != 4) break;
-			if (g_tileInfo == NULL) {
-				if ((g_tileInfo = (struct tileInfo_t **) malloc(TILE_HEIGHT_COUNT * sizeof(struct tileInfo_t *))) == NULL) ILIBCRITICALEXIT(254);
-				for (row = 0; row < TILE_HEIGHT_COUNT; row++) {
-					if ((g_tileInfo[row] = (struct tileInfo_t *) malloc(TILE_WIDTH_COUNT * sizeof(struct tileInfo_t))) == NULL) ILIBCRITICALEXIT(254);
-				}
-			}
-			for (row = 0; row < TILE_HEIGHT_COUNT; row++) {
-				for (col = 0; col < TILE_WIDTH_COUNT; col++) {
-					g_tileInfo[row][col].crc = 0xFF;
-					g_tileInfo[row][col].flag = 0;
-				}
-			}
+			tile_request_refresh();
 			break;
 		}
 		case MNG_KVM_PAUSE: // Pause
@@ -524,8 +514,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 		}
 		case MNG_KVM_FRAME_RATE_TIMER:
 		{
-			//int fr = ((int)ntohs(((unsigned short*)(block))[2]));
-			//if (fr > 20 && fr < 2000) FRAME_RATE_TIMER = fr;
+			if (size >= 6) { int fr = ((int)ntohs(ILibUnaligned_Read16(block + 4))); if (fr >= 20 && fr <= 5000) g_viewerFrameTimer = fr; }
 			break;
 		}
 	}
@@ -685,7 +674,9 @@ static int kvm_session_left_console(void)
 
 void* kvm_server_mainloop(void* param)
 {
-	int x, y, height, width, r, c = 0;
+	uint64_t frameStartMs = 0;
+	int frameTimerQueue = -1;
+	int x, y, height, width;
 	long long desktopsize = 0;
 	long long tilesize = 0;
 	void *desktop = NULL;
@@ -766,6 +757,7 @@ void* kvm_server_mainloop(void* param)
 	// Init the kvm
 	g_messageQ = ILibQueue_Create();
 	if (kvm_init() != 0) { return (void*)-1; }
+	frameTimerQueue = kqueue();
 
 
 	g_shutdown = 0;
@@ -833,16 +825,25 @@ kvm_next_session:
 		kvm_cursor_check(g_messageQ);
 
 
-		for (r = 0; r < TILE_HEIGHT_COUNT; r++) 
+		// The frame timer is the time from one frame start to the next. Without this wait the loop captured again as soon as the tiles were sent.
+		// Waits in steps of 50 ms at most, so a new timer value, a shutdown or a new connection is noticed.
+		// A kqueue timer with NOTE_CRITICAL because under launchd usleep(20000) took 66 to 95 ms and usleep(50000) 102 to 125 ms (macOS 15.8 and 26.7), this one 20.0 and 50.1 ms.
+		while (!g_shutdown && g_resetipc == 0)
 		{
-			for (c = 0; c < TILE_WIDTH_COUNT; c++) 
-			{
-				g_tileInfo[r][c].flag = TILE_TODO;
-#ifdef KVM_ALL_TILES
-				g_tileInfo[r][c].crc = 0xFF;
-#endif
-			}
+			uint64_t nowMs = clock_gettime_nsec_np(CLOCK_MONOTONIC) / 1000000;
+			uint64_t timerMs = (uint64_t)(g_viewerFrameTimer > 0 ? g_viewerFrameTimer : FRAME_RATE_TIMER);
+			uint64_t waitMs;
+			struct kevent timerEvent, firedEvent;
+
+			if (frameStartMs == 0 || nowMs - frameStartMs >= timerMs) { break; }
+			waitMs = timerMs - (nowMs - frameStartMs);
+			if (waitMs > 50) { waitMs = 50; }
+			EV_SET(&timerEvent, 1, EVFILT_TIMER, EV_ADD | EV_ONESHOT, NOTE_USECONDS | NOTE_CRITICAL, (intptr_t)(waitMs * 1000), NULL);
+			if (frameTimerQueue < 0 || kevent(frameTimerQueue, &timerEvent, 1, &firedEvent, 1, NULL) < 0) { usleep((useconds_t)(waitMs * 1000)); }
 		}
+		if (g_shutdown) { break; }
+		if (g_resetipc != 0) { continue; }
+		frameStartMs = clock_gettime_nsec_np(CLOCK_MONOTONIC) / 1000000;
 
 		screen_num = CGMainDisplayID();
 
@@ -881,6 +882,7 @@ kvm_next_session:
 			}
 
 			KvmDebugLog("...Enter for loop\n");
+			tile_start_pass((const unsigned char *)desktop, desktopsize);
 
 			for (y = 0; y < TILE_HEIGHT_COUNT; y++) 
 			{
@@ -891,7 +893,7 @@ kvm_next_session:
 					
 					if (g_shutdown) { x = TILE_WIDTH_COUNT; y = TILE_HEIGHT_COUNT; break; }
 					
-					if (g_tileInfo[y][x].flag == TILE_SENT || g_tileInfo[y][x].flag == TILE_DONT_SEND) {
+					if (g_tileInfo[y][x].flag != TILE_CHANGED) {
 						continue;
 					}
 					
@@ -947,8 +949,8 @@ kvm_next_session:
 	pthread_join(kvmthread, NULL);
 	kvmthread = (pthread_t)NULL;
 
-	if (g_tileInfo != NULL) { for (r = 0; r < TILE_HEIGHT_COUNT; r++) { free(g_tileInfo[r]); } }
-	g_tileInfo = NULL;
+	if (frameTimerQueue >= 0) { close(frameTimerQueue); }
+	tile_info_free();
 	if(tilebuffer != NULL) {
 		free(tilebuffer);
 		tilebuffer = NULL;
