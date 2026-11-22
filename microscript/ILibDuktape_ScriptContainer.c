@@ -208,6 +208,16 @@ typedef enum SCRIPT_ENGINE_COMMAND
 }SCRIPT_ENGINE_COMMAND;
 
 
+#ifdef WIN32
+struct ILibDuktape_ScriptContainer_Master;
+typedef struct ILibDuktape_ScriptContainer_OutputOwner
+{
+	struct ILibDuktape_ScriptContainer_Master *master;
+	uintptr_t nonce;
+	unsigned int references;
+}ILibDuktape_ScriptContainer_OutputOwner;
+#endif
+
 typedef struct ILibDuktape_ScriptContainer_Master
 {
 	duk_context *ctx;
@@ -218,6 +228,9 @@ typedef struct ILibDuktape_ScriptContainer_Master
 	void *PeerThread, *PeerChain;
 	duk_context *PeerCTX;
 	unsigned int ChildSecurityFlags;
+#ifdef WIN32
+	ILibDuktape_ScriptContainer_OutputOwner *outputOwner;
+#endif
 }ILibDuktape_ScriptContainer_Master;
 
 typedef struct ILibDuktape_ScriptContainer_Slave
@@ -3546,11 +3559,26 @@ duk_ret_t ILibDuktape_ScriptContainer_ExecuteString(duk_context *ctx)
 
 	return(0);
 }
-void ILibDuktape_ScriptContainer_ExitSink(ILibProcessPipe_Process sender, int exitCode, void* user)
+#ifdef WIN32
+typedef struct ILibDuktape_ScriptContainer_OutputTask
 {
-	ILibDuktape_ScriptContainer_Master *master = (ILibDuktape_ScriptContainer_Master*)user;
+	ILibDuktape_ScriptContainer_OutputOwner *owner;
+	int type; // 0: stdout, 1: framed stderr, 2: process exit
+	int exitCode;
+	size_t length;
+	char buffer[1];
+}ILibDuktape_ScriptContainer_OutputTask;
+
+void ILibDuktape_ScriptContainer_QueueOutput(ILibDuktape_ScriptContainer_Master *master, int type, const char *buffer, size_t length, int exitCode);
+void ILibDuktape_ScriptContainer_ReleaseOutputOwner(ILibDuktape_ScriptContainer_OutputOwner *owner)
+{
+	if (--owner->references == 0) { ILibMemory_Free(owner); }
+}
+#endif
+
+void ILibDuktape_ScriptContainer_EmitExit(ILibDuktape_ScriptContainer_Master *master, int exitCode)
+{
 	if (!ILibMemory_CanaryOK(master)) { return; }
-	master->child = NULL;
 	if (duk_ctx_is_alive(master->ctx) && !duk_ctx_shutting_down(master->ctx))
 	{
 		duk_context *ctx = master->ctx;
@@ -3567,6 +3595,18 @@ void ILibDuktape_ScriptContainer_ExitSink(ILibProcessPipe_Process sender, int ex
 
 		duk_pop_2(ctx);
 	}
+}
+void ILibDuktape_ScriptContainer_ExitSink(ILibProcessPipe_Process sender, int exitCode, void* user)
+{
+	ILibDuktape_ScriptContainer_Master *master = (ILibDuktape_ScriptContainer_Master*)user;
+	if (!ILibMemory_CanaryOK(master)) { return; }
+	master->child = NULL;
+#ifdef WIN32
+	// Native process cleanup can finish now; queued output owns independent buffers.
+	ILibDuktape_ScriptContainer_QueueOutput(master, 2, NULL, 0, exitCode);
+#else
+	ILibDuktape_ScriptContainer_EmitExit(master, exitCode);
+#endif
 }
 void ILibDuktape_ScriptContainer_StdOutSink_Chain(void *chain, void *user)
 {
@@ -3590,10 +3630,14 @@ void ILibDuktape_ScriptContainer_StdOutSink(ILibProcessPipe_Process sender, char
 	ILibDuktape_ScriptContainer_Master *master = (ILibDuktape_ScriptContainer_Master*)user;
 	if (ILibMemory_CanaryOK(master) && duk_ctx_is_alive(master->ctx) && !duk_ctx_shutting_down(master->ctx))
 	{
+#ifdef WIN32
+		ILibDuktape_ScriptContainer_QueueOutput(master, 0, buffer, bufferLen, 0);
+#else
 		void *tmp = ILibMemory_SmartAllocateEx(sizeof(void*), bufferLen + 1);
 		((void**)tmp)[0] = master;
 		memcpy_s(ILibMemory_Extra(tmp), ILibMemory_ExtraSize(tmp), buffer, bufferLen);
 		Duktape_RunOnEventLoop(master->chain, duk_ctx_nonce(master->ctx), master->ctx, ILibDuktape_ScriptContainer_StdOutSink_Chain, NULL, tmp);
+#endif
 	}
 
 	*bytesConsumed = bufferLen;
@@ -3692,13 +3736,61 @@ void ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread(void *chain, void *
 		duk_pop(ctx);		// ...
 	}
 
-#ifdef WIN32
-	if (ILibMemory_CanaryOK(master))
-	{
-		if (master->child != NULL) { ILibProcessPipe_Pipe_Resume(ILibProcessPipe_Process_GetStdErr(master->child)); }
-	}
-#endif
 }
+#ifdef WIN32
+void ILibDuktape_ScriptContainer_FreeOutputTask(void *chain, void *user)
+{
+	ILibDuktape_ScriptContainer_OutputTask *task = (ILibDuktape_ScriptContainer_OutputTask*)user;
+	ILibDuktape_ScriptContainer_OutputOwner *owner = task->owner;
+	ILibMemory_Free(task);
+	ILibDuktape_ScriptContainer_ReleaseOutputOwner(owner);
+}
+void ILibDuktape_ScriptContainer_DispatchOutput(void *chain, void *user)
+{
+	ILibDuktape_ScriptContainer_OutputTask *task = (ILibDuktape_ScriptContainer_OutputTask*)user;
+	ILibDuktape_ScriptContainer_Master *master = task->owner->master;
+	if (master != NULL && duk_ctx_is_alive(master->ctx) && duk_ctx_is_valid(task->owner->nonce, master->ctx) && !duk_ctx_shutting_down(master->ctx))
+	{
+		duk_context *ctx = master->ctx;
+		// An event listener may drop the last external reference and explicitly run GC.
+		duk_push_heapptr(ctx, master->emitter->object);
+		if (task->type == 2)
+		{
+			ILibDuktape_ScriptContainer_EmitExit(master, task->exitCode);
+		}
+		else if (task->type == 1)
+		{
+			void *args[2] = { master, task->buffer };
+			ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread(chain, args);
+		}
+		else
+		{
+			duk_push_global_object(ctx);
+			duk_get_prop_string(ctx, -1, "console");
+			duk_get_prop_string(ctx, -1, "log");
+			duk_swap_top(ctx, -2);
+			duk_push_string(ctx, "Child/StdOut");
+			duk_push_lstring(ctx, task->buffer, task->length);
+			duk_pcall_method(ctx, 2);
+			duk_pop_2(ctx);
+		}
+		duk_pop(ctx);
+	}
+	ILibDuktape_ScriptContainer_FreeOutputTask(chain, task);
+}
+void ILibDuktape_ScriptContainer_QueueOutput(ILibDuktape_ScriptContainer_Master *master, int type, const char *buffer, size_t length, int exitCode)
+{
+	ILibDuktape_ScriptContainer_OutputTask *task = (ILibDuktape_ScriptContainer_OutputTask*)ILibMemory_SmartAllocate(sizeof(ILibDuktape_ScriptContainer_OutputTask) + length);
+	task->owner = master->outputOwner;
+	++task->owner->references;
+	task->type = type;
+	task->exitCode = exitCode;
+	task->length = length;
+	if (length != 0) { memcpy_s(task->buffer, length, buffer, length); }
+	// A native queue also runs its abort handler when the JS heap has gone away.
+	ILibChain_RunOnMicrostackThreadEx3(master->chain, ILibDuktape_ScriptContainer_DispatchOutput, ILibDuktape_ScriptContainer_FreeOutputTask, task);
+}
+#endif
 void ILibDuktape_ScriptContainer_StdErrSink(ILibProcessPipe_Process sender, char *buffer, size_t bufferLen, size_t* bytesConsumed, void* user)
 {
 	ILibDuktape_ScriptContainer_Master* master = (ILibDuktape_ScriptContainer_Master*)user;
@@ -3709,18 +3801,16 @@ void ILibDuktape_ScriptContainer_StdErrSink(ILibProcessPipe_Process sender, char
 	}
 	
 	if (bufferLen < 4 || bufferLen < (size_t)(int)ILibUnaligned_Read32(buffer)) { return; }
+#ifdef WIN32
+	// A queued frame must contain its header before it can be copied.
+	if (ILibUnaligned_Read32(buffer) < 4) { *bytesConsumed = bufferLen; return; }
+#endif
 	
 	*bytesConsumed = (int)ILibUnaligned_Read32(buffer);
 #ifdef WIN32
-	if (ILibMemory_CanaryOK(sender))
-	{
-		void **ptr = (void**)ILibMemory_Extra(ILibProcessPipe_Process_GetStdErr(sender));
-		ptr[0] = master;
-		ptr[1] = buffer;
-
-		ILibProcessPipe_Pipe_Pause(ILibProcessPipe_Process_GetStdErr(sender));
-		Duktape_RunOnEventLoop(master->chain, duk_ctx_nonce(master->ctx), master->ctx, ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread, NULL, ptr);
-	}
+	// Copy just this complete frame. No queued callback borrows pipe storage, and
+	// an orphaned owner cannot leave stderr paused and prevent process cleanup.
+	ILibDuktape_ScriptContainer_QueueOutput(master, 1, buffer, *bytesConsumed, 0);
 #else
 	void *ptr[2] = { master, buffer };
 	ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread(master->chain, ptr);
@@ -3733,13 +3823,20 @@ duk_ret_t ILibDuktape_ScriptContainer_Finalizer(duk_context *ctx)
 {
 	duk_get_prop_string(ctx, 0, ILibDuktape_ScriptContainer_MasterPtr);
 	ILibDuktape_ScriptContainer_Master *master = (ILibDuktape_ScriptContainer_Master*)Duktape_GetBuffer(ctx, -1, NULL);
+#ifdef WIN32
+	if (master->outputOwner != NULL)
+	{
+		master->outputOwner->master = NULL;
+		ILibDuktape_ScriptContainer_ReleaseOutputOwner(master->outputOwner);
+		master->outputOwner = NULL;
+	}
+#endif
 	if (master->child != NULL)
 	{
 		// Pipe output can still be pending after the JavaScript owner is collected.
 		ILibProcessPipe_Process_UpdateUserObject(master->child, NULL);
-#ifdef WIN32
-		ILibProcessPipe_Process_RemoveHandlers(master->child);
-#endif
+		// Keep the native exit wait registered: OnExit owns Process_Destroy and
+		// closes the process plus all three pipes even after the JS owner is gone.
 		ILibProcessPipe_Process_SoftKill(master->child);
 		master->child = NULL;
 	}
@@ -4133,6 +4230,12 @@ duk_ret_t ILibDuktape_ScriptContainer_Create(duk_context *ctx)
 
 
 		if (master->child == NULL) { return(ILibDuktape_Error(ctx, "ScriptContainer.Create(): Error spawning child process, using [%s]", exePath)); }
+#ifdef WIN32
+		master->outputOwner = (ILibDuktape_ScriptContainer_OutputOwner*)ILibMemory_SmartAllocate(sizeof(ILibDuktape_ScriptContainer_OutputOwner));
+		master->outputOwner->master = master;
+		master->outputOwner->nonce = duk_ctx_nonce(ctx);
+		master->outputOwner->references = 1;
+#endif
 		
 		duk_push_true(ctx);
 		duk_put_prop_string(ctx, -2, ILibDuktape_ScriptContainer_ProcessIsolated);
