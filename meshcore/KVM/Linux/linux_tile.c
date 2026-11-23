@@ -309,82 +309,67 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, const struct t
 }
 
 
-// Get screen buffer from the XImage structure
+// Shift and width of one colour channel, from its mask
+static void tile_mask_layout(unsigned long mask, int *shift, int *bits)
+{
+	*shift = 0;
+	*bits = 0;
+	if (mask == 0) { return; }
+	while ((mask & 1) == 0) { mask >>= 1; (*shift)++; }
+	while ((mask & 1) != 0) { mask >>= 1; (*bits)++; }
+}
+
+static unsigned char tile_channel(unsigned long pixel, unsigned long mask, int shift, int bits)
+{
+	unsigned long v = (pixel & mask) >> shift;
+	return (unsigned char)(bits >= 8 ? (v >> (bits - 8)) : (v << (8 - bits)));
+}
+
+// Get screen buffer from the XImage structure, as RGB24 with rows and height padded to whole tiles.
+// The channels come from the image's masks and byte order and the rows from bytes_per_line. Before, the shifts were fixed and
+// 16 and 24 bpp rows were read as packed, so a visual with other masks got wrong colours and a padded row a skewed picture.
 int getScreenBuffer(char **desktop, long long *desktopsize, XImage *image)
 {
-	long long size = adjust_screen_size(SCREEN_WIDTH) * adjust_screen_size(SCREEN_HEIGHT) * 3;
-	int row, col, i, width_padding_size = 0, height_padding_size = 0;
-	char *output;
-	register unsigned char* tmpPtr2 = (unsigned char *)image->data;
-	register unsigned short* tmpPtr3 = (unsigned short *)image->data;
-	register unsigned int
-		rm = image->red_mask,
-		gm = image->green_mask,
-		bm = image->blue_mask,
-		rs = 16,
-		gs = 8,
-		bs = 0, *tmpPtr = (unsigned int *) image->data;
-	int bpp = image->bits_per_pixel;
+	size_t stride = (size_t)adjust_screen_size(SCREEN_WIDTH) * 3;
+	size_t rows = (size_t)adjust_screen_size(SCREEN_HEIGHT);
+	long long size = (long long)(stride * rows);
+	int bytes = image->bits_per_pixel >> 3;
+	int width = image->width;
+	int height = image->height;
+	int rs, rb, gs, gb, bs, bb;
+	int row, col, i;
 
-	if (*desktopsize != size) {
+	if (*desktopsize != size || *desktop == NULL) {
 		if (*desktop != NULL) { free(*desktop); }
 		*desktopsize = size;
-		if ((*desktop = (char *) malloc (*desktopsize + 4)) == NULL) ILIBCRITICALEXIT(254);
+		if ((*desktop = (char *) malloc ((size_t)size)) == NULL) ILIBCRITICALEXIT(254);
 	}
 
-	if (bpp == 16) {
-		rs = 11;
-		gs = 5;
-	}
-	output = *desktop;
+	if (width > adjust_screen_size(SCREEN_WIDTH)) { width = adjust_screen_size(SCREEN_WIDTH); }
+	if (height > (int)rows) { height = (int)rows; }
+	if (bytes < 1 || bytes > 4) { memset(*desktop, 0, (size_t)size); return 0; }
 
-	for (row = 0; row < image->height; row++) {
-		for (col = 0; col < image->width; col++) {
-			if (bpp == 16) {
-				*output++ = ((*tmpPtr3 >> rs) & 0x01f) << 3;
-				*output++ = ((*tmpPtr3 >> gs) & 0x03f) << 2;
-				*output++ = ((*tmpPtr3 >> bs) & 0x01f) << 3;
-				tmpPtr3++;
-			}
-			else if (bpp == 24) {
-				*output++ = *(tmpPtr2 + 2);
-				*output++ = *(tmpPtr2 + 1);
-				*output++ = *tmpPtr2;
-				tmpPtr2 += 3;
-			}
-			else {
-				*output++ = ((*tmpPtr & rm) >> rs);
-				*output++ = ((*tmpPtr & gm) >> gs);
-				*output++ = ((*tmpPtr & bm) >> bs);
-				tmpPtr = (unsigned int *) (((char *)tmpPtr) + (image->bits_per_pixel >> 3));
-				//tmpPtr++;		     // ignore alpha values
-			}
+	tile_mask_layout(image->red_mask, &rs, &rb);
+	tile_mask_layout(image->green_mask, &gs, &gb);
+	tile_mask_layout(image->blue_mask, &bs, &bb);
+
+	for (row = 0; row < height; row++) {
+		const unsigned char *src = (const unsigned char *)image->data + (size_t)row * image->bytes_per_line;
+		unsigned char *output = (unsigned char *)*desktop + (size_t)row * stride;
+
+		for (col = 0; col < width; col++) {
+			unsigned long pixel = 0;
+			if (image->byte_order == LSBFirst) { for (i = bytes - 1; i >= 0; i--) { pixel = (pixel << 8) | src[i]; } }
+			else { for (i = 0; i < bytes; i++) { pixel = (pixel << 8) | src[i]; } }
+			src += bytes;
+
+			*output++ = tile_channel(pixel, image->red_mask, rs, rb);
+			*output++ = tile_channel(pixel, image->green_mask, gs, gb);
+			*output++ = tile_channel(pixel, image->blue_mask, bs, bb);
 		}
-		//
-		// eat padded bytes, for better speed we use shifting,
-		// (bytes_per_line - bits_per_pixel / 8 * width ) / 4
-
-		tmpPtr += (image->bytes_per_line - (image->bits_per_pixel >> 3)
-			* image->width) >> 2;
-
-		width_padding_size = (adjust_screen_size(SCREEN_WIDTH) - image->width) * 3;
-
-		if (width_padding_size != 0) {
-			for (i = 0; i < width_padding_size; i++) {
-				*output++ = 0;
-			}
-		}
+		memset(output, 0, stride - (size_t)width * 3);
 	}
-
-	height_padding_size = adjust_screen_size(SCREEN_HEIGHT) - image->height;
-
-	if (height_padding_size != 0) {
-		for (row = 0; row < height_padding_size; row++) {
-			for (col = 0; col < (image->width * 3) + width_padding_size; col++) {
-				*output++ = 0;
-			}
-		}
-	}
+	memset(*desktop + (size_t)height * stride, 0, (rows - (size_t)height) * stride);
 
 	return 0;
 }
