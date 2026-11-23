@@ -17,6 +17,7 @@ limitations under the License.
 #include "mac_kvm.h"
 #include "mac_cursor.h"
 #include "mac_inputlock.h"
+#include "mac_sck.h"
 #include "../../meshdefines.h"
 #include "../../meshinfo.h"
 #include "../../../microstack/ILibParsers.h"
@@ -26,6 +27,7 @@ limitations under the License.
 #include <IOKit/IOKitLib.h>
 #include <IOKit/hidsystem/IOHIDLib.h>
 #include <IOKit/hidsystem/IOHIDParameter.h>
+#include <IOKit/pwr_mgt/IOPMLib.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreGraphics/CoreGraphics.h>
 #include <CoreServices/CoreServices.h>
@@ -672,17 +674,93 @@ static int kvm_session_left_console(void)
 	return(!kvm_session_on_console());
 }
 
+// Encodes and sends the tiles that changed in the frame
+static void kvm_send_tiles(void *desktop, long long desktopsize)
+{
+	int x, y;
+	long long tilesize = 0;
+	void *buf = NULL;
+	int written;
+
+	KvmDebugLog("...Enter for loop\n");
+	tile_start_pass((const unsigned char *)desktop, desktopsize);
+
+	for (y = 0; y < TILE_HEIGHT_COUNT; y++)
+	{
+		for (x = 0; x < TILE_WIDTH_COUNT; x++)
+		{
+			if (!g_shutdown && (g_pause)) { usleep(100000); g_pause = 0; } //HACK: Change this
+			if (g_shutdown) { return; }
+			if (g_tileInfo[y][x].flag != TILE_CHANGED) { continue; }
+
+			getTileAt(TILE_WIDTH * x, TILE_HEIGHT * y, &buf, &tilesize, desktop, desktopsize, y, x);
+			if (buf == NULL) { continue; }
+
+			written = g_shutdown ? 0 : KVM_SEND(buf, tilesize);
+			free(buf);
+			if (written == -1)
+			{
+				// The rest of the frame is not encoded for a connection that is gone. A user session exits and can be spawned again.
+				// A -kvmagent waits for its next connection, and sends the whole screen should this one still be there.
+				if (KVM_AGENT_FD == -1) { g_shutdown = 1; } else { tile_request_refresh(); }
+				return;
+			}
+		}
+	}
+
+	KvmDebugLog("...exit for loop\n");
+}
+
+// 1 when the display mode's pixel size is no longer the size the stream was started with, read at most once a second.
+// A size of 0 is read at once, because a new session sets it to 0 to get the size sent again.
+static int kvm_display_size_changed(CGDirectDisplayID display)
+{
+	static uint64_t lastCheck = 0;
+	uint64_t now = clock_gettime_nsec_np(CLOCK_MONOTONIC) / 1000000;
+	CGDisplayModeRef mode;
+	int changed = 0;
+
+	if (SCREEN_WIDTH != 0 && now - lastCheck < 1000) { return(0); }
+	lastCheck = now;
+
+	if ((mode = CGDisplayCopyDisplayMode(display)) != NULL)
+	{
+		changed = (int)CGDisplayModeGetPixelWidth(mode) != SCREEN_WIDTH || (int)CGDisplayModeGetPixelHeight(mode) != SCREEN_HEIGHT;
+		CGDisplayModeRelease(mode);
+	}
+	return(changed);
+}
+
+// A sleeping display gives the stream no frames, so a new session wakes it like a key press does
+static void kvm_wake_display(void)
+{
+	static IOPMAssertionID activity = kIOPMNullAssertionID;
+	IOPMAssertionDeclareUserActivity(CFSTR("MeshAgent remote desktop"), kIOPMUserActiveLocal, &activity);
+}
+
+static uint64_t g_sckRetryAtMs = 0;
+static int g_sckRetryWaitS = 0;
+
+// Sets when the stream is tried again and returns the state "failed", so CGDisplayCreateImage() captures until then.
+// After 5 s at first, then twice as long each time up to 60 s, because a start that fails can hold the frame loop for 4 s.
+static int kvm_sck_failed(const char *what)
+{
+	g_sckRetryWaitS = (g_sckRetryWaitS == 0) ? 5 : (g_sckRetryWaitS >= 30 ? 60 : g_sckRetryWaitS * 2);
+	g_sckRetryAtMs = clock_gettime_nsec_np(CLOCK_MONOTONIC) / 1000000 + (uint64_t)g_sckRetryWaitS * 1000;
+	ILIBLOGMESSAGEX("KVM: the ScreenCaptureKit stream %s, capturing with CGDisplayCreateImage(), next try in %d s\n", what, g_sckRetryWaitS);
+	return(-1);
+}
+
 void* kvm_server_mainloop(void* param)
 {
 	uint64_t frameStartMs = 0;
 	int frameTimerQueue = -1;
-	int x, y, height, width;
+	int sckState = 0; // 0 not started, 1 the stream runs, -1 it failed, so CGDisplayCreateImage() is used until the next try, -2 this macOS has no stream
+	int sckIntervalMs = 0;
 	long long desktopsize = 0;
-	long long tilesize = 0;
 	void *desktop = NULL;
 	void *buf = NULL;
 	int screen_num;
-	int written = 0;
 	struct sockaddr_un serveraddr;
 
 	if (param == NULL)
@@ -702,7 +780,7 @@ void* kvm_server_mainloop(void* param)
 			char tmp[255];
 			int tmplen = sprintf_s(tmp, sizeof(tmp), "ERROR CREATING DOMAIN SOCKET: %d\n", errno);
 			// Error creating domain socket
-			written = write(STDOUT_FILENO, tmp, tmplen);
+			write(STDOUT_FILENO, tmp, tmplen);
 			fsync(STDOUT_FILENO);
 			return(NULL);
 		}
@@ -722,26 +800,26 @@ void* kvm_server_mainloop(void* param)
 			char tmp[255];
 			int tmplen = sprintf_s(tmp, sizeof(tmp), "BIND ERROR on DOMAIN SOCKET: %d\n", errno);
 			// Error creating domain socket
-			written = write(STDOUT_FILENO, tmp, tmplen);
+			write(STDOUT_FILENO, tmp, tmplen);
 			fsync(STDOUT_FILENO);
 			return(NULL);
 		}
 
 		if (listen(KVM_Listener_FD, 1) < 0)
 		{
-			written = write(STDOUT_FILENO, "LISTEN ERROR ON DOMAIN SOCKET", 29);
+			write(STDOUT_FILENO, "LISTEN ERROR ON DOMAIN SOCKET", 29);
 			fsync(STDOUT_FILENO);
 			return(NULL);
 		}
 
-		written = write(STDOUT_FILENO, "LISTENING ON DOMAIN SOCKET\n", 27);
+		write(STDOUT_FILENO, "LISTENING ON DOMAIN SOCKET\n", 27);
 		fsync(STDOUT_FILENO);
 
 		signal(SIGTERM, ExitSink);
 
 		if ((KVM_AGENT_FD = accept(KVM_Listener_FD, NULL, NULL)) < 0)
 		{
-			written = write(STDOUT_FILENO, "ACCEPT ERROR ON DOMAIN SOCKET", 29);
+			write(STDOUT_FILENO, "ACCEPT ERROR ON DOMAIN SOCKET", 29);
 			fsync(STDOUT_FILENO);
 			return(NULL);
 		}
@@ -749,7 +827,7 @@ void* kvm_server_mainloop(void* param)
 		{
 			char tmp[255];
 			int tmpLen = sprintf_s(tmp, sizeof(tmp), "ACCEPTed new connection %d on Domain Socket\n", KVM_AGENT_FD);
-			written = write(STDOUT_FILENO, tmp, tmpLen);
+			write(STDOUT_FILENO, tmp, tmpLen);
 			fsync(STDOUT_FILENO);
 
 		}
@@ -761,6 +839,7 @@ void* kvm_server_mainloop(void* param)
 
 
 	g_shutdown = 0;
+	kvm_wake_display();
 	kvm_permission_watch_start();
 	pthread_create(&kvmthread, NULL, kvm_mainloopinput, param);
 
@@ -774,19 +853,21 @@ kvm_next_session:
 		{
 			g_resetipc = 0;
 			kvm_cursor_reset();
+			if (sckState == 1) { kvm_sck_stop(); }
+			sckState = 0;
 			close(KVM_AGENT_FD);
 
 			SCREEN_HEIGHT = SCREEN_WIDTH = 0;
 
 			char stmp[255];
 			int stmpLen = sprintf_s(stmp, sizeof(stmp), "Waiting for NEXT DomainSocket, TILE_HEIGHT_COUNT=%d, TILE_WIDTH_COUNT=%d\n", TILE_HEIGHT_COUNT, TILE_WIDTH_COUNT);
-			written = write(STDOUT_FILENO, stmp, stmpLen);
+			write(STDOUT_FILENO, stmp, stmpLen);
 			fsync(STDOUT_FILENO);
 
 			if ((KVM_AGENT_FD = accept(KVM_Listener_FD, NULL, NULL)) < 0)
 			{
 				g_shutdown = 1;
-				written = write(STDOUT_FILENO, "ACCEPT ERROR ON DOMAIN SOCKET", 29);
+				write(STDOUT_FILENO, "ACCEPT ERROR ON DOMAIN SOCKET", 29);
 				fsync(STDOUT_FILENO);
 				break;
 			}
@@ -794,8 +875,9 @@ kvm_next_session:
 			{
 				char tmp[255];
 				int tmpLen = sprintf_s(tmp, sizeof(tmp), "ACCEPTed new connection %d on Domain Socket\n", KVM_AGENT_FD);
-				written = write(STDOUT_FILENO, tmp, tmpLen);
+				write(STDOUT_FILENO, tmp, tmpLen);
 				fsync(STDOUT_FILENO);
+				kvm_wake_display();
 				kvm_permission_watch_start();
 				pthread_create(&kvmthread, NULL, kvm_mainloopinput, param);
 			}
@@ -826,9 +908,9 @@ kvm_next_session:
 
 
 		// The frame timer is the time from one frame start to the next. Without this wait the loop captured again as soon as the tiles were sent.
-		// Waits in steps of 50 ms at most, so a new timer value, a shutdown or a new connection is noticed.
+		// Waits in steps of 50 ms at most, so a new timer value, a shutdown or a new connection is noticed, and not at all while a running stream paces the frames.
 		// A kqueue timer with NOTE_CRITICAL because under launchd usleep(20000) took 66 to 95 ms and usleep(50000) 102 to 125 ms (macOS 15.8 and 26.7), this one 20.0 and 50.1 ms.
-		while (!g_shutdown && g_resetipc == 0)
+		while (sckState != 1 && !g_shutdown && g_resetipc == 0)
 		{
 			uint64_t nowMs = clock_gettime_nsec_np(CLOCK_MONOTONIC) / 1000000;
 			uint64_t timerMs = (uint64_t)(g_viewerFrameTimer > 0 ? g_viewerFrameTimer : FRAME_RATE_TIMER);
@@ -849,9 +931,48 @@ kvm_next_session:
 
 		if (screen_num == 0) { g_shutdown = 1; senddebug(-2); break; }
 		
-		if (SCREEN_NUM != screen_num)
+		// Before macOS 12.3 there is no ScreenCaptureKit, so CGDisplayCreateImage() captures every frame as before
+		if (sckState == 0 && !kvm_sck_available()) { sckState = -2; }
+
+		// The size is checked before the stream starts, and not during the fallback, which takes it from the captured image
+		if (SCREEN_NUM != screen_num || (sckState >= 0 && kvm_display_size_changed(screen_num)))
 		{
+			if (sckState == 1) { kvm_sck_stop(); sckState = 0; }
 			kvm_init();
+			continue;
+		}
+
+		// The stream paces the frames and delivers only changed ones, so a still screen costs no capture and no tile check
+		if (sckState == -1 && frameStartMs >= g_sckRetryAtMs) { sckState = 0; }
+		if (sckState == 0)
+		{
+			sckIntervalMs = g_viewerFrameTimer > 0 ? g_viewerFrameTimer : FRAME_RATE_TIMER;
+			if (kvm_sck_start(screen_num, SCREEN_WIDTH, SCREEN_HEIGHT, sckIntervalMs) != 0) { sckState = kvm_sck_failed("did not start"); }
+			else
+			{
+				if (g_sckRetryWaitS != 0) { ILIBLOGMESSAGEX("KVM: the ScreenCaptureKit stream runs again\n"); }
+				g_sckRetryWaitS = 0;
+				sckState = 1;
+			}
+		}
+		if (sckState == 1)
+		{
+			int got;
+
+			// A new timer from the viewer changes the running stream's interval, and the stream starts again only when that fails
+			int timer = g_viewerFrameTimer;
+			if (timer > 0 && timer != sckIntervalMs)
+			{
+				if (kvm_sck_set_interval(timer) != 0) { kvm_sck_stop(); sckState = 0; continue; }
+				sckIntervalMs = timer;
+			}
+
+			// A short wait, so the message queue and the pointer check above still run on a still screen
+			got = kvm_sck_take_frame((unsigned char **)&desktop, &desktopsize, 50);
+			if (got < 0) { kvm_sck_stop(); sckState = kvm_sck_failed("stopped"); continue; }
+			// A still screen gives no new frame, so a viewer's refresh and tiles whose encode failed are sent from the last one
+			if (got == 0 && tile_pass_pending()) { got = 1; }
+			if (got > 0) { kvm_send_tiles(desktop, desktopsize); }
 			continue;
 		}
 
@@ -881,55 +1002,7 @@ kvm_next_session:
 				continue;
 			}
 
-			KvmDebugLog("...Enter for loop\n");
-			tile_start_pass((const unsigned char *)desktop, desktopsize);
-
-			for (y = 0; y < TILE_HEIGHT_COUNT; y++) 
-			{
-				for (x = 0; x < TILE_WIDTH_COUNT; x++) {
-					height = TILE_HEIGHT * y;
-					width = TILE_WIDTH * x;
-					if (!g_shutdown && (g_pause)) { usleep(100000); g_pause = 0; } //HACK: Change this
-					
-					if (g_shutdown) { x = TILE_WIDTH_COUNT; y = TILE_HEIGHT_COUNT; break; }
-					
-					if (g_tileInfo[y][x].flag != TILE_CHANGED) {
-						continue;
-					}
-					
-					getTileAt(width, height, &buf, &tilesize, desktop, desktopsize, y, x);
-					
-					if (buf && !g_shutdown)
-					{	
-						// Write the reply to the pipe.
-						//KvmDebugLog("Writing to master in kvm_server_mainloop\n");
-
-						written = KVM_SEND(buf, tilesize);
-
-						//KvmDebugLog("Wrote %d bytes to master in kvm_server_mainloop\n", written);
-						if (written == -1) 
-						{ 
-							/*ILIBMESSAGE("KVMBREAK-K2\r\n");*/ 
-							if(KVM_AGENT_FD == -1)
-							{
-								// This is a User Session, so if the connection fails, we exit out... We can be spawned again later
-								g_shutdown = 1; height = SCREEN_HEIGHT; width = SCREEN_WIDTH; break;
-							}
-						}
-						//else
-						//{
-						//	char tmp[255];
-						//	int tmpLen = sprintf_s(tmp, sizeof(tmp), "KVM_SEND => tilesize: %d\n", tilesize);
-						//	written = write(STDOUT_FILENO, tmp, tmpLen);
-						//	fsync(STDOUT_FILENO);
-						//}
-						free(buf);
-
-					}
-				}
-			}
-
-			KvmDebugLog("...exit for loop\n");
+			kvm_send_tiles(desktop, desktopsize);
 
 		}
 		CGImageRelease(image);
@@ -937,6 +1010,8 @@ kvm_next_session:
 
 	// A capture fails once the session left the screen (NULL image or display 0), which ended the whole -kvmagent with exit 0 and kept the socket open, so the viewer froze.
 	// Unless SIGTERM ended it, a -kvmagent closes only the session, waits for its input thread and takes the next connection.
+	if (sckState == 1) { kvm_sck_stop(); }
+	sckState = 0;
 	if (KVM_AGENT_FD != -1 && !g_exiting)
 	{
 		shutdown(KVM_AGENT_FD, SHUT_RDWR);

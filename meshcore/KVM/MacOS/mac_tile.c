@@ -139,6 +139,7 @@ void dump32bit (const XImage * input)
 static unsigned char *refFrame = NULL;
 static size_t refFrameSize = 0;
 static int tileRefreshPending = 1;
+static int tileStalePending = 0; // 1 when an encode failed in the last pass, so its tiles are still to be sent
 
 /******************************************************************************
  * EXTERNAL FUNCTIONS
@@ -186,6 +187,12 @@ void tile_request_refresh(void)
 	__atomic_store_n(&tileRefreshPending, 1, __ATOMIC_SEQ_CST);
 }
 
+// 1 when a pass has something to send without a new frame: a viewer's refresh, or tiles whose encode failed
+int tile_pass_pending(void)
+{
+	return(tileStalePending || __atomic_load_n(&tileRefreshPending, __ATOMIC_SEQ_CST));
+}
+
 // Marks the tiles that differ from the reference frame, and copies the parts that differ, so the reference holds the frame afterwards.
 // Compared a pixel row at a time in memory order because tile by tile measured 6.2 against 1.05 ms per 1080p frame on a Cortex-A76.
 // Exact, where the hash it replaces could miss a change.
@@ -196,6 +203,8 @@ void tile_start_pass(const unsigned char *desktop, long long desktopsize)
 	size_t size = stride * (size_t)TILE_HEIGHT_COUNT * TILE_HEIGHT;
 	size_t len = (size_t)TILE_WIDTH * 3;
 	int row, col, r;
+
+	tileStalePending = 0;
 
 #ifdef KVM_ALL_TILES
 	all = 1;
@@ -351,7 +360,7 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, void *desktop,
 		for (c = col; c <= rightcol; c++)
 		{
 			g_tileInfo[r][c].flag = TILE_DONE;
-			if (*buffer == NULL) { g_tileInfo[r][c].stale = 1; }
+			if (*buffer == NULL) { g_tileInfo[r][c].stale = 1; tileStalePending = 1; }
 		}
 	}
 	

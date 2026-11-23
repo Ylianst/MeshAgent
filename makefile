@@ -213,7 +213,7 @@ PATH_RPI = ../ToolChains/arm-rpi-4.9.3-linux-gnueabihf/
 PATH_OPENWRT_X86_64 = /home/dev/openwrt/staging_dir/toolchain-x86_64_gcc-7.3.0_musl/
 PATH_RISCV64 = ../ToolChains/riscv64-linux-musl-x86_64/
 
-OBJECTS = $(patsubst %.c,%.o, $(SOURCES))
+OBJECTS = $(patsubst %.m,%.o, $(patsubst %.c,%.o, $(SOURCES)))
 
 # Compiler command name
 CC = gcc
@@ -577,7 +577,7 @@ endif
 ifeq ($(KVM),1)
 # Mesh Agent KVM, this is only included in builds that have KVM support
 LINUXKVMSOURCES = meshcore/KVM/Linux/linux_kvm.c meshcore/KVM/Linux/linux_kvm_wayland.c meshcore/KVM/Linux/linux_kvm_drm.c meshcore/KVM/Linux/linux_kvm_drm_egl.c meshcore/KVM/Linux/linux_kvm_rotated.c meshcore/KVM/Linux/linux_kvm_xkb.c meshcore/KVM/Linux/linux_events.c meshcore/KVM/Linux/linux_events_evdev.c meshcore/KVM/Linux/linux_tile.c meshcore/KVM/Linux/linux_compression.c
-MACOSKVMSOURCES = meshcore/KVM/MacOS/mac_kvm.c meshcore/KVM/MacOS/mac_events.c meshcore/KVM/MacOS/mac_tile.c meshcore/KVM/MacOS/mac_cursor.c meshcore/KVM/MacOS/mac_inputlock.c meshcore/KVM/Linux/linux_compression.c
+MACOSKVMSOURCES = meshcore/KVM/MacOS/mac_kvm.c meshcore/KVM/MacOS/mac_events.c meshcore/KVM/MacOS/mac_tile.c meshcore/KVM/MacOS/mac_cursor.c meshcore/KVM/MacOS/mac_inputlock.c meshcore/KVM/MacOS/mac_sck.m meshcore/KVM/Linux/linux_compression.c
 CFLAGS += -D_LINKVM
 DRMLIBS =
 # The DRM/Wayland header probes only make sense on Linux goals; macOS/BSD also set KVM=1 but a
@@ -850,6 +850,10 @@ vrun:all
 trace:
 	mtrace ./$(EXENAME) mtrax
 
+# Objective-C, only the macOS ScreenCaptureKit capture
+%.o: %.m
+	$(V)$(CC) $(CFLAGS) -fobjc-arc -c $< -o $@
+
 $(LIBNAME): $(OBJECTS) $(SOURCES)
 	$(CC) $(OBJECTS) -shared -o $(LIBNAME)
 
@@ -864,7 +868,7 @@ linux:
 	$(STRIP)
 
 macos:
-	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES)" CFLAGS="$(MACOSARCH) -std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA) $(CSECTIONS)" LDFLAGS="$(MACSSL) $(MACOSFLAGS) -L. -lpthread -ldl -lz -lutil -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreServices -framework CoreGraphics -framework CoreFoundation -framework Security -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA) $(MACOSLDSECTIONS)"
+	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES)" CFLAGS="$(MACOSARCH) -std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA) $(CSECTIONS)" LDFLAGS="$(MACSSL) $(MACOSFLAGS) -L. -lpthread -ldl -lz -lutil -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreServices -framework CoreGraphics -framework CoreFoundation -framework Security -framework Foundation -framework ScreenCaptureKit -framework CoreMedia -framework CoreVideo -framework Accelerate -lobjc -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA) $(MACOSLDSECTIONS)"
 	$(SYMBOLCP)
 	$(STRIP)
 

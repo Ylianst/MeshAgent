@@ -30,6 +30,7 @@ struct tileInfo_t {
 extern void tile_info_alloc(void);
 extern void tile_info_free(void);
 extern void tile_request_refresh(void);
+extern int tile_pass_pending(void);
 extern void tile_start_pass(const unsigned char *desktop, long long desktopsize);
 extern int adjust_screen_size(int pixles);
 extern int getTileAt(int x, int y, void** buffer, long long *bufferSize, void *desktop, long long desktopsize, int row, int col);
