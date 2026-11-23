@@ -18,10 +18,8 @@ limitations under the License.
 #include "meshcore/meshdefines.h"
 #include "microstack/ILibParsers.h"
 
-extern int SCREEN_NUM;
 extern int SCREEN_WIDTH;
 extern int SCREEN_HEIGHT;
-extern int SCREEN_DEPTH;
 extern int TILE_WIDTH;
 extern int TILE_HEIGHT;
 extern int TILE_WIDTH_COUNT;
@@ -29,54 +27,6 @@ extern int TILE_HEIGHT_COUNT;
 extern struct tileInfo_t **g_tileInfo;
 
 int COMPRESSION_QUALITY = 50;
-
-#if 0
-void dump32bit (const XImage * input)
-{
-    int row, col;
-    static char head[256];
-
-    static FILE *fp2 = NULL;
-    char *ptr2, *output;
-    long size;
-
-    register unsigned int
-	rm = input->red_mask,
-	gm = input->green_mask,
-	bm = input->blue_mask,
-	rs = 16,
-	gs = 8,
-	bs = 0, *p32 = (unsigned int *) input->data;
-
-
-    sprintf (head, "P6\n%d %d\n%d\n", input->width, input->height, 255);
-    size = ((input->bytes_per_line * input->height) / 4) * 3;
-    output = malloc (size);
-    ptr2 = output;
-
-    for (row = 0; row < input->height; row++) {
-		for (col = 0; col < input->width; col++) {
-			*output++ = ((*p32 & rm) >> rs);
-			*output++ = ((*p32 & gm) >> gs);
-			*output++ = ((*p32 & bm) >> bs);
-			p32++;		     // ignore alpha values
-		}
-		//
-		// eat padded bytes, for better speed we use shifting,
-		// (bytes_per_line - bits_per_pixel / 8 * width ) / 4
-		//
-		p32 += (input->bytes_per_line - (input->bits_per_pixel >> 3)
-			* input->width) >> 2;
-    }
-
-    fp2 = fopen ("/tmp/pic.rgb.pnm", "w");
-    fwrite (head, strlen (head), 1, fp2);
-
-    fwrite (ptr2, size, 1, fp2);
-    fclose (fp2);
-    free (ptr2);
-}
-#endif
 
 static unsigned char *refFrame = NULL;
 static int refWidth = 0;
@@ -384,6 +334,4 @@ void set_tile_compression(int type, int level)
 	else {
 		COMPRESSION_QUALITY = 60;
 	}
-
-	//  TODO Make sure the all the types are handled. We ignore the type variable for now.
 }

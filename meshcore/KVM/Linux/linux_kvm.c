@@ -1591,11 +1591,6 @@ void* kvm_server_mainloop_x11(void* parm)
 				AllPlanes);
 		}
 
-		//image = XGetImage(imagedisplay,
-		//		RootWindowOfScreen(DefaultScreenOfDisplay(imagedisplay))
-		//		, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, AllPlanes, ZPixmap);
-
-
 		if (image == NULL) {
 			g_shutdown = 1;
 		}
@@ -1677,10 +1672,7 @@ void* kvm_server_mainloop_x11(void* parm)
 
 					if (buf && !g_shutdown)
 					{
-						// Write the reply to the pipe.
-						//fprintf(logFile, "Writing to master in kvm_server_mainloop\n");
 						written = kvm_write_all(slave2master[1], (char*)buf, (size_t)tilesize);
-						//fprintf(logFile, "Wrote %d bytes to master in kvm_server_mainloop\n", written);
 						if (written == -1) { /*ILIBMESSAGE("KVMBREAK-K2\r\n");*/ g_shutdown = 1; height = SCREEN_HEIGHT; width = SCREEN_WIDTH; break; }
 					}
 				}
