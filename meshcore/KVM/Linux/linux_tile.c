@@ -34,28 +34,31 @@ extern int TILE_WIDTH_COUNT;
 extern int TILE_HEIGHT_COUNT;
 extern int COMPRESSION_RATIO;
 extern struct tileInfo_t **g_tileInfo;
-extern unsigned char *jpeg_buffer;
-extern int jpeg_buffer_length;
 
 int COMPRESSION_QUALITY = 50;
+
+// The JPEG of the last encoded rectangle, inside the encoder's buffer. NULL when there is none to send.
+static unsigned char *tileJpeg = NULL;
+static int tileJpegLength = 0;
 
 /******************************************************************************
  * INTERNAL FUNCTIONS
  ******************************************************************************/
 
-//This function returns 0 and jpeg_buffer != NULL if everything was good. retval = jpegsize if the captured image was too large.
+//This function returns 0 and tileJpeg != NULL if everything was good. retval = jpegsize if the captured image was too large.
 int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, const struct tileFrame_t *frame)
 {
 	// The tile grid is rounded up to whole tiles, so a rectangle on the right or bottom edge ends at the frame edge
 	if (x + captureWidth > frame->width) { captureWidth = frame->width - x; }
 	if (y + captureHeight > frame->height) { captureHeight = frame->height - y; }
 
-	write_JPEG_rect(frame->pixels + (size_t)y * frame->stride + (size_t)x * frame->bytesPerPixel, frame->stride, captureWidth, captureHeight, frame->bytesPerPixel, frame->format, COMPRESSION_QUALITY);
+	tileJpeg = write_JPEG_rect(frame->pixels + (size_t)y * frame->stride + (size_t)x * frame->bytesPerPixel, frame->stride, captureWidth, captureHeight, frame->bytesPerPixel, frame->format, COMPRESSION_QUALITY, &tileJpegLength);
 
 #if MAX_TILE_SIZE > 0
-	if (jpeg_buffer_length > MAX_TILE_SIZE)
+	if (tileJpegLength > MAX_TILE_SIZE)
 	{
-		return jpeg_buffer_length;
+		tileJpeg = NULL;
+		return tileJpegLength;
 	}
 	else 
 #endif
@@ -264,6 +267,7 @@ void tile_start_pass(const struct tileFrame_t *frame)
 }
 
 //Fetches the encoded jpeg tile at the given location. The neighboring changed tiles are coalesced to form a larger jpeg before returning.
+// *buffer is the packet inside the encoder's buffer. It holds until the next call and the caller does not free it.
 int getTileAt(int x, int y, void** buffer, long long *bufferSize, const struct tileFrame_t *frame, int row, int col)
 {
 	int rcol, r, c;
@@ -335,34 +339,31 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, const struct t
 	} while (retval != 0);
 #endif
 
-	if (jpeg_buffer != NULL) 
+	// The packet header is written into the room in front of the JPEG, so the packet is sent from the encoder's buffer without a copy
+	if (tileJpeg != NULL)
 	{
-		*bufferSize = jpeg_buffer_length + (jpeg_buffer_length > 65500 ? 16 : 8);
-		*buffer = malloc(*bufferSize);
-
-		if (jpeg_buffer_length > 65500)
+		if (tileJpegLength > 65500)
 		{
+			*buffer = tileJpeg - 16;
+			*bufferSize = tileJpegLength + 16;
 			((unsigned short*)*buffer)[0] = (unsigned short)htons((unsigned short)MNG_JUMBO);		// Write the type
 			((unsigned short*)*buffer)[1] = (unsigned short)htons((unsigned short)8);				// Write the size
-			((unsigned int*)*buffer)[1] = (unsigned int)htonl(jpeg_buffer_length + 8);				// Size of the Next Packet
+			((unsigned int*)*buffer)[1] = (unsigned int)htonl(tileJpegLength + 8);					// Size of the Next Packet
 			((unsigned short*)*buffer)[4] = (unsigned short)htons((unsigned short)MNG_KVM_PICTURE);	// Write the type
 			((unsigned short*)*buffer)[5] = 0;														// RESERVED
 			((unsigned short*)*buffer)[6] = (unsigned short)htons((unsigned short)x);				// X position
 			((unsigned short*)*buffer)[7] = (unsigned short)htons((unsigned short)y);				// Y position
-			memcpy_s((char *)(*buffer) + 16, *bufferSize -16, jpeg_buffer, jpeg_buffer_length);
 		}
 		else
 		{
+			*buffer = tileJpeg - 8;
+			*bufferSize = tileJpegLength + 8;
 			((unsigned short*)*buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_PICTURE);	// Write the type
 			((unsigned short*)*buffer)[1] = (unsigned short)htons((unsigned short)*bufferSize);		// Write the size
 			((unsigned short*)*buffer)[2] = (unsigned short)htons((unsigned short)x);				// X position
 			((unsigned short*)*buffer)[3] = (unsigned short)htons((unsigned short)y);				// Y position
-			memcpy_s((char *)(*buffer) + 8, *bufferSize -8, jpeg_buffer, jpeg_buffer_length);
 		}
-
-		free(jpeg_buffer);
-		jpeg_buffer = NULL;
-		jpeg_buffer_length = 0;
+		tileJpeg = NULL;
 	}
 
 	// The region is done for this pass either way, and a failed encode leaves it stale so the next pass sends it again

@@ -1607,7 +1607,6 @@ void* kvm_server_mainloop_x11(void* parm)
 						written = write(slave2master[1], buf, tilesize);
 						fsync(slave2master[1]);
 						//fprintf(logFile, "Wrote %d bytes to master in kvm_server_mainloop\n", written);
-						free(buf);
 						if (written == -1) { /*ILIBMESSAGE("KVMBREAK-K2\r\n");*/ g_shutdown = 1; height = SCREEN_HEIGHT; width = SCREEN_WIDTH; break; }
 					}
 				}
@@ -1645,6 +1644,7 @@ void* kvm_server_mainloop_x11(void* parm)
 	}
 
 	tile_info_free();
+	jpeg_output_free();
 	return (void*)0;
 }
 

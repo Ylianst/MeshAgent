@@ -27,13 +27,17 @@ limitations under the License.
 #include <jerror.h>
 #endif
 
-#define MAX_BUFFER  22528 // 22 KiB should be fine.
+#define MAX_BUFFER  22528 // The output buffer starts at 22 KiB and doubles when a JPEG needs more
+#define JPEG_HEADER_ROOM 16
 
 typedef void(*JPEG_error_handler)(char *msg);
 
 extern int write_JPEG_buffer (JSAMPLE * image_buffer, int image_width, int image_height, int quality);
 // Encodes a rectangle straight from the caller's pixels. stride is the byte distance between two rows, components the bytes per pixel.
-extern int write_JPEG_rect(const unsigned char *pixels, size_t stride, int image_width, int image_height, int components, J_COLOR_SPACE format, int quality);
+// Returns the JPEG and sets *length. The JPEG lies in the encoder's one output buffer and holds until the next call.
+// JPEG_HEADER_ROOM bytes in front of the JPEG are free for a packet header, so a packet needs no copy.
+extern unsigned char *write_JPEG_rect(const unsigned char *pixels, size_t stride, int image_width, int image_height, int components, J_COLOR_SPACE format, int quality, int *length);
+extern void jpeg_output_free(void);
 extern JPEG_error_handler default_JPEG_error_handler;
 
 #endif // LINUX_COMPRESSION_H_ 

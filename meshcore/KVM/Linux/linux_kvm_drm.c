@@ -283,8 +283,6 @@ extern int master2slave[2];
 extern int slave2master[2];
 extern int CURRENT_DISPLAY_ID;
 extern int g_enableEvents;
-extern unsigned char *jpeg_buffer;
-extern int jpeg_buffer_length;
 
 extern void kvm_send_error(char *msg);
 extern void kvm_send_resolution();
@@ -449,10 +447,8 @@ static int kvm_drm_send_dirty_tiles(const unsigned char *rgbBuffer, size_t rgbSi
 			{
 				if (kvm_drm_write_all(slave2master[1], (char *)tilePacket, (size_t)tilePacketSize) != 0)
 				{
-					free(tilePacket);
 					return -1;
 				}
-				free(tilePacket);
 			}
 		}
 	}
@@ -3530,12 +3526,7 @@ void *kvm_server_mainloop_drm(void *parm)
 		}
 	}
 
-	if (jpeg_buffer != NULL)
-	{
-		free(jpeg_buffer);
-		jpeg_buffer = NULL;
-		jpeg_buffer_length = 0;
-	}
+	jpeg_output_free();
 
 	if (rgbBuffer != NULL)
 	{
