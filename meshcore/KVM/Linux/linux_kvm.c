@@ -915,6 +915,9 @@ int kvm_server_inputdata(char* block, int blocklen)
 	if (blocklen < 4) return 0;
 	type = ntohs(ILibUnaligned_Read16(block));
 	size = ntohs(ILibUnaligned_Read16(block + 2));
+	// A command is at least its 4 byte header, so a smaller size can never be completed and the callers waited on it until their buffer was full.
+	// The stream cannot be read past such a header, so what is in the buffer is dropped and reading starts again with the next data.
+	if (size < 4) return blocklen;
 	if (size > blocklen) return 0;
 
 	switch (type)
@@ -1326,7 +1329,8 @@ void* kvm_server_mainloop_x11(void* parm)
 	int ptr = 0;
 	int ptr2 = 0;
 	int len = 0;
-	char pchRequest2[30000];
+	// The size field of a command is 16 bit, so this holds any command. With 30000 bytes a larger one could never complete, the buffer filled up and the KVM shut down.
+	static char pchRequest2[65536];
 	ssize_t cbBytesRead = 0;
 
 	while (!g_shutdown) 
@@ -1352,7 +1356,7 @@ void* kvm_server_mainloop_x11(void* parm)
 			if (selectResult < 0 && errno == EINTR && !g_shutdown) { continue; }
 			if (selectResult <= 0 || !FD_ISSET(master2slave[0], &readset)) { break; }
 
-			cbBytesRead = read(master2slave[0], pchRequest2 + len, 30000 - len);
+			cbBytesRead = read(master2slave[0], pchRequest2 + len, sizeof(pchRequest2) - len);
 			if (cbBytesRead == -1 || cbBytesRead == 0 || g_shutdown)
 			{
 				g_shutdown = 1;
