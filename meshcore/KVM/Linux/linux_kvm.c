@@ -1359,9 +1359,13 @@ void* kvm_server_mainloop_x11(void* parm)
 				break;
 			}
 			len += cbBytesRead;
-			ptr2 = 0;
-			while ((ptr2 = kvm_server_inputdata((char*)pchRequest2 + ptr, cbBytesRead - ptr)) != 0) { ptr += ptr2; }
-			if (ptr == len) { len = 0; ptr = 0; }
+			// Every complete command in the buffer is handled, and the start of an incomplete one moves to the front for the next read.
+			// The length passed was that of the last read, so a command split over two reads was never completed and input stopped.
+			ptr = 0;
+			while (ptr < len && (ptr2 = kvm_server_inputdata((char*)pchRequest2 + ptr, len - ptr)) != 0) { ptr += ptr2; }
+			if (ptr > 0 && ptr < len) { memmove(pchRequest2, pchRequest2 + ptr, (size_t)(len - ptr)); }
+			len -= ptr;
+			ptr = 0;
 
 			// A frame that is already due reads input once, as before, so a busy input pipe cannot hold it back
 			if (waitMs == 0) { break; }
