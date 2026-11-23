@@ -439,6 +439,9 @@ int kvm_server_inputdata(char* block, int blocklen)
 	type = ntohs(((unsigned short*)(block))[0]);
 	size = ntohs(((unsigned short*)(block))[1]);
 
+	// A command is at least its 4 byte header, so a smaller size can never be completed and the input loop waited on it until its buffer was full.
+	// The stream cannot be read past such a header, so what is in the buffer is dropped and reading starts again with the next data.
+	if (size < 4) return blocklen;
 	if (size > blocklen) return 0;
 
 	switch (type)
@@ -585,7 +588,8 @@ static int kvm_input_packet(char *block, int blocklen)
 	if (getuid() != 0 || blocklen < 4) { return(kvm_server_inputdata(block, blocklen)); }
 	type = ntohs(((unsigned short*)(block))[0]);
 	size = ntohs(((unsigned short*)(block))[1]);
-	if (size == 0 || size > blocklen) { return(0); }
+	if (size < 4) { return(blocklen); } // As in kvm_server_inputdata(), a header that can never complete drops the buffer
+	if (size > blocklen) { return(0); }
 	if (type == MNG_KVM_KEY || type == MNG_KVM_KEY_UNICODE || type == MNG_KVM_MOUSE) { return(size); }
 	return(kvm_server_inputdata(block, blocklen));
 }
@@ -595,8 +599,9 @@ void* kvm_mainloopinput(void* param)
 	int ptr = 0;
 	int ptr2 = 0;
 	int len = 0;
-	char* pchRequest2[30000];
-	int cbBytesRead = 0;
+	// The size field of a command is 16 bit, so this holds any command. It was an array of 30000 pointers, so a read went to len pointers in while the parser counted bytes.
+	static char pchRequest2[65536];
+	ssize_t cbBytesRead = 0;
 
 	if (KVM_AGENT_FD == -1)
 	{
@@ -609,8 +614,8 @@ void* kvm_mainloopinput(void* param)
 	while (!g_shutdown)
 	{
 		KvmDebugLog("About to read from IPC Socket\n");
-		cbBytesRead = read(KVM_AGENT_FD == -1 ? STDIN_FILENO: KVM_AGENT_FD, pchRequest2 + len, 30000 - len);
-		KvmDebugLog("Read %d bytes from IPC Socket\n", cbBytesRead);
+		cbBytesRead = read(KVM_AGENT_FD == -1 ? STDIN_FILENO: KVM_AGENT_FD, pchRequest2 + len, sizeof(pchRequest2) - len);
+		KvmDebugLog("Read %d bytes from IPC Socket\n", (int)cbBytesRead);
 
 		if (cbBytesRead == -1 || cbBytesRead == 0) 
 		{ 
@@ -625,15 +630,16 @@ void* kvm_mainloopinput(void* param)
 			}
 			break; 
 		}
-		len += cbBytesRead;
-		ptr2 = 0;
-		
-		KvmDebugLog("enter while\n");
-		while ((ptr2 = kvm_input_packet((char*)pchRequest2 + ptr, cbBytesRead - ptr)) != 0) { ptr += ptr2; }
-		KvmDebugLog("exited while\n");
+		len += (int)cbBytesRead;
 
-		if (ptr == len) { len = 0; ptr = 0; }
-		// TODO: else move the reminder.
+		// Every complete command in the buffer is handled, and the start of an incomplete one moves to the front for the next read.
+		// The length passed was that of the last read, so a command split over two reads was never completed and input stopped.
+		KvmDebugLog("enter while\n");
+		ptr = 0;
+		while (ptr < len && (ptr2 = kvm_input_packet(pchRequest2 + ptr, len - ptr)) != 0) { ptr += ptr2; }
+		KvmDebugLog("exited while\n");
+		if (ptr > 0 && ptr < len) { memmove(pchRequest2, pchRequest2 + ptr, (size_t)(len - ptr)); }
+		len -= ptr;
 	}
 
 	// The viewer is gone, so the local user gets the keyboard and mouse back
