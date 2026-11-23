@@ -3225,12 +3225,19 @@ void *kvm_server_mainloop_drm(void *parm)
 		fd_set errorset;
 		fd_set writeset;
 		int selectResult = 0;
+		uint64_t waitNowMs = kvm_drm_now_ms();
+		uint64_t waitIntervalMs = FRAME_RATE_TIMER < 20 ? 20 : (uint64_t)FRAME_RATE_TIMER;
+		uint64_t waitMs = 0;
+
+		// Wait until the next frame is due, not a fixed 20 ms, because the fixed wait started a 33 ms frame up to 20 ms late
+		if (waitNowMs == 0) { waitMs = 20; }
+		else if (lastFrameTimeMs != 0 && waitNowMs - lastFrameTimeMs < waitIntervalMs) { waitMs = waitIntervalMs - (waitNowMs - lastFrameTimeMs); }
 
 		FD_ZERO(&readset);
 		FD_ZERO(&errorset);
 		FD_ZERO(&writeset);
-		tv.tv_sec = 0;
-		tv.tv_usec = 20000;
+		tv.tv_sec = (time_t)(waitMs / 1000);
+		tv.tv_usec = (suseconds_t)((waitMs % 1000) * 1000);
 		FD_SET(master2slave[0], &readset);
 
 		selectResult = select(master2slave[0] + 1, &readset, &writeset, &errorset, &tv);

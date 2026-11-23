@@ -1210,10 +1210,17 @@ void kvm_server_sighandler(int signum, siginfo_t *info, void *context)
 	g_shutdown = 1;
 }
 
+static uint64_t kvm_relay_now_ms(void)
+{
+	struct timespec ts;
+	if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) { return 0; }
+	return (((uint64_t)ts.tv_sec) * 1000ULL) + (((uint64_t)ts.tv_nsec) / 1000000ULL);
+}
+
 void* kvm_server_mainloop_x11(void* parm)
 {
 	int sessionUid = (int)(intptr_t)parm;
-	int maxsleep;
+	uint64_t frameStartMs = 0;
 	Window rr, cr;
 	int rx, ry, wx, wy, rs;
 	unsigned int mr;
@@ -1303,7 +1310,45 @@ void* kvm_server_mainloop_x11(void* parm)
 
 	while (!g_shutdown) 
 	{
-		for (r = 0; r < TILE_HEIGHT_COUNT; r++) 
+		// FRAME_RATE_TIMER is the time from one frame start to the next, not a sleep after the work, so the work no longer adds to it.
+		// Input is handled while waiting, so it no longer waits for the next frame.
+		for (;;)
+		{
+			uint64_t nowMs = kvm_relay_now_ms();
+			uint64_t waitMs = 0;
+			int selectResult;
+
+			if (nowMs == 0) { waitMs = (uint64_t)FRAME_RATE_TIMER; }
+			else if (frameStartMs != 0 && nowMs - frameStartMs < (uint64_t)FRAME_RATE_TIMER) { waitMs = (uint64_t)FRAME_RATE_TIMER - (nowMs - frameStartMs); }
+
+			FD_ZERO(&readset);
+			FD_ZERO(&errorset);
+			FD_ZERO(&writeset);
+			tv.tv_sec = (time_t)(waitMs / 1000);
+			tv.tv_usec = (suseconds_t)((waitMs % 1000) * 1000);
+			FD_SET(master2slave[0], &readset);
+			selectResult = select(FD_SETSIZE, &readset, &writeset, &errorset, &tv);
+			if (selectResult < 0 && errno == EINTR && !g_shutdown) { continue; }
+			if (selectResult <= 0 || !FD_ISSET(master2slave[0], &readset)) { break; }
+
+			cbBytesRead = read(master2slave[0], pchRequest2 + len, 30000 - len);
+			if (cbBytesRead == -1 || cbBytesRead == 0 || g_shutdown)
+			{
+				g_shutdown = 1;
+				break;
+			}
+			len += cbBytesRead;
+			ptr2 = 0;
+			while ((ptr2 = kvm_server_inputdata((char*)pchRequest2 + ptr, cbBytesRead - ptr)) != 0) { ptr += ptr2; }
+			if (ptr == len) { len = 0; ptr = 0; }
+
+			// A frame that is already due reads input once, as before, so a busy input pipe cannot hold it back
+			if (waitMs == 0) { break; }
+		}
+		if (g_shutdown) { break; }
+		frameStartMs = kvm_relay_now_ms();
+
+		for (r = 0; r < TILE_HEIGHT_COUNT; r++)
 		{
 			for (c = 0; c < TILE_WIDTH_COUNT; c++) 
 			{
@@ -1341,30 +1386,6 @@ void* kvm_server_mainloop_x11(void* parm)
 			kvm_send_resolution();
 			kvm_send_display_list();
 			reset_tile_info(old);
-		}
-
-
-		FD_ZERO(&readset);
-		FD_ZERO(&errorset);
-		FD_ZERO(&writeset);
-		tv.tv_sec = 0;
-		tv.tv_usec = 0;
-		FD_SET(master2slave[0], &readset);
-		if (select(FD_SETSIZE, &readset, &writeset, &errorset, &tv) > 0 && FD_ISSET(master2slave[0], &readset))
-		{
-
-			//fprintf(logFile, "Reading from master in kvm_mainloopinput\n");
-			cbBytesRead = read(master2slave[0], pchRequest2 + len, 30000 - len);
-			//fprintf(logFile, "Read %d bytes from master in kvm_mainloopinput\n", cbBytesRead);
-			if (cbBytesRead == -1 || cbBytesRead == 0 || g_shutdown)
-			{
-				g_shutdown = 1;
-				break;
-			}
-			len += cbBytesRead;
-			ptr2 = 0;
-			while ((ptr2 = kvm_server_inputdata((char*)pchRequest2 + ptr, cbBytesRead - ptr)) != 0) { ptr += ptr2; }
-			if (ptr == len) { len = 0; ptr = 0; }
 		}
 
 		if (cursordisplay == NULL)
@@ -1623,24 +1644,6 @@ void* kvm_server_mainloop_x11(void* parm)
 			x11_exports->XCloseDisplay(imagedisplay);
 			imagedisplay = NULL;
 		}
-
-		// We can't go full speed here, we need to slow this down.
-		height = FRAME_RATE_TIMER;
-		while (!g_shutdown && height > 0)
-		{
-			if (height > 50)
-			{
-				height -= 50;
-				maxsleep = 50000;
-			}
-			else 
-			{
-				maxsleep = height * 1000;
-				height = 0;
-			}
-
-			usleep(maxsleep);
-		}
 	}
 
 	if (desktop != NULL) { free(desktop); desktop = NULL; }
@@ -1739,13 +1742,6 @@ static int g_kvmForkRetryDispatch = 0;
 // Implemented in agentcore.c: re-derive consoleUid()/X env and re-fork the capture child (reuses the
 // same path as a live user-sessions 'changed' event).
 extern void ILibDuktape_MeshAgent_RemoteDesktop_KvmAutoRecover(void *reservedPtrs);
-
-static uint64_t kvm_relay_now_ms(void)
-{
-	struct timespec ts;
-	if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) { return 0; }
-	return (((uint64_t)ts.tv_sec) * 1000ULL) + (((uint64_t)ts.tv_nsec) / 1000000ULL);
-}
 
 typedef struct kvm_child_reaper
 {
