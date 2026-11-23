@@ -31,6 +31,7 @@ limitations under the License.
 
 #include <sys/ipc.h>
 #include <sys/shm.h>
+#include <poll.h>
 #include <X11/extensions/XShm.h>
 #include <X11/extensions/Xrandr.h>
 #include <X11/keysym.h>
@@ -1199,6 +1200,43 @@ static uint64_t kvm_relay_now_ms(void)
 	return (((uint64_t)ts.tv_sec) * 1000ULL) + (((uint64_t)ts.tv_nsec) / 1000000ULL);
 }
 
+// A write() to the pipe can take only a part of a large picture, or be interrupted, and the rest of the picture was lost then
+static int kvm_write_all(int fd, const char *buffer, size_t len)
+{
+	while (len > 0)
+	{
+		ssize_t n = write(fd, buffer, len);
+		if (n < 0)
+		{
+			if (g_shutdown) { return -1; }
+			if (errno == EINTR) { continue; }
+			if (errno == EAGAIN || errno == EWOULDBLOCK)
+			{
+				struct pollfd pfd;
+				pfd.fd = fd;
+				pfd.events = POLLOUT;
+				pfd.revents = 0;
+				poll(&pfd, 1, 1000);
+				continue;
+			}
+			return -1;
+		}
+		buffer += n;
+		len -= (size_t)n;
+	}
+	return 0;
+}
+
+// Detaches and frees the shared memory image of the capture
+static void kvm_x11_image_release(Display *display, XImage **image, XShmSegmentInfo *shminfo)
+{
+	if (*image == NULL) { return; }
+	x11ext_exports->XShmDetach(display, shminfo);
+	XDestroyImage(*image);
+	*image = NULL;
+	shmdt(shminfo->shmaddr);
+}
+
 void* kvm_server_mainloop_x11(void* parm)
 {
 	int sessionUid = (int)(intptr_t)parm;
@@ -1334,7 +1372,20 @@ void* kvm_server_mainloop_x11(void* parm)
 		CheckDesktopSwitch(1);
 		//fprintf(logFile, "After CheckDesktopSwitch.\n"); fflush(logFile);
 
-		imagedisplay = x11_exports->XOpenDisplay(CURRENT_XDISPLAY);
+		// The capture connection is kept between frames, where a new one was opened for every frame.
+		// DisplayWidth() and DisplayHeight() give the size at connect time, so the root window is asked, and after a resize the connection is opened again.
+		if (imagedisplay != NULL)
+		{
+			XWindowAttributes rootAttr;
+			if (x11_exports->XGetWindowAttributes(imagedisplay, RootWindowOfScreen(ScreenOfDisplay(imagedisplay, CURRENT_DISPLAY_ID)), &rootAttr) == 0 ||
+				rootAttr.width != DisplayWidth(imagedisplay, CURRENT_DISPLAY_ID) || rootAttr.height != DisplayHeight(imagedisplay, CURRENT_DISPLAY_ID))
+			{
+				kvm_x11_image_release(imagedisplay, &image, &shminfo);
+				x11_exports->XCloseDisplay(imagedisplay);
+				imagedisplay = NULL;
+			}
+		}
+		if (imagedisplay == NULL) { imagedisplay = x11_exports->XOpenDisplay(CURRENT_XDISPLAY); }
 		if (imagedisplay == NULL) { g_shutdown = 1; break; }
 
 		if (DisplayWidth(imagedisplay, CURRENT_DISPLAY_ID) != VSCREEN_WIDTH ||
@@ -1489,28 +1540,52 @@ void* kvm_server_mainloop_x11(void* parm)
 				((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
 				buffer[4] = (char)curcursor;																// Cursor Type
 				written = write(slave2master[1], buffer, 5);
-				fsync(slave2master[1]);
 				sentCursor = curcursor;
 			}
 		}
 
-		image = x11ext_exports->XShmCreateImage(imagedisplay,
-			DefaultVisual(imagedisplay, SCREEN_NUM), // Use a correct visual. Omitted for brevity     
-			SCREEN_DEPTH,
-			ZPixmap, NULL, &shminfo, SCREEN_WIDTH, SCREEN_HEIGHT);
-		shminfo.shmid = shmget(IPC_PRIVATE,
-			image->bytes_per_line * image->height,
-			IPC_CREAT | 0777);
-		shminfo.shmaddr = image->data = shmat(shminfo.shmid, 0, 0);
-		shminfo.readOnly = False;
-		x11ext_exports->XShmAttach(imagedisplay, &shminfo);
-		
-		x11ext_exports->XShmGetImage(imagedisplay,
-			RootWindowOfScreen(ScreenOfDisplay(imagedisplay, CURRENT_DISPLAY_ID)),
-			image,
-			CAPTURE_X,
-			CAPTURE_Y,
-			AllPlanes);
+		// The shared memory image is kept too, and made again when the captured size or depth changes
+		if (image != NULL && (image->width != SCREEN_WIDTH || image->height != SCREEN_HEIGHT || image->depth != SCREEN_DEPTH))
+		{
+			kvm_x11_image_release(imagedisplay, &image, &shminfo);
+		}
+		if (image == NULL)
+		{
+			image = x11ext_exports->XShmCreateImage(imagedisplay,
+				DefaultVisual(imagedisplay, SCREEN_NUM), // Use a correct visual. Omitted for brevity     
+				SCREEN_DEPTH,
+				ZPixmap, NULL, &shminfo, SCREEN_WIDTH, SCREEN_HEIGHT);
+			if (image != NULL)
+			{
+				shminfo.shmid = shmget(IPC_PRIVATE, image->bytes_per_line * image->height, IPC_CREAT | 0777);
+				shminfo.shmaddr = image->data = (shminfo.shmid < 0) ? (char*)-1 : (char*)shmat(shminfo.shmid, 0, 0);
+				shminfo.readOnly = False;
+				if (image->data == (char*)-1)
+				{
+					if (shminfo.shmid >= 0) { shmctl(shminfo.shmid, IPC_RMID, 0); }
+					image->data = NULL;
+					XDestroyImage(image);
+					image = NULL;
+				}
+				else
+				{
+					// Marked for removal once the server has attached it, so the segment goes away with its last user, also when this process dies
+					x11ext_exports->XShmAttach(imagedisplay, &shminfo);
+					x11_exports->XSync(imagedisplay, 0);
+					shmctl(shminfo.shmid, IPC_RMID, 0);
+				}
+			}
+		}
+
+		if (image != NULL)
+		{
+			x11ext_exports->XShmGetImage(imagedisplay,
+				RootWindowOfScreen(ScreenOfDisplay(imagedisplay, CURRENT_DISPLAY_ID)),
+				image,
+				CAPTURE_X,
+				CAPTURE_Y,
+				AllPlanes);
+		}
 
 		//image = XGetImage(imagedisplay,
 		//		RootWindowOfScreen(DefaultScreenOfDisplay(imagedisplay))
@@ -1565,7 +1640,6 @@ void* kvm_server_mainloop_x11(void* parm)
 						((unsigned short*)tmpbuffer)[1] = (unsigned short)htons((unsigned short)5);						// Write the size
 						tmpbuffer[4] = (char)KVM_MouseCursor_NONE;														// Cursor Type
 						written = write(slave2master[1], tmpbuffer, 5);
-						fsync(slave2master[1]);
 						sentCursor = KVM_MouseCursor_NONE;
 					}
 					x11_exports->XFree(cimage);
@@ -1601,25 +1675,20 @@ void* kvm_server_mainloop_x11(void* parm)
 					{
 						// Write the reply to the pipe.
 						//fprintf(logFile, "Writing to master in kvm_server_mainloop\n");
-						written = write(slave2master[1], buf, tilesize);
-						fsync(slave2master[1]);
+						written = kvm_write_all(slave2master[1], (char*)buf, (size_t)tilesize);
 						//fprintf(logFile, "Wrote %d bytes to master in kvm_server_mainloop\n", written);
 						if (written == -1) { /*ILIBMESSAGE("KVMBREAK-K2\r\n");*/ g_shutdown = 1; height = SCREEN_HEIGHT; width = SCREEN_WIDTH; break; }
 					}
 				}
 			}
 		}
-		
-		x11ext_exports->XShmDetach(imagedisplay, &shminfo);
-		XDestroyImage(image); image = NULL;
-		shmdt(shminfo.shmaddr);
-		shmctl(shminfo.shmid, IPC_RMID, 0);
-		
-		if (imagedisplay != NULL) 
-		{
-			x11_exports->XCloseDisplay(imagedisplay);
-			imagedisplay = NULL;
-		}
+	}
+
+	if (imagedisplay != NULL)
+	{
+		kvm_x11_image_release(imagedisplay, &image, &shminfo);
+		x11_exports->XCloseDisplay(imagedisplay);
+		imagedisplay = NULL;
 	}
 
 	if (desktop != NULL) { free(desktop); desktop = NULL; }
