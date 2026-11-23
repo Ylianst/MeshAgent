@@ -17,17 +17,18 @@ limitations under the License.
 #include "linux_compression.h"
 #include "../../../microstack/ILibParsers.h"
 
-#if defined(JPEGMAXBUF)
-	#define MAX_TILE_SIZE JPEGMAXBUF
-#else
-	#define MAX_TILE_SIZE 65500
-#endif
 #define TILE_JPEG_OPTIMIZE_MAX_AREA (128 * 128)
 
+// Filled by write_JPEG_buffer() only, with a copy that the caller frees
 unsigned char *jpeg_buffer = NULL;
 int jpeg_buffer_length = 0;
 char jpegLastError[JMSG_LENGTH_MAX];
 JPEG_error_handler default_JPEG_error_handler = NULL;
+
+// One output buffer for all rectangles. It only grows, and it has room for a packet header in front of the JPEG.
+static unsigned char *jpegOut = NULL;
+static size_t jpegOutSize = 0;
+static int jpegOutLength = 0;
 
 void jpeg_error_handler(j_common_ptr ptr)
 {
@@ -40,70 +41,62 @@ void jpeg_error_handler(j_common_ptr ptr)
 
 void init_destination(j_compress_ptr cinfo)
 {
-	JOCTET * next_output_byte;
-	if (jpeg_buffer != NULL) { free(jpeg_buffer); }
-	if ((jpeg_buffer = malloc(MAX_BUFFER)) == NULL) { ILIBCRITICALEXIT(254); }
-	jpeg_buffer_length = 0;
-	next_output_byte = jpeg_buffer;
-	cinfo->dest->next_output_byte = next_output_byte;
-	cinfo->dest->free_in_buffer = MAX_BUFFER;
+	if (jpegOut == NULL)
+	{
+		jpegOutSize = JPEG_HEADER_ROOM + MAX_BUFFER;
+		if ((jpegOut = (unsigned char *)malloc(jpegOutSize)) == NULL) { ILIBCRITICALEXIT(254); }
+	}
+	jpegOutLength = 0;
+	cinfo->dest->next_output_byte = jpegOut + JPEG_HEADER_ROOM;
+	cinfo->dest->free_in_buffer = jpegOutSize - JPEG_HEADER_ROOM;
 }
 
 boolean empty_output_buffer(j_compress_ptr cinfo)
 {
-	JOCTET * next_output_byte;
+	// libjpeg calls this with the whole buffer used, whatever free_in_buffer says
+	size_t used = jpegOutSize;
 
-	jpeg_buffer_length += MAX_BUFFER;
-	if ((jpeg_buffer = (unsigned char *)realloc(jpeg_buffer, jpeg_buffer_length + MAX_BUFFER)) == NULL) { ILIBCRITICALEXIT(254); }
-	next_output_byte = jpeg_buffer + jpeg_buffer_length;
-	cinfo->dest->next_output_byte = next_output_byte;
-	cinfo->dest->free_in_buffer = MAX_BUFFER;
+	if ((jpegOut = (unsigned char *)realloc(jpegOut, jpegOutSize * 2)) == NULL) { ILIBCRITICALEXIT(254); }
+	jpegOutSize *= 2;
+	cinfo->dest->next_output_byte = jpegOut + used;
+	cinfo->dest->free_in_buffer = jpegOutSize - used;
 
-#if MAX_TILE_SIZE > 0
-	if ( jpeg_buffer_length > MAX_TILE_SIZE) return FALSE;
-#endif
 	return TRUE;
 }
 
 void term_destination (j_compress_ptr cinfo)
 {
-	int remaining_buff_length = MAX_BUFFER - cinfo->dest->free_in_buffer;
-
-	jpeg_buffer_length += remaining_buff_length;
-
-#if MAX_TILE_SIZE > 0
-	if (jpeg_buffer_length > MAX_TILE_SIZE)
-	{
-		free(jpeg_buffer);
-		jpeg_buffer = NULL;
-	}
-	else 
-#endif
-	{
-		if ((jpeg_buffer = (unsigned char *)realloc(jpeg_buffer, jpeg_buffer_length)) == NULL) { ILIBCRITICALEXIT(254); }
-	}
+	jpegOutLength = (int)(jpegOutSize - JPEG_HEADER_ROOM - cinfo->dest->free_in_buffer);
 }
 
-int write_JPEG_buffer(JSAMPLE * image_buffer, int image_width, int image_height, int quality)
+void jpeg_output_free(void)
+{
+	free(jpegOut);
+	jpegOut = NULL;
+	jpegOutSize = 0;
+	jpegOutLength = 0;
+}
+
+unsigned char *write_JPEG_rect(const unsigned char *pixels, size_t stride, int image_width, int image_height, int components, J_COLOR_SPACE format, int quality, int *length)
 {
 	struct jpeg_compress_struct cinfo;
 	struct jpeg_error_mgr jerr;
+	struct jpeg_destination_mgr dest;
 	JSAMPROW row_pointer[1];
-	int row_stride;
 
 	cinfo.err = jpeg_std_error(&jerr);
 	if (default_JPEG_error_handler != NULL) { jerr.error_exit = jpeg_error_handler; }
 
 	jpeg_create_compress(&cinfo);
-	cinfo.dest = (struct jpeg_destination_mgr *) malloc(sizeof(struct jpeg_destination_mgr));
-	cinfo.dest->init_destination = &init_destination;
-	cinfo.dest->empty_output_buffer = &empty_output_buffer;
-	cinfo.dest->term_destination = &term_destination;
+	dest.init_destination = &init_destination;
+	dest.empty_output_buffer = &empty_output_buffer;
+	dest.term_destination = &term_destination;
+	cinfo.dest = &dest;
 
 	cinfo.image_width = image_width;
 	cinfo.image_height = image_height;
-	cinfo.input_components = 3;
-	cinfo.in_color_space = JCS_RGB;
+	cinfo.input_components = components;
+	cinfo.in_color_space = format;
 	jpeg_set_defaults(&cinfo);
 
 	// 4:4:4, 1x1 (no subsampling)
@@ -116,25 +109,31 @@ int write_JPEG_buffer(JSAMPLE * image_buffer, int image_width, int image_height,
 	cinfo.comp_info[2].h_samp_factor = 1;
 
 	jpeg_set_quality(&cinfo, quality, TRUE);
-#if MAX_TILE_SIZE == 0
 	// Huffman tables built for each rectangle up to 128x128, where the standard tables are a large share of a small JPEG. Larger rectangles gain less for the second pass over the data.
-	// Not with a tile size limit, because optimized tables write all output in jpeg_finish_compress(), which cannot suspend, and a suspension there ends in exit().
 	if ((long)image_width * image_height <= TILE_JPEG_OPTIMIZE_MAX_AREA) { cinfo.optimize_coding = TRUE; }
-#endif
 	jpeg_start_compress(&cinfo, TRUE);
-	row_stride = image_width * 3;
 
+	// The rows are read where they lie in the caller's frame, so no copy of the rectangle is made
 	while (cinfo.next_scanline < cinfo.image_height)
 	{
-		row_pointer[0] = &image_buffer[cinfo.next_scanline * row_stride];
+		row_pointer[0] = (JSAMPROW)(pixels + (size_t)cinfo.next_scanline * stride);
 		(void)jpeg_write_scanlines(&cinfo, row_pointer, 1);
 	}
 
 	jpeg_finish_compress(&cinfo);
-
-	free(cinfo.dest);
-	cinfo.dest = NULL;
 	jpeg_destroy_compress(&cinfo);
 
+	*length = jpegOutLength;
+	return jpegOut + JPEG_HEADER_ROOM;
+}
+
+// The RGB24 entry point with the older contract, which macOS uses: the JPEG is a copy in jpeg_buffer that the caller frees
+int write_JPEG_buffer(JSAMPLE * image_buffer, int image_width, int image_height, int quality)
+{
+	unsigned char *jpeg = write_JPEG_rect(image_buffer, (size_t)image_width * 3, image_width, image_height, 3, JCS_RGB, quality, &jpeg_buffer_length);
+
+	if (jpeg_buffer != NULL) { free(jpeg_buffer); jpeg_buffer = NULL; }
+	if ((jpeg_buffer = (unsigned char *)malloc(jpeg_buffer_length)) == NULL) { ILIBCRITICALEXIT(254); }
+	memcpy(jpeg_buffer, jpeg, jpeg_buffer_length);
 	return 0;
 }
