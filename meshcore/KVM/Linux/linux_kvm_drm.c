@@ -283,7 +283,6 @@ extern int master2slave[2];
 extern int slave2master[2];
 extern int CURRENT_DISPLAY_ID;
 extern int g_enableEvents;
-extern void *tilebuffer;
 extern unsigned char *jpeg_buffer;
 extern int jpeg_buffer_length;
 
@@ -408,68 +407,27 @@ static void kvm_drm_process_pending_input(void)
 	}
 }
 
-static int kvm_drm_send_dirty_tiles(const unsigned char *rgbBuffer, size_t rgbSize, char **desktopBuffer, long long *desktopBufferSize)
+static int kvm_drm_send_dirty_tiles(const unsigned char *rgbBuffer, size_t rgbSize)
 {
 	int x = 0;
 	int y = 0;
 	int width = 0;
 	int height = 0;
-	int paddedWidth = 0;
-	int paddedHeight = 0;
-	size_t rowBytes = 0;
-	size_t rowPaddedBytes = 0;
-	size_t requiredSize = 0;
+	struct tileFrame_t frame;
 
 	if (SCREEN_WIDTH <= 0 || SCREEN_HEIGHT <= 0 || TILE_WIDTH_COUNT <= 0 || TILE_HEIGHT_COUNT <= 0)
 	{
 		return 0;
 	}
 
-	rowBytes = ((size_t)SCREEN_WIDTH) * 3u;
-	requiredSize = ((size_t)SCREEN_WIDTH) * ((size_t)SCREEN_HEIGHT) * 3u;
-	if (rgbBuffer == NULL || rgbSize < requiredSize)
+	if (rgbBuffer == NULL || rgbSize < ((size_t)SCREEN_WIDTH) * ((size_t)SCREEN_HEIGHT) * 3u)
 	{
 		return -1;
 	}
 
-	paddedWidth = adjust_screen_size(SCREEN_WIDTH);
-	paddedHeight = adjust_screen_size(SCREEN_HEIGHT);
-	rowPaddedBytes = ((size_t)paddedWidth) * 3u;
-	requiredSize = ((size_t)paddedWidth) * ((size_t)paddedHeight) * 3u;
-
-	if (*desktopBufferSize != (long long)requiredSize)
-	{
-		char *tmp = NULL;
-		if (*desktopBuffer != NULL)
-		{
-			free(*desktopBuffer);
-			*desktopBuffer = NULL;
-		}
-		tmp = (char *)malloc(requiredSize);
-		if (tmp == NULL) ILIBCRITICALEXIT(254);
-		*desktopBuffer = tmp;
-		*desktopBufferSize = (long long)requiredSize;
-	}
-
-	for (y = 0; y < SCREEN_HEIGHT; ++y)
-	{
-		char *dst = *desktopBuffer + (((size_t)y) * rowPaddedBytes);
-		const char *src = (const char *)rgbBuffer + (((size_t)y) * rowBytes);
-		memcpy_s(dst, rowPaddedBytes, src, rowBytes);
-		if (rowPaddedBytes > rowBytes)
-		{
-			memset(dst + rowBytes, 0, rowPaddedBytes - rowBytes);
-		}
-	}
-
-	if (paddedHeight > SCREEN_HEIGHT)
-	{
-		char *dst = *desktopBuffer + (((size_t)SCREEN_HEIGHT) * rowPaddedBytes);
-		size_t bytes = ((size_t)(paddedHeight - SCREEN_HEIGHT)) * rowPaddedBytes;
-		memset(dst, 0, bytes);
-	}
-
-	tile_start_pass(*desktopBuffer, *desktopBufferSize);
+	// The composed frame is compared and encoded where it lies, without a copy padded to whole tiles
+	tile_frame_from_rgb24(&frame, rgbBuffer, ((size_t)SCREEN_WIDTH) * 3u, SCREEN_WIDTH, SCREEN_HEIGHT);
+	tile_start_pass(&frame);
 
 	for (y = 0; y < TILE_HEIGHT_COUNT; ++y)
 	{
@@ -486,7 +444,7 @@ static int kvm_drm_send_dirty_tiles(const unsigned char *rgbBuffer, size_t rgbSi
 				continue;
 			}
 
-			getTileAt(width, height, &tilePacket, &tilePacketSize, *desktopBuffer, *desktopBufferSize, y, x);
+			getTileAt(width, height, &tilePacket, &tilePacketSize, &frame, y, x);
 			if (tilePacket != NULL && tilePacketSize > 0)
 			{
 				if (kvm_drm_write_all(slave2master[1], (char *)tilePacket, (size_t)tilePacketSize) != 0)
@@ -3113,8 +3071,6 @@ void *kvm_server_mainloop_drm(void *parm)
 	size_t rgbRotatedBufferSize = 0;
 	unsigned char *desktopRgbBuffer = NULL;
 	size_t desktopRgbBufferSize = 0;
-	char *desktopBuffer = NULL;
-	long long desktopBufferSize = 0;
 	uint32_t lastLoggedFbId = 0;
 	uint32_t lastLoggedWidth = 0;
 	uint32_t lastLoggedHeight = 0;
@@ -3568,18 +3524,12 @@ void *kvm_server_mainloop_drm(void *parm)
 			forceTileReset = 0;
 		}
 
-		if (kvm_drm_send_dirty_tiles(desktopRgbBuffer, desktopRgbSize, &desktopBuffer, &desktopBufferSize) != 0)
+		if (kvm_drm_send_dirty_tiles(desktopRgbBuffer, desktopRgbSize) != 0)
 		{
 			g_shutdown = 1;
 		}
 	}
 
-	if (desktopBuffer != NULL)
-	{
-		free(desktopBuffer);
-		desktopBuffer = NULL;
-		desktopBufferSize = 0;
-	}
 	if (jpeg_buffer != NULL)
 	{
 		free(jpeg_buffer);
@@ -3610,11 +3560,6 @@ void *kvm_server_mainloop_drm(void *parm)
 	master2slave[0] = 0;
 
 	tile_info_free();
-	if (tilebuffer != NULL)
-	{
-		free(tilebuffer);
-		tilebuffer = NULL;
-	}
 	kvm_events_evdev_shutdown();
 	g_enableEvents = 0;
 	g_kvmBackendDRM = 0;

@@ -32,6 +32,8 @@ limitations under the License.
 typedef void(*JPEG_error_handler)(char *msg);
 
 extern int write_JPEG_buffer (JSAMPLE * image_buffer, int image_width, int image_height, int quality);
+// Encodes a rectangle straight from the caller's pixels. stride is the byte distance between two rows, components the bytes per pixel.
+extern int write_JPEG_rect(const unsigned char *pixels, size_t stride, int image_width, int image_height, int components, J_COLOR_SPACE format, int quality);
 extern JPEG_error_handler default_JPEG_error_handler;
 
 #endif // LINUX_COMPRESSION_H_ 

@@ -171,7 +171,6 @@ static void kvm_slave_send(const void *buffer, size_t len)
 int remoteMouseX = 0, remoteMouseY = 0;
 static int remoteMouseInjected = 0;	// Set when this pass injected a mouse event, so the local-move check skips a pointer the X server may not have moved yet
 
-extern void* tilebuffer;
 extern char **environ;
 struct timespec inputtime;
 uint32_t inputcounter = 0;
@@ -1218,6 +1217,7 @@ void* kvm_server_mainloop_x11(void* parm)
 	long long tilesize = 0;
 
 	void *desktop = NULL;
+	struct tileFrame_t frame;
 	XImage *image = NULL;
 	eventdisplay = NULL;
 	Display *imagedisplay = NULL, *cursordisplay = NULL;
@@ -1579,8 +1579,13 @@ void* kvm_server_mainloop_x11(void* parm)
 					sentHideCursor = 0;
 				}
 			}
-			getScreenBuffer((char **)&desktop, &desktopsize, image);
-			tile_start_pass(desktop, desktopsize);
+			// A 32 bpp capture is compared and encoded where it lies, every other depth goes through the RGB24 copy
+			if (tile_frame_from_ximage(&frame, image) == 0)
+			{
+				getScreenBuffer((char **)&desktop, &desktopsize, image);
+				tile_frame_from_rgb24(&frame, (const unsigned char *)desktop, (size_t)adjust_screen_size(SCREEN_WIDTH) * 3, image->width, image->height);
+			}
+			tile_start_pass(&frame);
 
 			for (y = 0; y < TILE_HEIGHT_COUNT; y++) {
 				for (x = 0; x < TILE_WIDTH_COUNT; x++) {
@@ -1593,7 +1598,7 @@ void* kvm_server_mainloop_x11(void* parm)
 						continue;
 					}
 
-					getTileAt(width, height, &buf, &tilesize, desktop, desktopsize, y, x);
+					getTileAt(width, height, &buf, &tilesize, &frame, y, x);
 
 					if (buf && !g_shutdown)
 					{
@@ -1640,7 +1645,6 @@ void* kvm_server_mainloop_x11(void* parm)
 	}
 
 	tile_info_free();
-	if(tilebuffer != NULL) { free(tilebuffer); tilebuffer = NULL; }
 	return (void*)0;
 }
 

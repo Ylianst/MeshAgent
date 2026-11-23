@@ -84,12 +84,11 @@ void term_destination (j_compress_ptr cinfo)
 	}
 }
 
-int write_JPEG_buffer(JSAMPLE * image_buffer, int image_width, int image_height, int quality)
+int write_JPEG_rect(const unsigned char *pixels, size_t stride, int image_width, int image_height, int components, J_COLOR_SPACE format, int quality)
 {
 	struct jpeg_compress_struct cinfo;
 	struct jpeg_error_mgr jerr;
 	JSAMPROW row_pointer[1];
-	int row_stride;
 
 	cinfo.err = jpeg_std_error(&jerr);
 	if (default_JPEG_error_handler != NULL) { jerr.error_exit = jpeg_error_handler; }
@@ -102,8 +101,8 @@ int write_JPEG_buffer(JSAMPLE * image_buffer, int image_width, int image_height,
 
 	cinfo.image_width = image_width;
 	cinfo.image_height = image_height;
-	cinfo.input_components = 3;
-	cinfo.in_color_space = JCS_RGB;
+	cinfo.input_components = components;
+	cinfo.in_color_space = format;
 	jpeg_set_defaults(&cinfo);
 
 	// 4:4:4, 1x1 (no subsampling)
@@ -122,11 +121,11 @@ int write_JPEG_buffer(JSAMPLE * image_buffer, int image_width, int image_height,
 	if ((long)image_width * image_height <= TILE_JPEG_OPTIMIZE_MAX_AREA) { cinfo.optimize_coding = TRUE; }
 #endif
 	jpeg_start_compress(&cinfo, TRUE);
-	row_stride = image_width * 3;
 
+	// The rows are read where they lie in the caller's frame, so no copy of the rectangle is made
 	while (cinfo.next_scanline < cinfo.image_height)
 	{
-		row_pointer[0] = &image_buffer[cinfo.next_scanline * row_stride];
+		row_pointer[0] = (JSAMPROW)(pixels + (size_t)cinfo.next_scanline * stride);
 		(void)jpeg_write_scanlines(&cinfo, row_pointer, 1);
 	}
 
@@ -137,4 +136,10 @@ int write_JPEG_buffer(JSAMPLE * image_buffer, int image_width, int image_height,
 	jpeg_destroy_compress(&cinfo);
 
 	return 0;
+}
+
+// The RGB24 entry point, for a rectangle that is already packed
+int write_JPEG_buffer(JSAMPLE * image_buffer, int image_width, int image_height, int quality)
+{
+	return write_JPEG_rect(image_buffer, (size_t)image_width * 3, image_width, image_height, 3, JCS_RGB, quality);
 }
