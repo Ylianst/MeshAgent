@@ -410,8 +410,6 @@ static void kvm_drm_process_pending_input(void)
 
 static int kvm_drm_send_dirty_tiles(const unsigned char *rgbBuffer, size_t rgbSize, char **desktopBuffer, long long *desktopBufferSize)
 {
-	int r = 0;
-	int c = 0;
 	int x = 0;
 	int y = 0;
 	int width = 0;
@@ -471,16 +469,7 @@ static int kvm_drm_send_dirty_tiles(const unsigned char *rgbBuffer, size_t rgbSi
 		memset(dst, 0, bytes);
 	}
 
-	for (r = 0; r < TILE_HEIGHT_COUNT; ++r)
-	{
-		for (c = 0; c < TILE_WIDTH_COUNT; ++c)
-		{
-			g_tileInfo[r][c].flag = TILE_TODO;
-#ifdef KVM_ALL_TILES
-			g_tileInfo[r][c].crc = 0xFF;
-#endif
-		}
-	}
+	tile_start_pass(*desktopBuffer, *desktopBufferSize);
 
 	for (y = 0; y < TILE_HEIGHT_COUNT; ++y)
 	{
@@ -492,7 +481,7 @@ static int kvm_drm_send_dirty_tiles(const unsigned char *rgbBuffer, size_t rgbSi
 			height = TILE_HEIGHT * y;
 			width = TILE_WIDTH * x;
 
-			if (g_tileInfo[y][x].flag == TILE_SENT || g_tileInfo[y][x].flag == TILE_DONT_SEND)
+			if (g_tileInfo[y][x].flag != TILE_CHANGED)
 			{
 				continue;
 			}
@@ -3041,7 +3030,6 @@ void *kvm_server_mainloop_drm(void *parm)
 {
 	int sessionUid = (int)(intptr_t)parm;
 	ssize_t cbBytesRead = 0;
-	int r = 0;
 	struct sigaction action;
 	int displayListSent = 0;
 	uint64_t lastFrameTimeMs = 0;
@@ -3558,11 +3546,10 @@ void *kvm_server_mainloop_drm(void *parm)
 
 		if (SCREEN_WIDTH != reportedScreenWidth || SCREEN_HEIGHT != reportedScreenHeight || SCREEN_SEL != reportedScreenSel)
 		{
-			int oldTileHeightCount = TILE_HEIGHT_COUNT;
 			kvm_drm_update_tile_geometry();
 			kvm_send_resolution();
 			kvm_send_display();
-			reset_tile_info(oldTileHeightCount);
+			tile_info_alloc();
 			forceTileReset = 0;
 			reportedScreenWidth = SCREEN_WIDTH;
 			reportedScreenHeight = SCREEN_HEIGHT;
@@ -3575,14 +3562,9 @@ void *kvm_server_mainloop_drm(void *parm)
 			displayListSent = 1;
 		}
 
-		if (g_tileInfo == NULL)
+		if (g_tileInfo == NULL || forceTileReset)
 		{
-			reset_tile_info(0);
-			forceTileReset = 0;
-		}
-		else if (forceTileReset)
-		{
-			reset_tile_info(TILE_HEIGHT_COUNT);
+			tile_info_alloc();
 			forceTileReset = 0;
 		}
 
@@ -3627,15 +3609,7 @@ void *kvm_server_mainloop_drm(void *parm)
 	slave2master[1] = 0;
 	master2slave[0] = 0;
 
-	if (g_tileInfo != NULL)
-	{
-		for (r = 0; r < TILE_HEIGHT_COUNT; r++)
-		{
-			free(g_tileInfo[r]);
-		}
-		free(g_tileInfo);
-		g_tileInfo = NULL;
-	}
+	tile_info_free();
 	if (tilebuffer != NULL)
 	{
 		free(tilebuffer);

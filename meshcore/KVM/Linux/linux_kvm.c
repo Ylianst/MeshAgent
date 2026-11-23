@@ -688,7 +688,6 @@ void kvm_set_x11_locations(char *libx11, char *libx11tst, char *libx11ext, char 
 int kvm_init(int displayNo)
 {
 	if (logFile) { fprintf(logFile, "kvm_init(%d) called\n", displayNo); fflush(logFile); }
-	int old_height_count = TILE_HEIGHT_COUNT;
 	int dummy1, dummy2, dummy3;
 
 	if (clock_gettime(CLOCK_MONOTONIC, &inputtime) != 0) { memset(&inputtime, 0, sizeof(inputtime)); }
@@ -833,7 +832,7 @@ int kvm_init(int displayNo)
 
 	kvm_send_resolution();
 	kvm_send_display();
-	reset_tile_info(old_height_count);
+	tile_info_alloc();
 
 	if (xkb_exports != NULL)
 	{
@@ -863,7 +862,6 @@ void CheckDesktopSwitch(int checkres)
 	if (change_display)
 	{
 		if (logFile) { fprintf(logFile, "CheckDesktopSwitch: SCREEN_SEL_TARGET=%d CURRENT_DISPLAY_ID=%d\n", SCREEN_SEL_TARGET, CURRENT_DISPLAY_ID); fflush(logFile); }
-		int old_height_count = TILE_HEIGHT_COUNT;
 		change_display = 0;
 
 		if (g_monitor_count > 0)
@@ -906,7 +904,7 @@ void CheckDesktopSwitch(int checkres)
 		kvm_send_resolution();
 		kvm_send_display();
 		kvm_send_display_list(); // re-send list with updated current selection so the UI highlights the right icon
-		reset_tile_info(old_height_count);
+		tile_info_alloc();
 	}
 }
 
@@ -974,20 +972,8 @@ int kvm_server_inputdata(char* block, int blocklen)
 			kvm_send_resolution();
 			sentCursor = -1;	// Sent on every viewer join, so the current cursor type goes out again on the next frame
 
-			int row, col;
 			if (size != 4) break;
-			if (g_tileInfo == NULL) {
-				if ((g_tileInfo = (struct tileInfo_t **) malloc(TILE_HEIGHT_COUNT * sizeof(struct tileInfo_t *))) == NULL) ILIBCRITICALEXIT(254);
-				for (row = 0; row < TILE_HEIGHT_COUNT; row++) {
-					if ((g_tileInfo[row] = (struct tileInfo_t *) malloc(TILE_WIDTH_COUNT * sizeof(struct tileInfo_t))) == NULL) ILIBCRITICALEXIT(254);
-				}
-			}
-			for (row = 0; row < TILE_HEIGHT_COUNT; row++) {
-				for (col = 0; col < TILE_WIDTH_COUNT; col++) {
-					g_tileInfo[row][col].crc = 0xFF;
-					g_tileInfo[row][col].flag = 0;
-				}
-			}
+			tile_request_refresh();
 			break;
 		}
 	case MNG_KVM_PAUSE: // Pause
@@ -1226,7 +1212,7 @@ void* kvm_server_mainloop_x11(void* parm)
 	unsigned int mr;
 	char *cimage;
 
-	int x, y, height, width, r, c;
+	int x, y, height, width;
 	int sentHideCursor = 0;
 	long long desktopsize = 0;
 	long long tilesize = 0;
@@ -1347,17 +1333,6 @@ void* kvm_server_mainloop_x11(void* parm)
 		}
 		if (g_shutdown) { break; }
 		frameStartMs = kvm_relay_now_ms();
-
-		for (r = 0; r < TILE_HEIGHT_COUNT; r++)
-		{
-			for (c = 0; c < TILE_WIDTH_COUNT; c++) 
-			{
-				g_tileInfo[r][c].flag = TILE_TODO;
-#ifdef KVM_ALL_TILES
-				g_tileInfo[r][c].crc = 0xFF;
-#endif
-			}
-		}
 		//fprintf(logFile, "Before CheckDesktopSwitch.\n"); fflush(logFile);
 		CheckDesktopSwitch(1);
 		//fprintf(logFile, "After CheckDesktopSwitch.\n"); fflush(logFile);
@@ -1369,7 +1344,6 @@ void* kvm_server_mainloop_x11(void* parm)
 			DisplayHeight(imagedisplay, CURRENT_DISPLAY_ID) != VSCREEN_HEIGHT ||
 			DefaultDepth(eventdisplay, CURRENT_DISPLAY_ID) != SCREEN_DEPTH)
 		{
-			int old = TILE_HEIGHT_COUNT;
 			VSCREEN_WIDTH  = DisplayWidth(imagedisplay, CURRENT_DISPLAY_ID);
 			VSCREEN_HEIGHT = DisplayHeight(imagedisplay, CURRENT_DISPLAY_ID);
 			SCREEN_DEPTH   = DefaultDepth(imagedisplay, CURRENT_DISPLAY_ID);
@@ -1385,7 +1359,7 @@ void* kvm_server_mainloop_x11(void* parm)
 
 			kvm_send_resolution();
 			kvm_send_display_list();
-			reset_tile_info(old);
+			tile_info_alloc();
 		}
 
 		if (cursordisplay == NULL)
@@ -1606,6 +1580,7 @@ void* kvm_server_mainloop_x11(void* parm)
 				}
 			}
 			getScreenBuffer((char **)&desktop, &desktopsize, image);
+			tile_start_pass(desktop, desktopsize);
 
 			for (y = 0; y < TILE_HEIGHT_COUNT; y++) {
 				for (x = 0; x < TILE_WIDTH_COUNT; x++) {
@@ -1614,7 +1589,7 @@ void* kvm_server_mainloop_x11(void* parm)
 
 					if (g_shutdown) { x = TILE_WIDTH_COUNT; y = TILE_HEIGHT_COUNT; break; }
 
-					if (g_tileInfo[y][x].flag == TILE_SENT || g_tileInfo[y][x].flag == TILE_DONT_SEND) {
+					if (g_tileInfo[y][x].flag != TILE_CHANGED) {
 						continue;
 					}
 
@@ -1664,12 +1639,7 @@ void* kvm_server_mainloop_x11(void* parm)
 		cursordisplay = NULL;
 	}
 
-	if (g_tileInfo != NULL)
-	{
-		for (r = 0; r < TILE_HEIGHT_COUNT; r++) { free(g_tileInfo[r]); }
-		free(g_tileInfo);
-		g_tileInfo = NULL;
-	}
+	tile_info_free();
 	if(tilebuffer != NULL) { free(tilebuffer); tilebuffer = NULL; }
 	return (void*)0;
 }
