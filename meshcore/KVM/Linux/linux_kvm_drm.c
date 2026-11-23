@@ -272,7 +272,6 @@ extern int TILE_WIDTH;
 extern int TILE_HEIGHT;
 extern int TILE_WIDTH_COUNT;
 extern int TILE_HEIGHT_COUNT;
-extern int COMPRESSION_RATIO;
 extern int FRAME_RATE_TIMER;
 extern struct tileInfo_t **g_tileInfo;
 extern int g_remotepause;
@@ -3038,7 +3037,6 @@ void *kvm_server_mainloop_drm(void *parm)
 	SCREEN_DEPTH = 24;
 	TILE_WIDTH = 32;
 	TILE_HEIGHT = 32;
-	COMPRESSION_RATIO = 50;
 	FRAME_RATE_TIMER = 33;
 	g_shutdown = 0;
 

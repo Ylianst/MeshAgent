@@ -17,11 +17,6 @@ limitations under the License.
 #include "linux_compression.h"
 #include "../../../microstack/ILibParsers.h"
 
-#if defined(JPEGMAXBUF)
-	#define MAX_TILE_SIZE JPEGMAXBUF
-#else
-	#define MAX_TILE_SIZE 65500
-#endif
 #define TILE_JPEG_OPTIMIZE_MAX_AREA (128 * 128)
 
 // Filled by write_JPEG_buffer() only, with a copy that the caller frees
@@ -66,9 +61,6 @@ boolean empty_output_buffer(j_compress_ptr cinfo)
 	cinfo->dest->next_output_byte = jpegOut + used;
 	cinfo->dest->free_in_buffer = jpegOutSize - used;
 
-#if MAX_TILE_SIZE > 0
-	if (used - JPEG_HEADER_ROOM > MAX_TILE_SIZE) return FALSE;
-#endif
 	return TRUE;
 }
 
@@ -117,11 +109,8 @@ unsigned char *write_JPEG_rect(const unsigned char *pixels, size_t stride, int i
 	cinfo.comp_info[2].h_samp_factor = 1;
 
 	jpeg_set_quality(&cinfo, quality, TRUE);
-#if MAX_TILE_SIZE == 0
 	// Huffman tables built for each rectangle up to 128x128, where the standard tables are a large share of a small JPEG. Larger rectangles gain less for the second pass over the data.
-	// Not with a tile size limit, because optimized tables write all output in jpeg_finish_compress(), which cannot suspend, and a suspension there ends in exit().
 	if ((long)image_width * image_height <= TILE_JPEG_OPTIMIZE_MAX_AREA) { cinfo.optimize_coding = TRUE; }
-#endif
 	jpeg_start_compress(&cinfo, TRUE);
 
 	// The rows are read where they lie in the caller's frame, so no copy of the rectangle is made
@@ -138,16 +127,12 @@ unsigned char *write_JPEG_rect(const unsigned char *pixels, size_t stride, int i
 	return jpegOut + JPEG_HEADER_ROOM;
 }
 
-// The RGB24 entry point with the older contract, which macOS uses: the JPEG is a copy in jpeg_buffer that the caller frees.
-// With a tile size limit, a JPEG over the limit leaves jpeg_buffer NULL and its size in jpeg_buffer_length.
+// The RGB24 entry point with the older contract, which macOS uses: the JPEG is a copy in jpeg_buffer that the caller frees
 int write_JPEG_buffer(JSAMPLE * image_buffer, int image_width, int image_height, int quality)
 {
 	unsigned char *jpeg = write_JPEG_rect(image_buffer, (size_t)image_width * 3, image_width, image_height, 3, JCS_RGB, quality, &jpeg_buffer_length);
 
 	if (jpeg_buffer != NULL) { free(jpeg_buffer); jpeg_buffer = NULL; }
-#if MAX_TILE_SIZE > 0
-	if (jpeg_buffer_length > MAX_TILE_SIZE) { return 0; }
-#endif
 	if ((jpeg_buffer = (unsigned char *)malloc(jpeg_buffer_length)) == NULL) { ILIBCRITICALEXIT(254); }
 	memcpy(jpeg_buffer, jpeg, jpeg_buffer_length);
 	return 0;

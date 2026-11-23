@@ -18,12 +18,6 @@ limitations under the License.
 #include "meshcore/meshdefines.h"
 #include "microstack/ILibParsers.h"
 
-#if defined(JPEGMAXBUF)
-	#define MAX_TILE_SIZE JPEGMAXBUF
-#else
-	#define MAX_TILE_SIZE 65500
-#endif
-
 extern int SCREEN_NUM;
 extern int SCREEN_WIDTH;
 extern int SCREEN_HEIGHT;
@@ -32,40 +26,9 @@ extern int TILE_WIDTH;
 extern int TILE_HEIGHT;
 extern int TILE_WIDTH_COUNT;
 extern int TILE_HEIGHT_COUNT;
-extern int COMPRESSION_RATIO;
 extern struct tileInfo_t **g_tileInfo;
 
 int COMPRESSION_QUALITY = 50;
-
-// The JPEG of the last encoded rectangle, inside the encoder's buffer. NULL when there is none to send.
-static unsigned char *tileJpeg = NULL;
-static int tileJpegLength = 0;
-
-/******************************************************************************
- * INTERNAL FUNCTIONS
- ******************************************************************************/
-
-//This function returns 0 and tileJpeg != NULL if everything was good. retval = jpegsize if the captured image was too large.
-int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, const struct tileFrame_t *frame)
-{
-	// The tile grid is rounded up to whole tiles, so a rectangle on the right or bottom edge ends at the frame edge
-	if (x + captureWidth > frame->width) { captureWidth = frame->width - x; }
-	if (y + captureHeight > frame->height) { captureHeight = frame->height - y; }
-
-	tileJpeg = write_JPEG_rect(frame->pixels + (size_t)y * frame->stride + (size_t)x * frame->bytesPerPixel, frame->stride, captureWidth, captureHeight, frame->bytesPerPixel, frame->format, COMPRESSION_QUALITY, &tileJpegLength);
-
-#if MAX_TILE_SIZE > 0
-	if (tileJpegLength > MAX_TILE_SIZE)
-	{
-		tileJpeg = NULL;
-		return tileJpegLength;
-	}
-	else 
-#endif
-	{
-		return 0;
-	}
-}
 
 #if 0
 void dump32bit (const XImage * input)
@@ -275,6 +238,8 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, const struct t
 	int botrow = row; //Used in coalescing. Indicates the bottom most row to be coalesced.
 	int captureWidth = TILE_WIDTH;
 	int captureHeight = TILE_HEIGHT;
+	unsigned char *tileJpeg;
+	int tileJpegLength = 0;
 
 	*buffer = NULL; // If anything fails, this will be the indication.
 	*bufferSize = 0;
@@ -284,9 +249,6 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, const struct t
 	// First go to the right most changed tile
 	while (rightcol + 1 < TILE_WIDTH_COUNT && g_tileInfo[row][rightcol + 1].flag == TILE_CHANGED)
 	{
-#if MAX_TILE_SIZE > 0
-		if ((captureWidth + TILE_WIDTH) * TILE_HEIGHT * 3 / COMPRESSION_RATIO > MAX_TILE_SIZE) { break; }
-#endif
 		rightcol++;
 		captureWidth += TILE_WIDTH;
 	}
@@ -294,9 +256,6 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, const struct t
 	// Now go to the bottom tiles, a row of them is added when all of its tiles in the range have changed
 	while (botrow + 1 < TILE_HEIGHT_COUNT)
 	{
-#if MAX_TILE_SIZE > 0
-		if ((captureHeight + TILE_HEIGHT) * captureWidth * 3 / COMPRESSION_RATIO > MAX_TILE_SIZE) { break; }
-#endif
 		rcol = col;
 		while (rcol <= rightcol && g_tileInfo[botrow + 1][rcol].flag == TILE_CHANGED) { rcol++; }
 		if (rcol <= rightcol) { break; }
@@ -304,40 +263,11 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, const struct t
 		captureHeight += TILE_HEIGHT;
 	}
 
-	int retval = 0;
-#if MAX_TILE_SIZE == 0
-	retval = calc_opt_compr_send(x, y, captureWidth, captureHeight, frame);
-#else
-	int firstTime = 1;
+	// The tile grid is rounded up to whole tiles, so a rectangle on the right or bottom edge ends at the frame edge
+	if (x + captureWidth > frame->width) { captureWidth = frame->width - x; }
+	if (y + captureHeight > frame->height) { captureHeight = frame->height - y; }
 
-	//This loop is used to adjust the COMPRESSION_RATIO. This loop runs only once most of the time.
-	do {
-		//retval here is 0 if everything was good. It is > 0 if it contains the size of the jpeg that was created and not sent.
-		retval = calc_opt_compr_send(x, y, captureWidth, captureHeight, frame);
-		if (retval != 0) {
-			if (firstTime) {
-				// Re-adjust the compression ratio.
-				COMPRESSION_RATIO = (int)(((double)COMPRESSION_RATIO/(double)retval) * (0.92 * MAX_TILE_SIZE)); //Magic number: 92% of MAX_TILE_SIZE
-				if (COMPRESSION_RATIO <= 1) { COMPRESSION_RATIO = 2; }
-				firstTime = 0;
-			}
-
-			if (botrow > row) { //First time, try reducing the height.
-				botrow = row + ((botrow - row + 1) / 2);
-				captureHeight = (botrow - row + 1) * TILE_HEIGHT;
-			}
-			else if (rightcol > col){ //If it is not possible, reduce the width
-				rightcol = col + ((rightcol - col + 1) / 2);
-				captureWidth = (rightcol - col + 1) * TILE_WIDTH;
-			}
-			else { //This never happens in any case.
-				retval = 0;
-				break;
-			}
-
-		}
-	} while (retval != 0);
-#endif
+	tileJpeg = write_JPEG_rect(frame->pixels + (size_t)y * frame->stride + (size_t)x * frame->bytesPerPixel, frame->stride, captureWidth, captureHeight, frame->bytesPerPixel, frame->format, COMPRESSION_QUALITY, &tileJpegLength);
 
 	// The packet header is written into the room in front of the JPEG, so the packet is sent from the encoder's buffer without a copy
 	if (tileJpeg != NULL)
@@ -363,7 +293,6 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, const struct t
 			((unsigned short*)*buffer)[2] = (unsigned short)htons((unsigned short)x);				// X position
 			((unsigned short*)*buffer)[3] = (unsigned short)htons((unsigned short)y);				// Y position
 		}
-		tileJpeg = NULL;
 	}
 
 	// The region is done for this pass either way, and a failed encode leaves it stale so the next pass sends it again
@@ -376,7 +305,7 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, const struct t
 		}
 	}
 
-	return retval;
+	return 0;
 }
 
 

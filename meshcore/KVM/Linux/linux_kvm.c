@@ -119,7 +119,6 @@ int TILE_WIDTH = 0;
 int TILE_HEIGHT = 0;
 int TILE_WIDTH_COUNT = 0;
 int TILE_HEIGHT_COUNT = 0;
-int COMPRESSION_RATIO = 0;
 int SCALING_FACTOR = 1024;		// Scaling factor, 1024 = 100%
 int SCALING_FACTOR_NEW = 1024;	// Desired scaling factor, 1024 = 100%
 int FRAME_RATE_TIMER = 0;
@@ -821,7 +820,6 @@ int kvm_init(int displayNo)
 	// Some magic numbers.
 	TILE_WIDTH = 32;
 	TILE_HEIGHT = 32;
-	COMPRESSION_RATIO = 50;
 	FRAME_RATE_TIMER = 100;
 
 	TILE_HEIGHT_COUNT = SCREEN_HEIGHT / TILE_HEIGHT;
@@ -963,7 +961,6 @@ int kvm_server_inputdata(char* block, int blocklen)
 			if (size >= 10) { int fr = ((int)ntohs(ILibUnaligned_Read16(block + 8))); if (fr >= 20 && fr <= 5000) FRAME_RATE_TIMER = fr; }
 			if (size >= 8) { int ns = ((int)ntohs(ILibUnaligned_Read16(block + 6))); if (ns >= 64 && ns <= 4096) SCALING_FACTOR_NEW = ns; }
 			if (size >= 6) { set_tile_compression((int)block[4], (int)block[5]); }
-			COMPRESSION_RATIO = 100;
 			break;
 		}
 	case MNG_KVM_REFRESH: // Refresh
