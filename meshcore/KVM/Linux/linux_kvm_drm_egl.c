@@ -820,8 +820,9 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 	const size_t rgb_size = (size_t)width * (size_t)height * 3u;
 	if (rgb == NULL)
 	{
-		kvm_drm_egl_copy_error_message(out_error, out_error_size, "Output RGB pointer is null");
-		return false;
+		// The caller takes the frame from ctx->rgba_readback: RGBA, 4 bytes per pixel, bottom row first
+		if (rgb_size_out != NULL) { *rgb_size_out = rgba_size; }
+		return true;
 	}
 	if (rgb_capacity < rgb_size)
 	{

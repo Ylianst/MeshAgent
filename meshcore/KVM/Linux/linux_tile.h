@@ -37,7 +37,7 @@ struct tileInfo_t {
 // The frame of one pass, compared and encoded where it lies. width and height are the real size, not rounded up to whole tiles.
 struct tileFrame_t {
 	const unsigned char *pixels;
-	size_t stride;			// Bytes from one row to the next
+	ptrdiff_t stride;		// Bytes from one row to the next, negative for a bottom-up frame
 	int bytesPerPixel;
 	int width;
 	int height;
@@ -47,7 +47,7 @@ struct tileFrame_t {
 extern void tile_info_alloc(void);
 extern void tile_info_free(void);
 extern void tile_request_refresh(void);
-extern void tile_frame_from_rgb24(struct tileFrame_t *frame, const unsigned char *pixels, size_t stride, int width, int height);
+extern void tile_frame_from_rgb24(struct tileFrame_t *frame, const unsigned char *pixels, ptrdiff_t stride, int width, int height);
 extern int tile_frame_from_ximage(struct tileFrame_t *frame, XImage *image);
 extern void tile_start_pass(const struct tileFrame_t *frame);
 extern int adjust_screen_size(int pixles);

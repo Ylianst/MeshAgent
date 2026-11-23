@@ -404,27 +404,54 @@ static void kvm_drm_process_pending_input(void)
 	}
 }
 
-static int kvm_drm_send_dirty_tiles(const unsigned char *rgbBuffer, size_t rgbSize)
+// Pixel format of a frame that the tile code can take as it is, without the RGB24 conversion. DRM formats name the bytes from the low one up.
+static int kvm_drm_direct_format(uint32_t format, int gpuReadback, J_COLOR_SPACE *out)
+{
+#ifdef JCS_EXTENSIONS
+	if (gpuReadback) { *out = JCS_EXT_RGBX; return 1; }
+	switch (format)
+	{
+	case DRM_FORMAT_XRGB8888:
+	case DRM_FORMAT_ARGB8888:
+		*out = JCS_EXT_BGRX;
+		return 1;
+	case DRM_FORMAT_XBGR8888:
+	case DRM_FORMAT_ABGR8888:
+		*out = JCS_EXT_RGBX;
+		return 1;
+	case DRM_FORMAT_RGBX8888:
+	case DRM_FORMAT_RGBA8888:
+		*out = JCS_EXT_XBGR;
+		return 1;
+	case DRM_FORMAT_BGRX8888:
+	case DRM_FORMAT_BGRA8888:
+		*out = JCS_EXT_XRGB;
+		return 1;
+	default:
+		break;
+	}
+#endif
+	return 0;
+}
+
+static int kvm_drm_send_dirty_tiles(const struct tileFrame_t *frame)
 {
 	int x = 0;
 	int y = 0;
 	int width = 0;
 	int height = 0;
-	struct tileFrame_t frame;
 
 	if (SCREEN_WIDTH <= 0 || SCREEN_HEIGHT <= 0 || TILE_WIDTH_COUNT <= 0 || TILE_HEIGHT_COUNT <= 0)
 	{
 		return 0;
 	}
 
-	if (rgbBuffer == NULL || rgbSize < ((size_t)SCREEN_WIDTH) * ((size_t)SCREEN_HEIGHT) * 3u)
+	if (frame->pixels == NULL || frame->width != SCREEN_WIDTH || frame->height != SCREEN_HEIGHT)
 	{
 		return -1;
 	}
 
-	// The composed frame is compared and encoded where it lies, without a copy padded to whole tiles
-	tile_frame_from_rgb24(&frame, rgbBuffer, ((size_t)SCREEN_WIDTH) * 3u, SCREEN_WIDTH, SCREEN_HEIGHT);
-	tile_start_pass(&frame);
+	tile_start_pass(frame);
 
 	for (y = 0; y < TILE_HEIGHT_COUNT; ++y)
 	{
@@ -441,7 +468,7 @@ static int kvm_drm_send_dirty_tiles(const unsigned char *rgbBuffer, size_t rgbSi
 				continue;
 			}
 
-			getTileAt(width, height, &tilePacket, &tilePacketSize, &frame, y, x);
+			getTileAt(width, height, &tilePacket, &tilePacketSize, frame, y, x);
 			if (tilePacket != NULL && tilePacketSize > 0)
 			{
 				if (kvm_drm_write_all(slave2master[1], (char *)tilePacket, (size_t)tilePacketSize) != 0)
@@ -3310,8 +3337,13 @@ void *kvm_server_mainloop_drm(void *parm)
 			desktopRgbBuffer = tmp;
 			desktopRgbBufferSize = desktopRgbSize;
 		}
-		memset(desktopRgbBuffer, 0, desktopRgbSize);
 
+		// With one output that fills the captured screen, a 4 byte per pixel frame goes to the tile code as it is.
+		// Not while MESH_KVM_DRM_DUMP is set, because the dump reads the composed RGB24 desktop.
+		struct tileFrame_t directFrame;
+		int direct = 0;
+		int directAllowed = (outputCount == 1 && (getenv("MESH_KVM_DRM_DUMP") == NULL || getenv("MESH_KVM_DRM_DUMP")[0] == 0));
+		int desktopCleared = 0;
 		int capturedOutputs = 0;
 		int outputIndex = 0;
 		for (outputIndex = 0; outputIndex < outputCount; ++outputIndex)
@@ -3381,6 +3413,12 @@ void *kvm_server_mainloop_drm(void *parm)
 				lastLoggedRotation = (int)frame.rotation;
 			}
 
+			J_COLOR_SPACE directFormat = JCS_RGB;
+			int outputDirect = (directAllowed && frame.rotation == KVM_DRM_ROTATION_0 &&
+				(int)frame.width == SCREEN_WIDTH && (int)frame.height == SCREEN_HEIGHT &&
+				outputs[outputIndex].width == frame.width && outputs[outputIndex].height == frame.height &&
+				outputs[outputIndex].x - layout.min_x - CAPTURE_X == 0 && outputs[outputIndex].y - layout.min_y - CAPTURE_Y == 0);
+
 			rgbSize = (size_t)frame.width * (size_t)frame.height * 3u;
 			if (rgbBufferSize < rgbSize)
 			{
@@ -3400,11 +3438,19 @@ void *kvm_server_mainloop_drm(void *parm)
 					lastLoggedPath = 1;
 				}
 
+				// Without an RGB24 buffer the readback stays in the EGL context as RGBA with the bottom row first, and is used from there
+				outputDirect = (outputDirect && kvm_drm_direct_format(frame.format, 1, &directFormat));
 				converted = kvm_drm_egl_convert_to_rgb24_gpu(&dev->eglCtx, dev->fd, frame.width, frame.height,
 															 frame.plane_count, frame.plane_handles, frame.plane_pitches, frame.plane_offsets,
 															 frame.format, frame.modifier,
-															 rgbBuffer, rgbBufferSize, &rgbSize, err, sizeof(err));
+															 outputDirect ? NULL : rgbBuffer, rgbBufferSize, &rgbSize, err, sizeof(err));
 				kvm_drm_close_frame_handles(dev->fd, &frame);
+				if (converted && outputDirect)
+				{
+					directFrame.pixels = dev->eglCtx.rgba_readback + (size_t)(frame.height - 1u) * (size_t)frame.width * 4u;
+					directFrame.stride = -(ptrdiff_t)((size_t)frame.width * 4u);
+					direct = 1;
+				}
 			}
 			else
 			{
@@ -3431,7 +3477,18 @@ void *kvm_server_mainloop_drm(void *parm)
 					}
 
 					const uint8_t *src = dev->map.addr + frame.offset;
-					converted = kvm_drm_convert_to_rgb24(&frame, src, rgbBuffer, rgbBufferSize, &rgbSize, err, sizeof(err));
+					if (outputDirect && frame.pitch >= frame.width * 4u && kvm_drm_direct_format(frame.format, 0, &directFormat))
+					{
+						// The mapped scanout buffer itself. The tile code reads it once in its compare and encodes from its own reference frame.
+						directFrame.pixels = src;
+						directFrame.stride = (ptrdiff_t)frame.pitch;
+						direct = 1;
+						converted = true;
+					}
+					else
+					{
+						converted = kvm_drm_convert_to_rgb24(&frame, src, rgbBuffer, rgbBufferSize, &rgbSize, err, sizeof(err));
+					}
 				}
 			}
 
@@ -3442,6 +3499,16 @@ void *kvm_server_mainloop_drm(void *parm)
 					kvm_send_error(err);
 					lastCaptureError = 1;
 				}
+				continue;
+			}
+
+			if (direct)
+			{
+				directFrame.bytesPerPixel = 4;
+				directFrame.width = (int)frame.width;
+				directFrame.height = (int)frame.height;
+				directFrame.format = directFormat;
+				capturedOutputs++;
 				continue;
 			}
 
@@ -3460,6 +3527,7 @@ void *kvm_server_mainloop_drm(void *parm)
 				rgbFrame = rgbRotatedBuffer;
 			}
 
+			if (!desktopCleared) { memset(desktopRgbBuffer, 0, desktopRgbSize); desktopCleared = 1; }
 			kvm_drm_copy_frame_to_desktop(rgbFrame, effectiveWidth, effectiveHeight, desktopRgbBuffer, (uint32_t)SCREEN_WIDTH, (uint32_t)SCREEN_HEIGHT,
 				outputs[outputIndex].x - layout.min_x - CAPTURE_X, outputs[outputIndex].y - layout.min_y - CAPTURE_Y,
 				outputs[outputIndex].width, outputs[outputIndex].height);
@@ -3492,7 +3560,11 @@ void *kvm_server_mainloop_drm(void *parm)
 		scanoutSuspended = 0;
 		lastCaptureError = 0;
 		captureLostSinceMs = 0;	// captured a frame again; clear the session-loss grace timer
-		kvm_drm_debug_dump_frame(desktopRgbBuffer, (uint32_t)SCREEN_WIDTH, (uint32_t)SCREEN_HEIGHT);
+		if (!direct)
+		{
+			kvm_drm_debug_dump_frame(desktopRgbBuffer, (uint32_t)SCREEN_WIDTH, (uint32_t)SCREEN_HEIGHT);
+			tile_frame_from_rgb24(&directFrame, desktopRgbBuffer, (ptrdiff_t)SCREEN_WIDTH * 3, SCREEN_WIDTH, SCREEN_HEIGHT);
+		}
 
 		if (SCREEN_WIDTH != reportedScreenWidth || SCREEN_HEIGHT != reportedScreenHeight || SCREEN_SEL != reportedScreenSel)
 		{
@@ -3518,7 +3590,7 @@ void *kvm_server_mainloop_drm(void *parm)
 			forceTileReset = 0;
 		}
 
-		if (kvm_drm_send_dirty_tiles(desktopRgbBuffer, desktopRgbSize) != 0)
+		if (kvm_drm_send_dirty_tiles(&directFrame) != 0)
 		{
 			g_shutdown = 1;
 		}

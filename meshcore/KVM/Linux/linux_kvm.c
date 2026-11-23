@@ -1657,7 +1657,7 @@ void* kvm_server_mainloop_x11(void* parm)
 			if (tile_frame_from_ximage(&frame, image) == 0)
 			{
 				getScreenBuffer((char **)&desktop, &desktopsize, image);
-				tile_frame_from_rgb24(&frame, (const unsigned char *)desktop, (size_t)adjust_screen_size(SCREEN_WIDTH) * 3, image->width, image->height);
+				tile_frame_from_rgb24(&frame, (const unsigned char *)desktop, (ptrdiff_t)adjust_screen_size(SCREEN_WIDTH) * 3, image->width, image->height);
 			}
 			tile_start_pass(&frame);
 

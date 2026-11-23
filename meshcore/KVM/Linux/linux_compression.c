@@ -77,7 +77,7 @@ void jpeg_output_free(void)
 	jpegOutLength = 0;
 }
 
-unsigned char *write_JPEG_rect(const unsigned char *pixels, size_t stride, int image_width, int image_height, int components, J_COLOR_SPACE format, int quality, int *length)
+unsigned char *write_JPEG_rect(const unsigned char *pixels, ptrdiff_t stride, int image_width, int image_height, int components, J_COLOR_SPACE format, int quality, int *length)
 {
 	struct jpeg_compress_struct cinfo;
 	struct jpeg_error_mgr jerr;
@@ -116,7 +116,7 @@ unsigned char *write_JPEG_rect(const unsigned char *pixels, size_t stride, int i
 	// The rows are read where they lie in the caller's frame, so no copy of the rectangle is made
 	while (cinfo.next_scanline < cinfo.image_height)
 	{
-		row_pointer[0] = (JSAMPROW)(pixels + (size_t)cinfo.next_scanline * stride);
+		row_pointer[0] = (JSAMPROW)(pixels + (ptrdiff_t)cinfo.next_scanline * stride);
 		(void)jpeg_write_scanlines(&cinfo, row_pointer, 1);
 	}
 
@@ -130,7 +130,7 @@ unsigned char *write_JPEG_rect(const unsigned char *pixels, size_t stride, int i
 // The RGB24 entry point with the older contract, which macOS uses: the JPEG is a copy in jpeg_buffer that the caller frees
 int write_JPEG_buffer(JSAMPLE * image_buffer, int image_width, int image_height, int quality)
 {
-	unsigned char *jpeg = write_JPEG_rect(image_buffer, (size_t)image_width * 3, image_width, image_height, 3, JCS_RGB, quality, &jpeg_buffer_length);
+	unsigned char *jpeg = write_JPEG_rect(image_buffer, (ptrdiff_t)image_width * 3, image_width, image_height, 3, JCS_RGB, quality, &jpeg_buffer_length);
 
 	if (jpeg_buffer != NULL) { free(jpeg_buffer); jpeg_buffer = NULL; }
 	if ((jpeg_buffer = (unsigned char *)malloc(jpeg_buffer_length)) == NULL) { ILIBCRITICALEXIT(254); }

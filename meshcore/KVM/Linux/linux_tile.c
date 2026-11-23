@@ -80,7 +80,7 @@ void tile_request_refresh(void)
 	tileRefreshPending = 1;
 }
 
-void tile_frame_from_rgb24(struct tileFrame_t *frame, const unsigned char *pixels, size_t stride, int width, int height)
+void tile_frame_from_rgb24(struct tileFrame_t *frame, const unsigned char *pixels, ptrdiff_t stride, int width, int height)
 {
 	frame->pixels = pixels;
 	frame->stride = stride;
@@ -103,7 +103,7 @@ int tile_frame_from_ximage(struct tileFrame_t *frame, XImage *image)
 	else { return 0; }
 
 	frame->pixels = (const unsigned char *)image->data;
-	frame->stride = (size_t)image->bytes_per_line;
+	frame->stride = (ptrdiff_t)image->bytes_per_line;
 	frame->bytesPerPixel = 4;
 	frame->width = image->width;
 	frame->height = image->height;
@@ -150,7 +150,7 @@ void tile_start_pass(const struct tileFrame_t *frame)
 	for (row = 0; row < TILE_HEIGHT_COUNT; row++)
 	{
 		struct tileInfo_t *tiles = g_tileInfo[row];
-		const unsigned char *cur = frame->pixels + (size_t)row * TILE_HEIGHT * frame->stride;
+		const unsigned char *cur = frame->pixels + (ptrdiff_t)row * TILE_HEIGHT * frame->stride;
 		unsigned char *ref;
 
 		for (col = 0; col < TILE_WIDTH_COUNT; col++)
@@ -217,7 +217,17 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, const struct t
 	if (x + captureWidth > frame->width) { captureWidth = frame->width - x; }
 	if (y + captureHeight > frame->height) { captureHeight = frame->height - y; }
 
-	tileJpeg = write_JPEG_rect(frame->pixels + (size_t)y * frame->stride + (size_t)x * frame->bytesPerPixel, frame->stride, captureWidth, captureHeight, frame->bytesPerPixel, frame->format, COMPRESSION_QUALITY, &tileJpegLength);
+	// Encoded from the reference frame, which tile_start_pass() just brought up to date for every changed tile.
+	// A DRM frame is the live scanout buffer and can change after the compare, and then the picture sent would differ from the reference.
+	if (refFrame != NULL && refWidth == frame->width && refHeight == frame->height && refBytesPerPixel == frame->bytesPerPixel)
+	{
+		ptrdiff_t refStride = (ptrdiff_t)refWidth * refBytesPerPixel;
+		tileJpeg = write_JPEG_rect(refFrame + (ptrdiff_t)y * refStride + (ptrdiff_t)x * refBytesPerPixel, refStride, captureWidth, captureHeight, refBytesPerPixel, frame->format, COMPRESSION_QUALITY, &tileJpegLength);
+	}
+	else
+	{
+		tileJpeg = write_JPEG_rect(frame->pixels + (ptrdiff_t)y * frame->stride + (ptrdiff_t)x * frame->bytesPerPixel, frame->stride, captureWidth, captureHeight, frame->bytesPerPixel, frame->format, COMPRESSION_QUALITY, &tileJpegLength);
+	}
 
 	// The packet header is written into the room in front of the JPEG, so the packet is sent from the encoder's buffer without a copy
 	if (tileJpeg != NULL)
