@@ -177,7 +177,6 @@ int kvm_clientProcessId = 0;
 int g_restartcount = 0;
 int g_totalRestartCount = 0;
 int restartKvm = 0;
-extern void* tilebuffer;
 pid_t g_slavekvm = 0;
 pthread_t kvmthread = (pthread_t)NULL;
 ILibProcessPipe_Process gChildProcess;
@@ -675,15 +674,14 @@ static int kvm_session_left_console(void)
 }
 
 // Encodes and sends the tiles that changed in the frame
-static void kvm_send_tiles(void *desktop, long long desktopsize)
+static void kvm_send_tiles(const struct tileFrame_t *frame)
 {
 	int x, y;
 	long long tilesize = 0;
 	void *buf = NULL;
-	int written;
 
 	KvmDebugLog("...Enter for loop\n");
-	tile_start_pass((const unsigned char *)desktop, desktopsize);
+	tile_start_pass(frame);
 
 	for (y = 0; y < TILE_HEIGHT_COUNT; y++)
 	{
@@ -693,12 +691,10 @@ static void kvm_send_tiles(void *desktop, long long desktopsize)
 			if (g_shutdown) { return; }
 			if (g_tileInfo[y][x].flag != TILE_CHANGED) { continue; }
 
-			getTileAt(TILE_WIDTH * x, TILE_HEIGHT * y, &buf, &tilesize, desktop, desktopsize, y, x);
-			if (buf == NULL) { continue; }
+			getTileAt(TILE_WIDTH * x, TILE_HEIGHT * y, &buf, &tilesize, frame, y, x);
+			if (buf == NULL || g_shutdown) { continue; }
 
-			written = g_shutdown ? 0 : KVM_SEND(buf, tilesize);
-			free(buf);
-			if (written == -1)
+			if (KVM_SEND(buf, tilesize) == -1)
 			{
 				// The rest of the frame is not encoded for a connection that is gone. A user session exits and can be spawned again.
 				// A -kvmagent waits for its next connection, and sends the whole screen should this one still be there.
@@ -957,6 +953,7 @@ kvm_next_session:
 		}
 		if (sckState == 1)
 		{
+			struct tileFrame_t frame;
 			int got;
 
 			// A new timer from the viewer changes the running stream's interval, and the stream starts again only when that fails
@@ -968,11 +965,11 @@ kvm_next_session:
 			}
 
 			// A short wait, so the message queue and the pointer check above still run on a still screen
-			got = kvm_sck_take_frame((unsigned char **)&desktop, &desktopsize, 50);
+			got = kvm_sck_take_frame(&frame, 50);
 			if (got < 0) { kvm_sck_stop(); sckState = kvm_sck_failed("stopped"); continue; }
 			// A still screen gives no new frame, so a viewer's refresh and tiles whose encode failed are sent from the last one
-			if (got == 0 && tile_pass_pending()) { got = 1; }
-			if (got > 0) { kvm_send_tiles(desktop, desktopsize); }
+			if (got == 0 && tile_pass_pending()) { got = kvm_sck_last_frame(&frame); }
+			if (got > 0) { kvm_send_tiles(&frame); }
 			continue;
 		}
 
@@ -1002,7 +999,11 @@ kvm_next_session:
 				continue;
 			}
 
-			kvm_send_tiles(desktop, desktopsize);
+			{
+				struct tileFrame_t frame;
+				tile_frame_from_rgb24(&frame, (const unsigned char *)desktop, (size_t)adjust_screen_size(SCREEN_WIDTH) * 3, SCREEN_WIDTH, SCREEN_HEIGHT);
+				kvm_send_tiles(&frame);
+			}
 
 		}
 		CGImageRelease(image);
@@ -1026,10 +1027,7 @@ kvm_next_session:
 
 	if (frameTimerQueue >= 0) { close(frameTimerQueue); }
 	tile_info_free();
-	if(tilebuffer != NULL) {
-		free(tilebuffer);
-		tilebuffer = NULL;
-	}
+	jpeg_output_free();
 
 	KvmDebugLog("Exiting...\n");
 	ILibQueue_Destroy(g_messageQ);

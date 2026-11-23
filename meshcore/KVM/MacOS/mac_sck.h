@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <CoreGraphics/CoreGraphics.h>
 
+struct tileFrame_t;
+
 // 0 before macOS 12.3, which has no ScreenCaptureKit
 int kvm_sck_available(void);
 
@@ -26,9 +28,12 @@ int kvm_sck_start(CGDirectDisplayID display, int width, int height, int interval
 // Changes the interval of the running stream and returns 0 when the stream took it
 int kvm_sck_set_interval(int intervalMs);
 
-// Swaps the newest changed frame into *desktop, as RGB24 with the rows and the height padded like getScreenBuffer() does.
+// Describes the newest changed frame in *frame. Its pixels stay valid until the next take that returns 1, or kvm_sck_stop().
 // Returns 1 for a new frame, 0 when none came within timeoutMs, -1 when the stream stopped.
-int kvm_sck_take_frame(unsigned char **desktop, long long *desktopsize, int timeoutMs);
+int kvm_sck_take_frame(struct tileFrame_t *frame, int timeoutMs);
+
+// Describes the frame taken last once more, and returns 0 when there is none
+int kvm_sck_last_frame(struct tileFrame_t *frame);
 
 void kvm_sck_stop(void);
 
