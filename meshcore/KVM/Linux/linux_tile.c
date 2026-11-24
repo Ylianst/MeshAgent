@@ -88,6 +88,7 @@ void tile_frame_from_rgb24(struct tileFrame_t *frame, const unsigned char *pixel
 	frame->width = width;
 	frame->height = height;
 	frame->format = JCS_RGB;
+	frame->changed = NULL;
 }
 
 // Describes a 32 bpp capture with 8 bit channels, so it is compared and encoded without the RGB24 copy of getScreenBuffer().
@@ -107,6 +108,7 @@ int tile_frame_from_ximage(struct tileFrame_t *frame, XImage *image)
 	frame->bytesPerPixel = 4;
 	frame->width = image->width;
 	frame->height = image->height;
+	frame->changed = NULL;
 	return 1;
 #else
 	return 0;
@@ -151,14 +153,18 @@ void tile_start_pass(const struct tileFrame_t *frame)
 	{
 		struct tileInfo_t *tiles = g_tileInfo[row];
 		const unsigned char *cur = frame->pixels + (ptrdiff_t)row * TILE_HEIGHT * frame->stride;
+		const unsigned char *hint = (frame->changed != NULL) ? frame->changed + (size_t)row * TILE_WIDTH_COUNT : NULL;
 		unsigned char *ref;
+		int work = (hint == NULL);
 
 		for (col = 0; col < TILE_WIDTH_COUNT; col++)
 		{
 			if (all) { tiles[col].stale = 1; }
 			tiles[col].flag = tiles[col].stale ? TILE_CHANGED : TILE_DONE;
+			if (tiles[col].stale || (hint != NULL && hint[col])) { work = 1; }
 		}
 		if (refFrame == NULL) { continue; } // Without a reference every tile stays stale and is sent, which costs data but loses nothing
+		if (!work) { continue; } // The capture found no change in this tile row and no tile of it is stale
 
 		ref = refFrame + (size_t)row * TILE_HEIGHT * refStride;
 		rows = frame->height - row * TILE_HEIGHT;
@@ -170,7 +176,7 @@ void tile_start_pass(const struct tileFrame_t *frame)
 			{
 				// The last tile of a row ends at the frame edge
 				size_t n = (col == TILE_WIDTH_COUNT - 1) ? lastLen : len;
-				if (!tiles[col].stale && memcmp(cur + col * len, ref + col * len, n) == 0) { continue; }
+				if (!tiles[col].stale && ((hint != NULL && !hint[col]) || memcmp(cur + col * len, ref + col * len, n) == 0)) { continue; }
 				memcpy(ref + col * len, cur + col * len, n);
 				tiles[col].flag = TILE_CHANGED;
 			}

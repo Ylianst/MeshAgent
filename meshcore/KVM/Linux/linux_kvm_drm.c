@@ -3440,6 +3440,8 @@ void *kvm_server_mainloop_drm(void *parm)
 
 				// Without an RGB24 buffer the readback stays in the EGL context as RGBA with the bottom row first, and is used from there
 				outputDirect = (outputDirect && kvm_drm_direct_format(frame.format, 1, &directFormat));
+				// With square tiles the readback compares the tiles on the GPU and fetches only the changed ones
+				dev->eglCtx.direct_tile_size = (TILE_WIDTH == TILE_HEIGHT) ? TILE_WIDTH : 0;
 				converted = kvm_drm_egl_convert_to_rgb24_gpu(&dev->eglCtx, dev->fd, frame.width, frame.height,
 															 frame.plane_count, frame.plane_handles, frame.plane_pitches, frame.plane_offsets,
 															 frame.format, frame.modifier,
@@ -3449,6 +3451,7 @@ void *kvm_server_mainloop_drm(void *parm)
 				{
 					directFrame.pixels = dev->eglCtx.rgba_readback + (size_t)(frame.height - 1u) * (size_t)frame.width * 4u;
 					directFrame.stride = -(ptrdiff_t)((size_t)frame.width * 4u);
+					directFrame.changed = dev->eglCtx.changed_valid ? dev->eglCtx.changed_tiles : NULL;
 					direct = 1;
 				}
 			}
@@ -3482,6 +3485,7 @@ void *kvm_server_mainloop_drm(void *parm)
 						// The mapped scanout buffer itself. The tile code reads it once in its compare and encodes from its own reference frame.
 						directFrame.pixels = src;
 						directFrame.stride = (ptrdiff_t)frame.pitch;
+						directFrame.changed = NULL;
 						direct = 1;
 						converted = true;
 					}

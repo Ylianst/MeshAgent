@@ -65,7 +65,7 @@ limitations under the License.
 	_(glFramebufferTexture2D) _(glGenBuffers) _(glGenFramebuffers) _(glGenTextures) _(glGetAttribLocation) \
 	_(glGetError) _(glGetProgramiv) _(glGetShaderInfoLog) _(glGetShaderiv) _(glGetUniformLocation) \
 	_(glLinkProgram) _(glReadPixels) _(glShaderSource) _(glTexImage2D) _(glTexParameteri) \
-	_(glUniform1i) _(glUseProgram) _(glVertexAttribPointer) _(glViewport)
+	_(glUniform1i) _(glUseProgram) _(glVertexAttribPointer) _(glViewport) _(glPixelStorei) _(glUniform2i)
 
 #define KVM_DRM_EGL_DECL_PTR(s) static __typeof__(s) *p_##s = NULL;
 KVM_DRM_EGL_SYMBOLS(KVM_DRM_EGL_DECL_PTR)
@@ -142,6 +142,8 @@ static int kvm_drm_egl_load_libs(void)
 #define glUseProgram p_glUseProgram
 #define glVertexAttribPointer p_glVertexAttribPointer
 #define glViewport p_glViewport
+#define glPixelStorei p_glPixelStorei
+#define glUniform2i p_glUniform2i
 #endif // __linux__
 
 static void kvm_drm_egl_copy_error_message(char *dst, size_t dst_size, const char *src)
@@ -459,8 +461,15 @@ static bool kvm_drm_egl_init_gpu_readback(kvm_drm_egl_context *g, int drm_fd, ch
 		return kvm_drm_egl_fail_with_persistent_error(g, out_error, out_error_size, "eglChooseConfig failed");
 	}
 
-	const EGLint ctx_attribs[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
+	// ES 3 when the driver has it, for the changed-tile readback (texelFetch, GL_PACK_ROW_LENGTH). The ES 2 path is unchanged in an ES 3 context.
+	EGLint ctx_attribs[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
 	g->ctx = eglCreateContext(g->dpy, g->cfg, EGL_NO_CONTEXT, ctx_attribs);
+	g->es3 = (g->ctx != EGL_NO_CONTEXT);
+	if (!g->es3)
+	{
+		ctx_attribs[1] = 2;
+		g->ctx = eglCreateContext(g->dpy, g->cfg, EGL_NO_CONTEXT, ctx_attribs);
+	}
 	if (g->ctx == EGL_NO_CONTEXT)
 	{
 		char err[KVM_DRM_EGL_MAX_ERROR];
@@ -571,6 +580,72 @@ static bool kvm_drm_egl_init_gpu_readback(kvm_drm_egl_context *g, int drm_fd, ch
 	glGenFramebuffers(1, &g->fbo);
 	glGenTextures(1, &g->out_tex);
 
+	// The tile compare pass. Without it every frame is read back whole, as before.
+	g->diff_program = 0;
+	g->have_prev = false;
+	if (g->es3)
+	{
+		// One fragment per tile: 1 when any pixel of the tile differs between the two frames. The frames are stored bottom row first.
+		const char *dvs_src = "#version 300 es\n"
+			"in vec2 aPos;\n"
+			"void main(){ gl_Position=vec4(aPos,0.0,1.0); }\n";
+		const char *dfs_src = "#version 300 es\n"
+			"precision highp float;\n"
+			"precision highp int;\n"
+			"uniform sampler2D uCur;\n"
+			"uniform sampler2D uPrev;\n"
+			"uniform ivec2 uSize;\n"
+			"uniform int uTile;\n"
+			"out vec4 o;\n"
+			"void main(){\n"
+			" ivec2 t = ivec2(gl_FragCoord.xy) * uTile;\n"
+			" bool d = false;\n"
+			" for (int y = 0; y < uTile; y++) {\n"
+			"  int gy = uSize.y - 1 - min(t.y + y, uSize.y - 1);\n"
+			"  for (int x = 0; x < uTile; x++) {\n"
+			"   ivec2 p = ivec2(min(t.x + x, uSize.x - 1), gy);\n"
+			"   if (texelFetch(uCur, p, 0) != texelFetch(uPrev, p, 0)) { d = true; }\n"
+			"  }\n"
+			" }\n"
+			" o = vec4(d ? 1.0 : 0.0);\n"
+			"}\n";
+		char dlog[128] = { 0 };
+		GLuint dvs = kvm_drm_egl_compile_shader(GL_VERTEX_SHADER, dvs_src, dlog, sizeof(dlog));
+		GLuint dfs = kvm_drm_egl_compile_shader(GL_FRAGMENT_SHADER, dfs_src, dlog, sizeof(dlog));
+		if (dvs != 0 && dfs != 0)
+		{
+			GLint dlinked = GL_FALSE;
+			g->diff_program = glCreateProgram();
+			glAttachShader(g->diff_program, dvs);
+			glAttachShader(g->diff_program, dfs);
+			glLinkProgram(g->diff_program);
+			glGetProgramiv(g->diff_program, GL_LINK_STATUS, &dlinked);
+			if (dlinked == GL_TRUE)
+			{
+				g->diff_attr_pos = glGetAttribLocation(g->diff_program, "aPos");
+				g->diff_u_cur = glGetUniformLocation(g->diff_program, "uCur");
+				g->diff_u_prev = glGetUniformLocation(g->diff_program, "uPrev");
+				g->diff_u_size = glGetUniformLocation(g->diff_program, "uSize");
+				g->diff_u_tile = glGetUniformLocation(g->diff_program, "uTile");
+			}
+			if (dlinked != GL_TRUE || g->diff_attr_pos < 0 || g->diff_u_cur < 0 || g->diff_u_prev < 0 || g->diff_u_size < 0 || g->diff_u_tile < 0)
+			{
+				glDeleteProgram(g->diff_program);
+				g->diff_program = 0;
+			}
+		}
+		if (dvs != 0) { glDeleteShader(dvs); }
+		if (dfs != 0) { glDeleteShader(dfs); }
+		if (g->diff_program != 0)
+		{
+			glGenTextures(1, &g->prev_tex);
+			glGenTextures(1, &g->diff_tex);
+			g->diff_w = 0;
+			g->diff_h = 0;
+		}
+		(void)glGetError();
+	}
+
 	g->initialized = true;
 	return true;
 }
@@ -618,6 +693,18 @@ static bool kvm_drm_egl_ensure_gpu_target_size(kvm_drm_egl_context *g, int width
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 
+	// The second render target of the same size. The two swap roles every frame, so the previous frame stays on the GPU without a copy.
+	g->have_prev = false;
+	if (g->diff_program != 0)
+	{
+		glBindTexture(GL_TEXTURE_2D, g->prev_tex);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+	}
+
 	glBindFramebuffer(GL_FRAMEBUFFER, g->fbo);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g->out_tex, 0);
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
@@ -629,6 +716,91 @@ static bool kvm_drm_egl_ensure_gpu_target_size(kvm_drm_egl_context *g, int width
 	return true;
 }
 
+#endif
+
+#if defined(__linux__)
+// Compares out_tex with prev_tex tile by tile on the GPU and reads back the changed tiles into their place in rgba_readback.
+// Returns false when it could not, and then the caller reads the whole frame.
+static bool kvm_drm_egl_read_changed_tiles(kvm_drm_egl_context *ctx, int width, int height, int tile)
+{
+	int tw = (width + tile - 1) / tile;
+	int th = (height + tile - 1) / tile;
+	size_t tiles = (size_t)tw * (size_t)th;
+	int r, c;
+
+	if (ctx->changed_tiles_cap < tiles)
+	{
+		uint8_t *a = (uint8_t*)realloc(ctx->changed_tiles, tiles);
+		uint8_t *b = (a != NULL) ? (uint8_t*)realloc(ctx->diff_readback, tiles * 4u) : NULL;
+		if (a != NULL) { ctx->changed_tiles = a; }
+		if (b != NULL) { ctx->diff_readback = b; }
+		if (a == NULL || b == NULL) { ctx->changed_tiles_cap = 0; return false; }
+		ctx->changed_tiles_cap = tiles;
+	}
+
+	(void)glGetError();
+	if (ctx->diff_w != tw || ctx->diff_h != th)
+	{
+		glBindTexture(GL_TEXTURE_2D, ctx->diff_tex);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tw, th, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+		ctx->diff_w = tw;
+		ctx->diff_h = th;
+	}
+
+	// Pass 2: one fragment per tile. Fragment row 0 is the top tile row, the shader turns the rows over.
+	glBindFramebuffer(GL_FRAMEBUFFER, ctx->fbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ctx->diff_tex, 0);
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) { (void)glGetError(); return false; }
+	glViewport(0, 0, tw, th);
+	glUseProgram(ctx->diff_program);
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, ctx->prev_tex);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, ctx->out_tex);
+	glUniform1i(ctx->diff_u_cur, 0);
+	glUniform1i(ctx->diff_u_prev, 1);
+	glUniform2i(ctx->diff_u_size, width, height);
+	glUniform1i(ctx->diff_u_tile, tile);
+	glBindBuffer(GL_ARRAY_BUFFER, ctx->vbo);
+	glEnableVertexAttribArray((GLuint)ctx->diff_attr_pos);
+	glVertexAttribPointer((GLuint)ctx->diff_attr_pos, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), (void*)(0));
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	glDisableVertexAttribArray((GLuint)ctx->diff_attr_pos);
+	glReadPixels(0, 0, tw, th, GL_RGBA, GL_UNSIGNED_BYTE, ctx->diff_readback);
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	if (glGetError() != GL_NO_ERROR) { return false; }
+	for (r = 0; r < (int)tiles; r++) { ctx->changed_tiles[r] = (ctx->diff_readback[(size_t)r * 4u] != 0) ? 1 : 0; }
+
+	// Read back each run of changed tiles in a tile row, straight into its place in the bottom-up frame buffer
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ctx->out_tex, 0);
+	glPixelStorei(0x0D02 /* GL_PACK_ROW_LENGTH */, width);
+	for (r = 0; r < th; r++)
+	{
+		int top = r * tile;
+		int bottom = (top + tile > height) ? height : top + tile;
+		int glY = height - bottom;
+		const uint8_t *row = ctx->changed_tiles + (size_t)r * (size_t)tw;
+		for (c = 0; c < tw; c++)
+		{
+			int c0, x0, x1;
+			if (!row[c]) { continue; }
+			c0 = c;
+			while (c + 1 < tw && row[c + 1]) { c++; }
+			x0 = c0 * tile;
+			x1 = ((c + 1) * tile > width) ? width : (c + 1) * tile;
+			glReadPixels(x0, glY, x1 - x0, bottom - top, GL_RGBA, GL_UNSIGNED_BYTE, ctx->rgba_readback + ((size_t)glY * (size_t)width + (size_t)x0) * 4u);
+		}
+	}
+	glPixelStorei(0x0D02 /* GL_PACK_ROW_LENGTH */, 0);
+	return (glGetError() == GL_NO_ERROR);
+}
 #endif
 
 bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint32_t width, uint32_t height,
@@ -763,8 +935,10 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 	}
 
 	glBindFramebuffer(GL_FRAMEBUFFER, ctx->fbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ctx->out_tex, 0);
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
 	{
+		ctx->have_prev = false;
 		ctx->eglDestroyImageKHRFn(ctx->dpy, image);
 		glDeleteTextures(1, &src_tex);
 		kvm_drm_egl_copy_error_message(out_error, out_error_size, "GPU readback framebuffer became incomplete");
@@ -806,9 +980,23 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 		ctx->rgba_readback_cap = rgba_size;
 	}
 
-	glReadPixels(0, 0, (GLsizei)width, (GLsizei)height, GL_RGBA, GL_UNSIGNED_BYTE, ctx->rgba_readback);
+	// Reading the whole frame back costs most of the CPU time of this path (measured 15 of 21 ms per 1920x1080 frame on a Mali-G610),
+	// so when the previous frame is on the GPU, the tiles are compared there and only the changed ones are read back.
+	ctx->changed_valid = false;
+	if (rgb == NULL && ctx->have_prev && ctx->diff_program != 0 && ctx->direct_tile_size > 0)
+	{
+		ctx->changed_valid = kvm_drm_egl_read_changed_tiles(ctx, (int)width, (int)height, ctx->direct_tile_size);
+	}
+	if (!ctx->changed_valid)
+	{
+		glBindFramebuffer(GL_FRAMEBUFFER, ctx->fbo);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ctx->out_tex, 0);
+		glReadPixels(0, 0, (GLsizei)width, (GLsizei)height, GL_RGBA, GL_UNSIGNED_BYTE, ctx->rgba_readback);
+	}
 	if (!kvm_drm_egl_check_gl_error("glReadPixels", out_error, out_error_size))
 	{
+		ctx->have_prev = false;
+		ctx->changed_valid = false;
 		ctx->eglDestroyImageKHRFn(ctx->dpy, image);
 		glDeleteTextures(1, &src_tex);
 		return false;
@@ -816,6 +1004,19 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 
 	ctx->eglDestroyImageKHRFn(ctx->dpy, image);
 	glDeleteTextures(1, &src_tex);
+
+	// This frame becomes the previous one. Only a caller that takes the readback as it is keeps rgba_readback in step with it.
+	if (rgb == NULL && ctx->diff_program != 0)
+	{
+		GLuint t = ctx->out_tex;
+		ctx->out_tex = ctx->prev_tex;
+		ctx->prev_tex = t;
+		ctx->have_prev = true;
+	}
+	else
+	{
+		ctx->have_prev = false;
+	}
 
 	const size_t rgb_size = (size_t)width * (size_t)height * 3u;
 	if (rgb == NULL)
@@ -859,6 +1060,12 @@ void kvm_drm_egl_destroy_context(kvm_drm_egl_context *ctx)
 	free(ctx->rgba_readback);
 	ctx->rgba_readback = NULL;
 	ctx->rgba_readback_cap = 0;
+	free(ctx->changed_tiles);
+	ctx->changed_tiles = NULL;
+	ctx->changed_tiles_cap = 0;
+	free(ctx->diff_readback);
+	ctx->diff_readback = NULL;
+	ctx->changed_valid = false;
 
 #if defined(__linux__)
 	// dpy is nulled on a device sharing another's EGLDisplay, so only the owner terminates it (and
@@ -871,6 +1078,9 @@ void kvm_drm_egl_destroy_context(kvm_drm_egl_context *ctx)
 		if (ctx->vbo != 0) { glDeleteBuffers(1, &ctx->vbo); ctx->vbo = 0; }
 		if (ctx->fbo != 0) { glDeleteFramebuffers(1, &ctx->fbo); ctx->fbo = 0; }
 		if (ctx->out_tex != 0) { glDeleteTextures(1, &ctx->out_tex); ctx->out_tex = 0; }
+		if (ctx->prev_tex != 0) { glDeleteTextures(1, &ctx->prev_tex); ctx->prev_tex = 0; }
+		if (ctx->diff_tex != 0) { glDeleteTextures(1, &ctx->diff_tex); ctx->diff_tex = 0; }
+		if (ctx->diff_program != 0) { glDeleteProgram(ctx->diff_program); ctx->diff_program = 0; }
 		eglMakeCurrent(ctx->dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 		if (ctx->ctx != EGL_NO_CONTEXT) { eglDestroyContext(ctx->dpy, ctx->ctx); ctx->ctx = EGL_NO_CONTEXT; }
 		if (ctx->surf != EGL_NO_SURFACE) { eglDestroySurface(ctx->dpy, ctx->surf); ctx->surf = EGL_NO_SURFACE; }
@@ -889,5 +1099,8 @@ void kvm_drm_egl_destroy_context(kvm_drm_egl_context *ctx)
 	ctx->u_tex = 0;
 #endif
 
+#if defined(__linux__)
+	ctx->have_prev = false;
+#endif
 	ctx->initialized = false;
 }

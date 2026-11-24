@@ -42,6 +42,7 @@ struct tileFrame_t {
 	int width;
 	int height;
 	J_COLOR_SPACE format;
+	const unsigned char *changed;	// NULL, or one byte per tile, row by row: 0 where the capture already found the tile equal to the previous frame
 };
 
 extern void tile_info_alloc(void);

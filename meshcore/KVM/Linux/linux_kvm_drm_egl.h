@@ -64,10 +64,33 @@ typedef struct kvm_drm_egl_context
 	GLint attr_pos;
 	GLint attr_tex;
 	GLint u_tex;
+
+	// Changed-tile readback: the previous frame stays on the GPU in prev_tex, a second pass writes one value per tile into diff_tex
+	bool es3;
+	bool have_prev;
+	GLuint prev_tex;
+	GLuint diff_tex;
+	GLuint diff_program;
+	GLint diff_attr_pos;
+	GLint diff_u_cur;
+	GLint diff_u_prev;
+	GLint diff_u_size;
+	GLint diff_u_tile;
+	int diff_w;
+	int diff_h;
 #endif
 
 	uint8_t *rgba_readback;
 	size_t rgba_readback_cap;
+
+	// Set by the caller for a call without an RGB24 buffer: the tile size, or 0 to read the whole frame back
+	int direct_tile_size;
+	// After such a call, when changed_valid is set: one byte per tile, row by row from the top, 0 where the tile equals the previous frame.
+	// rgba_readback then holds new pixels only for the changed tiles, and what it already had for the others.
+	bool changed_valid;
+	uint8_t *changed_tiles;
+	size_t changed_tiles_cap;
+	uint8_t *diff_readback;
 } kvm_drm_egl_context;
 
 bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint32_t width, uint32_t height,
