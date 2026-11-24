@@ -361,8 +361,7 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay, int animated)
 
 	unsigned short w = ((unsigned short*)(cursor_image + 4))[0];
 	unsigned short h = ((unsigned short*)(cursor_image + 6))[0];
-	char *pixels = cursor_image + (sizeof(void*) == 8 ? 24 : 16);
-	char alpha[65535];
+	unsigned char alpha[65535];
 	int i;
 
 	// GTK hides the pointer while typing with a nameless 1x1 cursor whose alpha is 0, so it goes out as NONE instead of a visible pointer
@@ -383,11 +382,10 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay, int animated)
 
 	if (((size_t)(w*h) <= sizeof(alpha)) && ((size_t)(w*h) > 6))
 	{
-		for (i = 0; i < (w*h); ++i)
-		{
-			alpha[i] = pixels[(sizeof(void*)==8?(3 + (i * 8)):(3 + (i * 4)))];
-		}
-		switch (crc32c(0, (unsigned char*)alpha+6, (uint32_t)((w*h)-6)))
+		// The alpha from the pixels pointer. The old walk read the struct tail as its first three pixels, and the table was computed
+		// over pixels 3 to w*h-4 of that walk, so the same window of real pixels is kept.
+		for (i = 0; i < (w*h); ++i) { alpha[i] = (unsigned char)(argb[i] >> 24); }
+		switch (crc32c(0, alpha + 3, (uint32_t)((w*h) - 6)))
 		{
 			case 2788757291:			// Ubuntu 20
 			case 1722092522:			// Ubuntu 9/10 (Top)
@@ -1516,6 +1514,7 @@ void* kvm_server_mainloop_x11(void* parm)
 			// Only the events queued now, so notifies that arrive while the lookup below runs wait for the next frame
 			int pending = x11_exports->XPending(cursordisplay);
 			XEvent cursorXE;
+			memset(&cursorXE, 0, sizeof(cursorXE));
 			int cursorNotified = 0;
 			int animFrames = 0;				// Nameless notifies with a new serial in this pass
 			unsigned long lastSerial = 0;
