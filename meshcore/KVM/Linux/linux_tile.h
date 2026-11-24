@@ -48,6 +48,7 @@ struct tileFrame_t {
 extern void tile_info_alloc(void);
 extern void tile_info_free(void);
 extern void tile_request_refresh(void);
+extern int tile_pass_needed(void);
 extern void tile_frame_from_rgb24(struct tileFrame_t *frame, const unsigned char *pixels, ptrdiff_t stride, int width, int height);
 extern int tile_frame_from_ximage(struct tileFrame_t *frame, XImage *image);
 extern void tile_start_pass(const struct tileFrame_t *frame);

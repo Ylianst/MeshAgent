@@ -80,6 +80,15 @@ void tile_request_refresh(void)
 	tileRefreshPending = 1;
 }
 
+// True when the next pass must run although nothing changed on the screen: a refresh was asked for, or a tile still has to be sent
+int tile_pass_needed(void)
+{
+	int r, c;
+	if (tileRefreshPending || g_tileInfo == NULL) { return 1; }
+	for (r = 0; r < TILE_HEIGHT_COUNT; r++) { for (c = 0; c < TILE_WIDTH_COUNT; c++) { if (g_tileInfo[r][c].stale) { return 1; } } }
+	return 0;
+}
+
 void tile_frame_from_rgb24(struct tileFrame_t *frame, const unsigned char *pixels, ptrdiff_t stride, int width, int height)
 {
 	frame->pixels = pixels;

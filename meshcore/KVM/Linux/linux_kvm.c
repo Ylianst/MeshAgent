@@ -197,6 +197,34 @@ typedef struct xfixes_struct
 	void*(*XFixesGetCursorImageAndName)(Display *d);
 }xfixes_struct;
 xfixes_struct *xfixes_exports = NULL;
+
+// XDamage, loaded like the other X libraries. Declared here, because Xdamage.h is not installed on every build host.
+typedef XID kvm_Damage;
+typedef struct
+{
+	int type;
+	unsigned long serial;
+	Bool send_event;
+	Display *display;
+	Drawable drawable;
+	kvm_Damage damage;
+	int level;
+	Bool more;
+	Time timestamp;
+	XRectangle area;
+	XRectangle geometry;
+} kvm_XDamageNotifyEvent;
+typedef struct xdamage_struct
+{
+	void *xdamage_lib;
+	Bool(*XDamageQueryExtension)(Display *d, int *event_base, int *error_base);
+	kvm_Damage(*XDamageCreate)(Display *d, Drawable drawable, int level);
+} xdamage_struct;
+xdamage_struct *xdamage_exports = NULL;
+#define KVM_XDAMAGE_REPORT_RAW_RECTANGLES 0
+#define KVM_XDAMAGE_NOTIFY 0
+// Damage can miss content, direct-rendered OpenGL for one, so every so many frames the whole screen is compared as before
+#define KVM_XDAMAGE_FULL_EVERY 10
 xkb_struct *xkb_exports = NULL;
 
 typedef struct xrandr_struct
@@ -759,6 +787,16 @@ int kvm_init(int displayNo)
 			((void**)xfixes_exports)[4] = (void*)dlsym(xfixes_exports->xfixes_lib, "XFixesGetCursorImageAndName");
 		}
 	}
+	if (xdamage_exports == NULL)
+	{
+		xdamage_exports = ILibMemory_SmartAllocate(sizeof(xdamage_struct));
+		xdamage_exports->xdamage_lib = dlopen("libXdamage.so.1", RTLD_NOW);
+		if (xdamage_exports->xdamage_lib)
+		{
+			xdamage_exports->XDamageQueryExtension = (Bool(*)(Display*, int*, int*))dlsym(xdamage_exports->xdamage_lib, "XDamageQueryExtension");
+			xdamage_exports->XDamageCreate = (kvm_Damage(*)(Display*, Drawable, int))dlsym(xdamage_exports->xdamage_lib, "XDamageCreate");
+		}
+	}
 	if (xkb_exports == NULL)
 	{
 		xkb_exports = ILibMemory_SmartAllocate(sizeof(xkb_struct));
@@ -1230,6 +1268,19 @@ static int kvm_write_all(int fd, const char *buffer, size_t len)
 	return 0;
 }
 
+// Marks the tiles a rectangle of the captured screen touches
+static void kvm_x11_mark_tiles(unsigned char *tiles, int x, int y, int w, int h)
+{
+	int c0, c1, r0, r1, r;
+	if (x < 0) { w += x; x = 0; }
+	if (y < 0) { h += y; y = 0; }
+	if (w <= 0 || h <= 0 || x >= SCREEN_WIDTH || y >= SCREEN_HEIGHT) { return; }
+	c0 = x / TILE_WIDTH; c1 = (x + w - 1) / TILE_WIDTH; r0 = y / TILE_HEIGHT; r1 = (y + h - 1) / TILE_HEIGHT;
+	if (c1 >= TILE_WIDTH_COUNT) { c1 = TILE_WIDTH_COUNT - 1; }
+	if (r1 >= TILE_HEIGHT_COUNT) { r1 = TILE_HEIGHT_COUNT - 1; }
+	for (r = r0; r <= r1; r++) { memset(tiles + (size_t)r * TILE_WIDTH_COUNT + c0, 1, (size_t)(c1 - c0 + 1)); }
+}
+
 // Detaches and frees the shared memory image of the capture
 static void kvm_x11_image_release(Display *display, XImage **image, XShmSegmentInfo *shminfo)
 {
@@ -1256,6 +1307,12 @@ void* kvm_server_mainloop_x11(void* parm)
 
 	void *desktop = NULL;
 	struct tileFrame_t frame;
+	// XDamage on the capture connection: the changed tiles of a frame, the pointer drawn into the last frame, and where the pointer was
+	kvm_Damage xdamage = 0;
+	int damageEventBase = 0, damageErrorBase = 0, framesSinceFull = 0;
+	unsigned char *damagedTiles = NULL;
+	size_t damagedTilesSize = 0;
+	int drawnX = 0, drawnY = 0, drawnW = 0, drawnH = 0, lastPointerX = -1, lastPointerY = -1;
 	XImage *image = NULL;
 	eventdisplay = NULL;
 	Display *imagedisplay = NULL, *cursordisplay = NULL;
@@ -1391,10 +1448,18 @@ void* kvm_server_mainloop_x11(void* parm)
 				kvm_x11_image_release(imagedisplay, &image, &shminfo);
 				x11_exports->XCloseDisplay(imagedisplay);
 				imagedisplay = NULL;
+				xdamage = 0;
 			}
 		}
 		if (imagedisplay == NULL) { imagedisplay = x11_exports->XOpenDisplay(CURRENT_XDISPLAY); }
 		if (imagedisplay == NULL) { g_shutdown = 1; break; }
+		if (xdamage == 0 && xdamage_exports->XDamageQueryExtension != NULL && xdamage_exports->XDamageCreate != NULL &&
+			xdamage_exports->XDamageQueryExtension(imagedisplay, &damageEventBase, &damageErrorBase))
+		{
+			// Damage events arrive on this connection, so the next frame starts with a whole compare
+			xdamage = xdamage_exports->XDamageCreate(imagedisplay, RootWindowOfScreen(ScreenOfDisplay(imagedisplay, CURRENT_DISPLAY_ID)), KVM_XDAMAGE_REPORT_RAW_RECTANGLES);
+			framesSinceFull = KVM_XDAMAGE_FULL_EVERY;
+		}
 
 		if (DisplayWidth(imagedisplay, CURRENT_DISPLAY_ID) != VSCREEN_WIDTH ||
 			DisplayHeight(imagedisplay, CURRENT_DISPLAY_ID) != VSCREEN_HEIGHT ||
@@ -1585,6 +1650,45 @@ void* kvm_server_mainloop_x11(void* parm)
 			}
 		}
 
+		// The tiles the X server reports as changed since the last frame. With nothing changed, nothing to send and the pointer still, the frame is skipped.
+		if (xdamage != 0 && image != NULL)
+		{
+			size_t tiles = (size_t)TILE_WIDTH_COUNT * (size_t)TILE_HEIGHT_COUNT;
+			int damaged = 0;
+			if (damagedTilesSize != tiles)
+			{
+				free(damagedTiles);
+				damagedTiles = (unsigned char *)malloc(tiles);
+				damagedTilesSize = (damagedTiles != NULL) ? tiles : 0;
+				framesSinceFull = KVM_XDAMAGE_FULL_EVERY;
+			}
+			if (damagedTiles != NULL) { memset(damagedTiles, 0, tiles); }
+			while (x11_exports->XPending(imagedisplay) > 0)
+			{
+				XEvent de;
+				x11_exports->XNextEvent(imagedisplay, &de);
+				if (de.type == damageEventBase + KVM_XDAMAGE_NOTIFY && damagedTiles != NULL)
+				{
+					XRectangle *a = &((kvm_XDamageNotifyEvent*)&de)->area;
+					kvm_x11_mark_tiles(damagedTiles, a->x - CAPTURE_X, a->y - CAPTURE_Y, a->width, a->height);
+					damaged = 1;
+				}
+			}
+			if (damagedTiles != NULL && drawnW > 0) { kvm_x11_mark_tiles(damagedTiles, drawnX, drawnY, drawnW, drawnH); }
+			if (damagedTiles != NULL && !damaged && drawnW == 0 && gRemoteMouseRenderDefault == 0 && framesSinceFull < KVM_XDAMAGE_FULL_EVERY && !tile_pass_needed())
+			{
+				Window qr, qc;
+				int qx, qy, qwx, qwy;
+				unsigned int qm;
+				if (x11_exports->XQueryPointer(imagedisplay, RootWindowOfScreen(ScreenOfDisplay(imagedisplay, CURRENT_DISPLAY_ID)), &qr, &qc, &qx, &qy, &qwx, &qwy, &qm) &&
+					qx == lastPointerX && qy == lastPointerY)
+				{
+					framesSinceFull++;
+					continue;
+				}
+			}
+		}
+
 		if (image != NULL)
 		{
 			x11ext_exports->XShmGetImage(imagedisplay,
@@ -1602,6 +1706,8 @@ void* kvm_server_mainloop_x11(void* parm)
 		{
 			rs = x11_exports->XQueryPointer(imagedisplay, RootWindowOfScreen(ScreenOfDisplay(imagedisplay, CURRENT_DISPLAY_ID)),
 				&rr, &cr, &rx, &ry, &wx, &wy, &mr);
+			if (rs == 1) { lastPointerX = rx; lastPointerY = ry; }
+			drawnW = 0;
 			if (rs == 1 && cursordisplay != NULL)
 			{
 				// XTest moves the pointer on eventdisplay and XQueryPointer reads it on imagedisplay, so in a pass with injected input rx and ry can still be the old position.
@@ -1632,6 +1738,9 @@ void* kvm_server_mainloop_x11(void* parm)
 					if (localRx >= 0 && localRx < SCREEN_WIDTH && localRy >= 0 && localRy < SCREEN_HEIGHT)
 					{
 						bitblt(pixels, (int)w, (int)h, 0, 0, (int)w, (int)h, image->data, SCREEN_WIDTH, SCREEN_HEIGHT, mx, my, 1);
+						// The drawn pointer is no damage the X server knows of, so its tiles count as changed in this frame and the next one
+						drawnX = mx; drawnY = my; drawnW = w; drawnH = h;
+						if (xdamage != 0 && damagedTiles != NULL) { kvm_x11_mark_tiles(damagedTiles, drawnX, drawnY, drawnW, drawnH); }
 					}
 
 					// Gated on sentCursor, not sentHideCursor, so a refresh from a joining viewer resends the hide as well
@@ -1658,6 +1767,15 @@ void* kvm_server_mainloop_x11(void* parm)
 			{
 				getScreenBuffer((char **)&desktop, &desktopsize, image);
 				tile_frame_from_rgb24(&frame, (const unsigned char *)desktop, (ptrdiff_t)adjust_screen_size(SCREEN_WIDTH) * 3, image->width, image->height);
+			}
+			if (xdamage != 0 && damagedTiles != NULL && framesSinceFull < KVM_XDAMAGE_FULL_EVERY)
+			{
+				frame.changed = damagedTiles;
+				framesSinceFull++;
+			}
+			else
+			{
+				framesSinceFull = 0;
 			}
 			tile_start_pass(&frame);
 
@@ -1692,6 +1810,7 @@ void* kvm_server_mainloop_x11(void* parm)
 	}
 
 	if (desktop != NULL) { free(desktop); desktop = NULL; }
+	free(damagedTiles);
 	close(slave2master[1]);
 	close(master2slave[0]);
 	slave2master[1] = 0;
