@@ -3364,7 +3364,8 @@ void *kvm_server_mainloop_drm(void *parm)
 		// Not while MESH_KVM_DRM_DUMP is set, because the dump reads the composed RGB24 desktop.
 		struct tileFrame_t directFrame;
 		int direct = 0;
-		int dumpOn = (getenv("MESH_KVM_DRM_DUMP") != NULL && getenv("MESH_KVM_DRM_DUMP")[0] != 0);
+		static int dumpOn = -1;
+		if (dumpOn < 0) { dumpOn = (getenv("MESH_KVM_DRM_DUMP") != NULL && getenv("MESH_KVM_DRM_DUMP")[0] != 0); }
 		int directAllowed = (outputCount == 1 && !dumpOn);
 		int desktopCleared = 0;
 

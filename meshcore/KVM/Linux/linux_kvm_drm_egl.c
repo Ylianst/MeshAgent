@@ -1066,7 +1066,6 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 	glDisableVertexAttribArray((GLuint)ctx->attr_pos);
 	glDisableVertexAttribArray((GLuint)ctx->attr_tex);
-	glFinish();
 	if (!kvm_drm_egl_check_gl_error("GPU draw/readback pass", out_error, out_error_size))
 	{
 		ctx->eglDestroyImageKHRFn(ctx->dpy, image);
