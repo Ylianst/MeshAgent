@@ -331,7 +331,11 @@ long ILibGetTimeStamp();
 	typedef volatile int ILibSpinLock;
 #endif
 	static inline void ILibSpinLock_Init(ILibSpinLock *lock) { *lock = 0; }
-	static inline void ILibSpinLock_UnLock(ILibSpinLock *lock) { *lock = 0; }
+#ifdef WIN32
+	static inline void ILibSpinLock_UnLock(ILibSpinLock *lock) { InterlockedExchange(lock, 0); }
+#else
+	static inline void ILibSpinLock_UnLock(ILibSpinLock *lock) { __sync_lock_release(lock); }
+#endif
 	static inline void ILibSpinLock_Lock(ILibSpinLock *lock)
 	{
 #ifdef WIN32
