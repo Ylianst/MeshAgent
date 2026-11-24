@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+#include <setjmp.h>
 #include "linux_compression.h"
 #include "../../../microstack/ILibParsers.h"
 
@@ -30,13 +31,23 @@ static unsigned char *jpegOut = NULL;
 static size_t jpegOutSize = 0;
 static int jpegOutLength = 0;
 
+struct jpeg_error_jmp
+{
+	struct jpeg_error_mgr pub;
+	jmp_buf jump;
+};
+static int jpegErrorReported = 0;
+
+// Returns to write_JPEG_rect(), which gives up on this rectangle. It ended the process with exit(1) before, and with it the KVM session.
 void jpeg_error_handler(j_common_ptr ptr)
 {
 	// Build the error string
 	(*(ptr->err->format_message)) (ptr, jpegLastError);
 
-	if (default_JPEG_error_handler != NULL) { default_JPEG_error_handler(jpegLastError); }
-	exit(1);
+	// A rectangle that fails is tried again with every frame, so only the first failure in a row is reported
+	if (default_JPEG_error_handler != NULL && jpegErrorReported == 0) { default_JPEG_error_handler(jpegLastError); }
+	jpegErrorReported = 1;
+	longjmp(((struct jpeg_error_jmp*)ptr->err)->jump, 1);
 }
 
 void init_destination(j_compress_ptr cinfo)
@@ -80,12 +91,20 @@ void jpeg_output_free(void)
 unsigned char *write_JPEG_rect(const unsigned char *pixels, ptrdiff_t stride, int image_width, int image_height, int components, J_COLOR_SPACE format, int quality, int *length)
 {
 	struct jpeg_compress_struct cinfo;
-	struct jpeg_error_mgr jerr;
+	struct jpeg_error_jmp jerr;
 	struct jpeg_destination_mgr dest;
 	JSAMPROW row_pointer[1];
 
-	cinfo.err = jpeg_std_error(&jerr);
-	if (default_JPEG_error_handler != NULL) { jerr.error_exit = jpeg_error_handler; }
+	// Zeroed first, because an error inside jpeg_create_compress() comes back here before libjpeg has cleared the structure
+	memset(&cinfo, 0, sizeof(cinfo));
+	cinfo.err = jpeg_std_error(&jerr.pub);
+	jerr.pub.error_exit = jpeg_error_handler;
+	if (setjmp(jerr.jump))
+	{
+		jpeg_destroy_compress(&cinfo);
+		*length = 0;
+		return NULL;
+	}
 
 	jpeg_create_compress(&cinfo);
 	dest.init_destination = &init_destination;
@@ -123,6 +142,7 @@ unsigned char *write_JPEG_rect(const unsigned char *pixels, ptrdiff_t stride, in
 	jpeg_finish_compress(&cinfo);
 	jpeg_destroy_compress(&cinfo);
 
+	jpegErrorReported = 0;
 	*length = jpegOutLength;
 	return jpegOut + JPEG_HEADER_ROOM;
 }
@@ -133,6 +153,7 @@ int write_JPEG_buffer(JSAMPLE * image_buffer, int image_width, int image_height,
 	unsigned char *jpeg = write_JPEG_rect(image_buffer, (ptrdiff_t)image_width * 3, image_width, image_height, 3, JCS_RGB, quality, &jpeg_buffer_length);
 
 	if (jpeg_buffer != NULL) { free(jpeg_buffer); jpeg_buffer = NULL; }
+	if (jpeg == NULL) { jpeg_buffer_length = 0; return 0; }
 	if ((jpeg_buffer = (unsigned char *)malloc(jpeg_buffer_length)) == NULL) { ILIBCRITICALEXIT(254); }
 	memcpy(jpeg_buffer, jpeg, jpeg_buffer_length);
 	return 0;

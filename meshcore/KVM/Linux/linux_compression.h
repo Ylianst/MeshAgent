@@ -35,7 +35,7 @@ typedef void(*JPEG_error_handler)(char *msg);
 
 extern int write_JPEG_buffer (JSAMPLE * image_buffer, int image_width, int image_height, int quality);
 // Encodes a rectangle straight from the caller's pixels. stride is the byte distance between two rows, negative for a bottom-up frame, components the bytes per pixel.
-// Returns the JPEG and sets *length. The JPEG lies in the encoder's one output buffer and holds until the next call.
+// Returns the JPEG and sets *length, or NULL when libjpeg reported an error. The JPEG lies in the encoder's one output buffer and holds until the next call.
 // JPEG_HEADER_ROOM bytes in front of the JPEG are free for a packet header, so a packet needs no copy.
 extern unsigned char *write_JPEG_rect(const unsigned char *pixels, ptrdiff_t stride, int image_width, int image_height, int components, J_COLOR_SPACE format, int quality, int *length);
 extern void jpeg_output_free(void);
