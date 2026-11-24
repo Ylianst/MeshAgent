@@ -46,6 +46,11 @@ typedef struct kvm_drm_egl_target
 	GLuint out_tex;
 	GLuint prev_tex;
 	GLuint diff_tex;
+	// The linear buffers behind out_tex and prev_tex, swapped with them. NULL when the texture is an ordinary one.
+	void *out_bo;
+	void *prev_bo;
+	EGLImageKHR out_img;
+	EGLImageKHR prev_img;
 	int w;
 	int h;
 	int diff_w;
@@ -89,6 +94,10 @@ typedef struct kvm_drm_egl_context
 	GLint diff_u_tile;
 	// Render targets per output, because the previous frame of each output stays on the GPU. Target 0 also serves the RGB24 path.
 	kvm_drm_egl_target targets[KVM_DRM_EGL_TARGETS];
+	// A GBM device on the DRM node, for render targets in linear buffers. linear_off is set when that does not work on this driver.
+	int drm_fd;
+	void *gbm;
+	bool linear_off;
 #endif
 
 	uint8_t *rgba_readback;

@@ -72,6 +72,35 @@ KVM_DRM_EGL_SYMBOLS(KVM_DRM_EGL_DECL_PTR)
 KVM_DRM_GLES_SYMBOLS(KVM_DRM_EGL_DECL_PTR)
 #undef KVM_DRM_EGL_DECL_PTR
 
+// libgbm is loaded on first use. Only these five functions are used, so no header is needed.
+static void *g_libgbm_handle = NULL;
+static void *(*p_gbm_create_device)(int fd) = NULL;
+static void (*p_gbm_device_destroy)(void *gbm) = NULL;
+static void *(*p_gbm_bo_create)(void *gbm, uint32_t width, uint32_t height, uint32_t format, uint32_t flags) = NULL;
+static int (*p_gbm_bo_get_fd)(void *bo) = NULL;
+static uint32_t (*p_gbm_bo_get_stride)(void *bo) = NULL;
+static void (*p_gbm_bo_destroy)(void *bo) = NULL;
+
+static int kvm_drm_egl_load_gbm(void)
+{
+	void *h;
+	if (g_libgbm_handle != NULL) { return 1; }
+	if ((h = dlopen("libgbm.so.1", RTLD_NOW)) == NULL) { return 0; }
+	p_gbm_create_device = (void *(*)(int))dlsym(h, "gbm_create_device");
+	p_gbm_device_destroy = (void (*)(void *))dlsym(h, "gbm_device_destroy");
+	p_gbm_bo_create = (void *(*)(void *, uint32_t, uint32_t, uint32_t, uint32_t))dlsym(h, "gbm_bo_create");
+	p_gbm_bo_get_fd = (int (*)(void *))dlsym(h, "gbm_bo_get_fd");
+	p_gbm_bo_get_stride = (uint32_t (*)(void *))dlsym(h, "gbm_bo_get_stride");
+	p_gbm_bo_destroy = (void (*)(void *))dlsym(h, "gbm_bo_destroy");
+	if (p_gbm_create_device == NULL || p_gbm_device_destroy == NULL || p_gbm_bo_create == NULL || p_gbm_bo_get_fd == NULL || p_gbm_bo_get_stride == NULL || p_gbm_bo_destroy == NULL)
+	{
+		dlclose(h);
+		return 0;
+	}
+	g_libgbm_handle = h;
+	return 1;
+}
+
 static void *g_libEGL_handle = NULL;
 static void *g_libGLES_handle = NULL;
 static int kvm_drm_egl_load_libs(void)
@@ -579,6 +608,8 @@ static bool kvm_drm_egl_init_gpu_readback(kvm_drm_egl_context *g, int drm_fd, ch
 
 	glGenFramebuffers(1, &g->fbo);
 	memset(g->targets, 0, sizeof(g->targets));
+	g->gbm = NULL;
+	g->linear_off = false;
 
 	// The tile compare pass. Without it every frame is read back whole, as before.
 	g->diff_program = 0;
@@ -642,6 +673,53 @@ static bool kvm_drm_egl_init_gpu_readback(kvm_drm_egl_context *g, int drm_fd, ch
 	return true;
 }
 
+static void kvm_drm_egl_free_linear(kvm_drm_egl_context *g, void **bo, EGLImageKHR *img)
+{
+	if (*img != NULL && *img != EGL_NO_IMAGE_KHR && g->eglDestroyImageKHRFn != NULL) { g->eglDestroyImageKHRFn(g->dpy, *img); }
+	*img = NULL;
+	if (*bo != NULL) { p_gbm_bo_destroy(*bo); }
+	*bo = NULL;
+}
+
+// Backs the texture with a linear buffer from GBM. Reading a linear render target back costs less CPU time than the driver's own tiled layout.
+// Returns false when that is not possible, and the caller then uses an ordinary texture.
+static bool kvm_drm_egl_linear_texture(kvm_drm_egl_context *g, GLuint *tex, void **bo, EGLImageKHR *img, int width, int height)
+{
+	EGLint attrs[24];
+	int a = 0, fd;
+
+	kvm_drm_egl_free_linear(g, bo, img);
+	if (g->linear_off || g->drm_fd < 0 || !kvm_drm_egl_load_gbm()) { return false; }
+	if (g->gbm == NULL && (g->gbm = p_gbm_create_device(g->drm_fd)) == NULL) { g->linear_off = true; return false; }
+
+	// GBM_BO_USE_RENDERING | GBM_BO_USE_LINEAR
+	if ((*bo = p_gbm_bo_create(g->gbm, (uint32_t)width, (uint32_t)height, DRM_FORMAT_ABGR8888, (1u << 2) | (1u << 4))) == NULL) { g->linear_off = true; return false; }
+	if ((fd = p_gbm_bo_get_fd(*bo)) < 0) { kvm_drm_egl_free_linear(g, bo, img); g->linear_off = true; return false; }
+	attrs[a++] = EGL_WIDTH; attrs[a++] = width;
+	attrs[a++] = EGL_HEIGHT; attrs[a++] = height;
+	attrs[a++] = EGL_LINUX_DRM_FOURCC_EXT; attrs[a++] = (EGLint)DRM_FORMAT_ABGR8888;
+	attrs[a++] = EGL_DMA_BUF_PLANE0_FD_EXT; attrs[a++] = fd;
+	attrs[a++] = EGL_DMA_BUF_PLANE0_OFFSET_EXT; attrs[a++] = 0;
+	attrs[a++] = EGL_DMA_BUF_PLANE0_PITCH_EXT; attrs[a++] = (EGLint)p_gbm_bo_get_stride(*bo);
+	attrs[a++] = EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT; attrs[a++] = (EGLint)(DRM_FORMAT_MOD_LINEAR & 0xFFFFFFFFu);
+	attrs[a++] = EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT; attrs[a++] = (EGLint)(DRM_FORMAT_MOD_LINEAR >> 32);
+	attrs[a++] = EGL_NONE;
+	*img = g->eglCreateImageKHRFn(g->dpy, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, attrs);
+	close(fd);
+	if (*img == EGL_NO_IMAGE_KHR) { *img = NULL; kvm_drm_egl_free_linear(g, bo, img); g->linear_off = true; return false; }
+
+	if (*tex == 0) { glGenTextures(1, tex); }
+	glBindTexture(GL_TEXTURE_2D, *tex);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	(void)glGetError();
+	g->glEGLImageTargetTexture2DOESFn(GL_TEXTURE_2D, (GLeglImageOES)*img);
+	if (glGetError() != GL_NO_ERROR) { kvm_drm_egl_free_linear(g, bo, img); g->linear_off = true; return false; }
+	return true;
+}
+
 static void kvm_drm_egl_alloc_target_texture(GLuint *tex, int width, int height)
 {
 	if (*tex == 0) { glGenTextures(1, tex); }
@@ -694,10 +772,26 @@ static bool kvm_drm_egl_ensure_gpu_target_size(kvm_drm_egl_context *g, kvm_drm_e
 
 	if (t->out_tex != 0 && t->w == width && t->h == height) { return true; }
 
-	kvm_drm_egl_alloc_target_texture(&t->out_tex, width, height);
-	// The second render target of the same size. The two swap roles every frame, so the previous frame stays on the GPU without a copy.
+	// Linear buffers where the driver can render into them, ordinary textures otherwise.
+	// The second render target has the same size, and the two swap roles every frame, so the previous frame stays on the GPU without a copy.
 	t->have_prev = false;
-	if (g->diff_program != 0) { kvm_drm_egl_alloc_target_texture(&t->prev_tex, width, height); }
+	if (kvm_drm_egl_linear_texture(g, &t->out_tex, &t->out_bo, &t->out_img, width, height))
+	{
+		glBindFramebuffer(GL_FRAMEBUFFER, g->fbo);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t->out_tex, 0);
+		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE ||
+			(g->diff_program != 0 && !kvm_drm_egl_linear_texture(g, &t->prev_tex, &t->prev_bo, &t->prev_img, width, height)))
+		{
+			g->linear_off = true;
+		}
+	}
+	if (t->out_bo == NULL || g->linear_off)
+	{
+		kvm_drm_egl_free_linear(g, &t->out_bo, &t->out_img);
+		kvm_drm_egl_free_linear(g, &t->prev_bo, &t->prev_img);
+		kvm_drm_egl_alloc_target_texture(&t->out_tex, width, height);
+		if (g->diff_program != 0) { kvm_drm_egl_alloc_target_texture(&t->prev_tex, width, height); }
+	}
 	t->w = width;
 	t->h = height;
 
@@ -866,6 +960,7 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 		kvm_drm_egl_copy_error_message(out_error, out_error_size, "No usable destination for the GPU readback");
 		return false;
 	}
+	if (ctx->gbm == NULL) { ctx->drm_fd = drm_fd; }
 	if (!kvm_drm_egl_ensure_gpu_target_size(ctx, t, (t == &ctx->targets[0]), (int)width, (int)height, out_error, out_error_size)) { return false; }
 
 	static const EGLint planeFdAttr[4]     = { EGL_DMA_BUF_PLANE0_FD_EXT,         EGL_DMA_BUF_PLANE1_FD_EXT,         EGL_DMA_BUF_PLANE2_FD_EXT,         EGL_DMA_BUF_PLANE3_FD_EXT };
@@ -1033,8 +1128,14 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 	if (rgb == NULL && ctx->diff_program != 0)
 	{
 		GLuint swap = t->out_tex;
+		void *swapBo = t->out_bo;
+		EGLImageKHR swapImg = t->out_img;
 		t->out_tex = t->prev_tex;
 		t->prev_tex = swap;
+		t->out_bo = t->prev_bo;
+		t->prev_bo = swapBo;
+		t->out_img = t->prev_img;
+		t->prev_img = swapImg;
 		t->have_prev = true;
 	}
 	else
@@ -1103,6 +1204,8 @@ void kvm_drm_egl_destroy_context(kvm_drm_egl_context *ctx)
 		if (ctx->fbo != 0) { glDeleteFramebuffers(1, &ctx->fbo); ctx->fbo = 0; }
 		for (int i = 0; i < KVM_DRM_EGL_TARGETS; i++)
 		{
+			kvm_drm_egl_free_linear(ctx, &ctx->targets[i].out_bo, &ctx->targets[i].out_img);
+			kvm_drm_egl_free_linear(ctx, &ctx->targets[i].prev_bo, &ctx->targets[i].prev_img);
 			if (ctx->targets[i].out_tex != 0) { glDeleteTextures(1, &ctx->targets[i].out_tex); }
 			if (ctx->targets[i].prev_tex != 0) { glDeleteTextures(1, &ctx->targets[i].prev_tex); }
 			if (ctx->targets[i].diff_tex != 0) { glDeleteTextures(1, &ctx->targets[i].diff_tex); }
@@ -1112,6 +1215,7 @@ void kvm_drm_egl_destroy_context(kvm_drm_egl_context *ctx)
 		eglMakeCurrent(ctx->dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 		if (ctx->ctx != EGL_NO_CONTEXT) { eglDestroyContext(ctx->dpy, ctx->ctx); ctx->ctx = EGL_NO_CONTEXT; }
 		if (ctx->surf != EGL_NO_SURFACE) { eglDestroySurface(ctx->dpy, ctx->surf); ctx->surf = EGL_NO_SURFACE; }
+		if (ctx->gbm != NULL) { p_gbm_device_destroy(ctx->gbm); ctx->gbm = NULL; }
 		eglTerminate(ctx->dpy);
 		ctx->dpy = EGL_NO_DISPLAY;
 	}
