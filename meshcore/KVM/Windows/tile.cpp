@@ -273,9 +273,9 @@ static char* tile_jpeg_encode(int x, int y, int width, int height, void *desktop
 static void set_tile_header(char *Tile, DWORD jpegSize, int x, int y, void **buffer, long long *bufferSize)
 {
 	*buffer = (unsigned char*)Tile;
-	*bufferSize = jpegSize + (jpegSize > 65500 ? 16 : 8);
+	*bufferSize = jpegSize + (jpegSize > TILE_JUMBO_LIMIT ? TILE_JUMBO_HEADER_SIZE : TILE_HEADER_SIZE);
 
-	if (jpegSize > 65500)
+	if (jpegSize > TILE_JUMBO_LIMIT)
 	{
 		((unsigned short*)*buffer)[0] = (unsigned short)htons((unsigned short)MNG_JUMBO);		// Write the type
 		((unsigned short*)*buffer)[1] = (unsigned short)htons((unsigned short)8);				// Write the size
@@ -294,8 +294,8 @@ static void set_tile_header(char *Tile, DWORD jpegSize, int x, int y, void **buf
 	}
 }
 
-// This function always returns 0 since jumbo support, and *buffer != NULL if everything was good
-int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void* desktop, void ** buffer, long long *bufferSize) 
+// *buffer != NULL if everything was good
+void calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void* desktop, void ** buffer, long long *bufferSize)
 {
 	BITMAPINFO bmpInfo;
 	LARGE_INTEGER Offset;
@@ -305,9 +305,10 @@ int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void*
 
 	KVMDEBUG("calc_opt_compr_send()", 0);
 
-	// JPEG goes through libjpeg, which reads the desktop buffer in place, and GDI+ below stays for PNG, TIFF and 16-bit screens
+	// JPEG goes through libjpeg, which reads the desktop buffer in place. The buffer is always 24 or 32 bits per pixel,
+	// so GDI+ below only stays for PNG and TIFF.
 	int encoderType = (int)tileEncoderType;
-	if (encoderType == 1 && (PIXEL_SIZE == 4 || PIXEL_SIZE == 3))
+	if (encoderType == 1)
 	{
 		unsigned long encodedSize = 0;
 		char *packet = tile_jpeg_encode(x, y, captureWidth, captureHeight, desktop, &encodedSize);
@@ -315,20 +316,15 @@ int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void*
 		{
 			KVMDEBUG("tile_jpeg_encode() failed", 0);
 			ILibCriticalLog(NULL, __FILE__, __LINE__, 252, 0);
-			return 0;
+			return;
 		}
 		set_tile_header(packet, (DWORD)encodedSize, x, y, buffer, bufferSize);
-		return 0;
+		return;
 	}
 
 	if (encoderClsidType != encoderType)
 	{
-		switch (encoderType)
-		{
-			case 2: { GetEncoderClsid(L"image/png", &encoderClsid); break; }
-			case 3: { GetEncoderClsid(L"image/tiff", &encoderClsid); break; }
-			default: { GetEncoderClsid(L"image/jpeg", &encoderClsid); break; }
-		}
+		GetEncoderClsid(encoderType == 2 ? L"image/png" : L"image/tiff", &encoderClsid);
 		encoderClsidType = encoderType;
 	}
 
@@ -340,7 +336,7 @@ int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void*
 	{
 		if (tilebuffer != NULL) free(tilebuffer);
 		tilebuffersize = 0;
-		if ((tilebuffer = malloc(bmpInfo.bmiHeader.biSizeImage)) == NULL) return 0;
+		if ((tilebuffer = malloc(bmpInfo.bmiHeader.biSizeImage)) == NULL) return;
 		tilebuffersize = bmpInfo.bmiHeader.biSizeImage;
 	}
 
@@ -359,7 +355,7 @@ int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void*
 	{
 		KVMDEBUG("CreateStreamOnHGlobal() failed", 0);
 		ILibCriticalLog(NULL, __FILE__, __LINE__, 252, GetLastError());
-		return 0;
+		return;
 	}
 
 	// Write entire contents of the source BMP into this stream.
@@ -374,7 +370,7 @@ int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void*
 		KVMDEBUG("bmpStream->Seek() failed", 0);
 		bmpStream->Release();
 		ILibCriticalLog(NULL, __FILE__, __LINE__, 252, GetLastError());
-		return 0;
+		return;
 	}
 
 	// Construct GDI+ Image object from the BMP stream.
@@ -388,7 +384,7 @@ int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void*
 		delete DIBImage;
 		bmpStream->Release();
 		ILibCriticalLog(NULL, __FILE__, __LINE__, 252, GetLastError());
-		return 0;
+		return;
 	}
 
 	// Save image stream into the stream object.
@@ -400,7 +396,7 @@ int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void*
 		bmpStream->Release();
 		jpegStream->Release();
 		ILibCriticalLog(NULL, __FILE__, __LINE__, 252, GetLastError());
-		return 0;
+		return;
 	}
 
 	// Get the size of the output stream
@@ -413,7 +409,7 @@ int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void*
 		bmpStream->Release();
 		jpegStream->Release();
 		ILibCriticalLog(NULL, __FILE__, __LINE__, 252, GetLastError());
-		return 0;
+		return;
 	}       
 
 	// Move the image stream's pointer to its beginning.
@@ -425,15 +421,15 @@ int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void*
 		bmpStream->Release();
 		jpegStream->Release();
 		ILibCriticalLog(NULL, __FILE__, __LINE__, 252, GetLastError());
-		return 0;
+		return;
 	}        
 
 	// A JPEG over 65500 bytes goes out as a jumbo packet
 	DWORD jpegSize = (DWORD)Size.QuadPart;
 
 	// Save the image stream in memory.
-	char* Tile = (char*)ILibMemory_Allocate(jpegSize > 65500 ? (jpegSize + 16):(jpegSize + 8), 0, NULL, NULL);
-	if (jpegStream->Read(Tile + (jpegSize > 65500 ? 16 : 8), jpegSize, NULL) != S_OK)
+	char* Tile = (char*)ILibMemory_Allocate(jpegSize + (jpegSize > TILE_JUMBO_LIMIT ? TILE_JUMBO_HEADER_SIZE : TILE_HEADER_SIZE), 0, NULL, NULL);
+	if (jpegStream->Read(Tile + (jpegSize > TILE_JUMBO_LIMIT ? TILE_JUMBO_HEADER_SIZE : TILE_HEADER_SIZE), jpegSize, NULL) != S_OK)
 	{
 		KVMDEBUG("jpegStream->Read() failed", 0);
 		delete DIBImage;
@@ -441,7 +437,7 @@ int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void*
 		bmpStream->Release();
 		jpegStream->Release();
 		ILibCriticalLog(NULL, __FILE__, __LINE__, 252, GetLastError());
-		return 0;
+		return;
 	}
 
 	// Cleanup
@@ -450,7 +446,7 @@ int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void*
 	jpegStream->Release();
 
 	set_tile_header(Tile, jpegSize, x, y, buffer, bufferSize);
-	return 0;
+	return;
 }
 
 struct tileInfo_t {
@@ -619,10 +615,11 @@ void get_tile_at(void** buffer, long long *bufferSize, void *desktop, int row, i
 	// One encode for the whole region, whatever its size
 	calc_opt_compr_send(x, y, captureWidth, captureHeight, desktop, buffer, bufferSize);
 
-	// After an encode the tiles of the region are done for this pass, after a failed one they are stale so the next pass tries them again
+	// The tiles of the region are done for this pass either way, and after a failed encode they are stale so the next pass sends them again
 	for (int r = row; r <= botrow; r++) {
 		for (int c = col; c <= rightcol; c++) {
-			if (*buffer != NULL) { tileInfo[r][c].flags = TILE_DONE; } else { tileInfo[r][c].stale = 1; }
+			tileInfo[r][c].flags = TILE_DONE;
+			if (*buffer == NULL) { tileInfo[r][c].stale = 1; }
 		}
 	}
 }
@@ -843,7 +840,7 @@ int get_desktop_buffer(void **buffer, long long *bufferSize, long* mouseMove)
 	else
 	{
 		if (SetStretchBltMode(hCaptureDC, HALFTONE) == 0) { KVMDEBUG("SetStretchBltMode() failed", 0); return(1); }
-		if (StretchBlt(hCaptureDC, 0, 0, adjust_screen_size(SCALED_WIDTH), adjust_screen_size(SCALED_HEIGHT), hDesktopDC, SCREEN_X, SCREEN_Y, adjust_screen_size(SCREEN_WIDTH), adjust_screen_size(SCREEN_HEIGHT), SRCCOPY) == FALSE)
+		if (StretchBlt(hCaptureDC, 0, 0, w, h, hDesktopDC, SCREEN_X, SCREEN_Y, adjust_screen_size(SCREEN_WIDTH), adjust_screen_size(SCREEN_HEIGHT), SRCCOPY) == FALSE)
 		{
 			KVMDEBUG("StretchBlt() returned FALSE", 0);
 			return 1; // If the copy fails, error out.

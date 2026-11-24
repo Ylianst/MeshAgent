@@ -46,7 +46,7 @@ static RECT *changed = NULL;
 static int changedCount = 0;
 static int changedCapacity = 0;
 
-#define DXGI_SAFE_RELEASE(p) if ((p) != NULL) { (p)->Release(); (p) = NULL; }
+#define DXGI_SAFE_RELEASE(p) do { if ((p) != NULL) { (p)->Release(); (p) = NULL; } } while (0)
 
 extern "C" void dxgi_capture_release(void)
 {
@@ -75,6 +75,32 @@ static void dxgi_capture_failed(void)
 	failedAt = GetTickCount();
 }
 
+// Only an output that covers exactly the captured rectangle, so "all displays" across several monitors stays on BitBlt.
+// Returns 1 with the adapter and output for the caller to release, 0 when no output matches.
+static int dxgi_find_output(IDXGIFactory1 *factory, int x, int y, int w, int h, IDXGIAdapter1 **adapter, IDXGIOutput **output)
+{
+	UINT a, o;
+
+	for (a = 0; factory->EnumAdapters1(a, adapter) != DXGI_ERROR_NOT_FOUND; a++)
+	{
+		for (o = 0; (*adapter)->EnumOutputs(o, output) != DXGI_ERROR_NOT_FOUND; o++)
+		{
+			DXGI_OUTPUT_DESC d;
+			(*output)->GetDesc(&d);
+			if (d.AttachedToDesktop && d.Rotation == DXGI_MODE_ROTATION_IDENTITY &&
+				d.DesktopCoordinates.left == x && d.DesktopCoordinates.top == y &&
+				d.DesktopCoordinates.right - d.DesktopCoordinates.left == w &&
+				d.DesktopCoordinates.bottom - d.DesktopCoordinates.top == h)
+			{
+				return 1;
+			}
+			DXGI_SAFE_RELEASE(*output);
+		}
+		DXGI_SAFE_RELEASE(*adapter);
+	}
+	return 0;
+}
+
 static int dxgi_capture_init(int x, int y, int w, int h)
 {
 	CreateDXGIFactory1_t createFactory;
@@ -85,8 +111,7 @@ static int dxgi_capture_init(int x, int y, int w, int h)
 	IDXGIOutput1 *output1 = NULL;
 	D3D11_TEXTURE2D_DESC td;
 	HRESULT hr;
-	UINT a, o;
-	int found = 0;
+	int found;
 
 	dxgi_capture_release();
 	if (unsupported) { return 1; }
@@ -99,25 +124,7 @@ static int dxgi_capture_init(int x, int y, int w, int h)
 	createDevice = (D3D11CreateDevice_t)GetProcAddress(d3d11Lib, "D3D11CreateDevice");
 	if (createFactory == NULL || createDevice == NULL || FAILED(createFactory(__uuidof(IDXGIFactory1), (void **)&factory))) { unsupported = 1; return 1; }
 
-	// Only an output that covers exactly the captured rectangle, so "all displays" across several monitors stays on BitBlt
-	for (a = 0; !found && factory->EnumAdapters1(a, &adapter) != DXGI_ERROR_NOT_FOUND; a++)
-	{
-		for (o = 0; !found && adapter->EnumOutputs(o, &output) != DXGI_ERROR_NOT_FOUND; o++)
-		{
-			DXGI_OUTPUT_DESC d;
-			output->GetDesc(&d);
-			if (d.AttachedToDesktop && d.Rotation == DXGI_MODE_ROTATION_IDENTITY &&
-				d.DesktopCoordinates.left == x && d.DesktopCoordinates.top == y &&
-				d.DesktopCoordinates.right - d.DesktopCoordinates.left == w &&
-				d.DesktopCoordinates.bottom - d.DesktopCoordinates.top == h)
-			{
-				found = 1;
-				break;
-			}
-			DXGI_SAFE_RELEASE(output);
-		}
-		if (!found) { DXGI_SAFE_RELEASE(adapter); }
-	}
+	found = dxgi_find_output(factory, x, y, w, h, &adapter, &output);
 	factory->Release();
 	if (!found) { return 1; }
 
@@ -251,6 +258,7 @@ extern "C" int dxgi_capture_frame(int x, int y, int w, int h, unsigned char *des
 	ID3D11Texture2D *tex = NULL;
 	HRESULT hr;
 	int result;
+	int fresh = 0;
 
 	*rects = NULL;
 	*rectCount = -1;
@@ -269,23 +277,15 @@ extern "C" int dxgi_capture_frame(int x, int y, int w, int h, unsigned char *des
 	}
 
 	hr = dup->AcquireNextFrame(0, &fi, &res);
-	if (hr == DXGI_ERROR_WAIT_TIMEOUT)
-	{
-		// Nothing changed, but right after an init there may be no frame yet, and then GDI captures this one
-		if (!hasFrame) { return 1; }
-		changedCount = destCurrent ? 0 : -1;
-		if (dxgi_capture_copy(dest, destWidth, destHeight) != 0) { dxgi_capture_failed(); return 1; }
-		*rects = changed;
-		*rectCount = changedCount;
-		return 0;
-	}
-	if (FAILED(hr)) { dxgi_capture_failed(); return 1; } // DXGI_ERROR_ACCESS_LOST on a desktop switch, UAC prompt or mode change
+	// DXGI_ERROR_ACCESS_LOST on a desktop switch, UAC prompt or mode change
+	if (FAILED(hr) && hr != DXGI_ERROR_WAIT_TIMEOUT) { dxgi_capture_failed(); return 1; }
 
-	// A frame with LastPresentTime 0 only moved the pointer, the image is unchanged
-	if (fi.LastPresentTime.QuadPart != 0)
+	// A timeout means nothing changed, and a frame with LastPresentTime 0 only moved the pointer
+	result = 0;
+	if (SUCCEEDED(hr) && fi.LastPresentTime.QuadPart != 0)
 	{
-		result = -1;
-		if (SUCCEEDED(res->QueryInterface(__uuidof(ID3D11Texture2D), (void **)&tex)))
+		if (FAILED(res->QueryInterface(__uuidof(ID3D11Texture2D), (void **)&tex))) { result = -1; }
+		else
 		{
 			// The whole frame after a start, after GDI wrote dest and when the rectangles cannot be read
 			if (!hasFrame || !destCurrent || dxgi_read_changes(&fi) != 0)
@@ -300,17 +300,24 @@ extern "C" int dxgi_capture_frame(int x, int y, int w, int h, unsigned char *des
 			}
 			tex->Release();
 			hasFrame = 1;
+			fresh = 1;
+		}
+	}
+	if (result == 0)
+	{
+		// Right after a start there may be no frame yet, and then GDI captures this one
+		if (!hasFrame) { result = 1; }
+		else
+		{
+			if (!fresh) { changedCount = destCurrent ? 0 : -1; }
 			result = dxgi_capture_copy(dest, destWidth, destHeight);
 		}
 	}
-	else if (!hasFrame) { result = 1; }
-	else
+	if (SUCCEEDED(hr))
 	{
-		changedCount = destCurrent ? 0 : -1;
-		result = dxgi_capture_copy(dest, destWidth, destHeight);
+		res->Release();
+		dup->ReleaseFrame();
 	}
-	res->Release();
-	dup->ReleaseFrame();
 	if (result < 0) { dxgi_capture_failed(); return 1; }
 	if (result == 0)
 	{
