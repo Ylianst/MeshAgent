@@ -726,6 +726,7 @@ static bool kvm_drm_egl_read_changed_tiles(kvm_drm_egl_context *ctx, int width, 
 	int tw = (width + tile - 1) / tile;
 	int th = (height + tile - 1) / tile;
 	size_t tiles = (size_t)tw * (size_t)th;
+	uint8_t *done;
 	int r, c;
 
 	if (ctx->changed_tiles_cap < tiles)
@@ -777,24 +778,36 @@ static bool kvm_drm_egl_read_changed_tiles(kvm_drm_egl_context *ctx, int width, 
 	glBindTexture(GL_TEXTURE_2D, 0);
 	if (glGetError() != GL_NO_ERROR) { return false; }
 	for (r = 0; r < (int)tiles; r++) { ctx->changed_tiles[r] = (ctx->diff_readback[(size_t)r * 4u] != 0) ? 1 : 0; }
+	// The compare result is not needed anymore, so its buffer serves as the map of tiles that are already read
+	done = ctx->diff_readback;
 
-	// Read back each run of changed tiles in a tile row, straight into its place in the bottom-up frame buffer
+	// Read back the changed tiles as rectangles, straight into their place in the bottom-up frame buffer.
+	// A run of changed tiles is extended down over the tile rows that have changed across its whole width, so a changed window is one read and not one per tile row.
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ctx->out_tex, 0);
 	glPixelStorei(0x0D02 /* GL_PACK_ROW_LENGTH */, width);
+	memset(done, 0, tiles);
 	for (r = 0; r < th; r++)
 	{
-		int top = r * tile;
-		int bottom = (top + tile > height) ? height : top + tile;
-		int glY = height - bottom;
 		const uint8_t *row = ctx->changed_tiles + (size_t)r * (size_t)tw;
 		for (c = 0; c < tw; c++)
 		{
-			int c0, x0, x1;
-			if (!row[c]) { continue; }
-			c0 = c;
-			while (c + 1 < tw && row[c + 1]) { c++; }
+			int c0 = c, r1 = r, i, x0, x1, top, bottom, glY;
+			if (!row[c] || done[(size_t)r * (size_t)tw + (size_t)c]) { continue; }
+			while (c + 1 < tw && row[c + 1] && !done[(size_t)r * (size_t)tw + (size_t)c + 1]) { c++; }
+			while (r1 + 1 < th)
+			{
+				const uint8_t *below = ctx->changed_tiles + (size_t)(r1 + 1) * (size_t)tw;
+				const uint8_t *belowDone = done + (size_t)(r1 + 1) * (size_t)tw;
+				for (i = c0; i <= c && below[i] && !belowDone[i]; i++) { }
+				if (i <= c) { break; }
+				r1++;
+			}
+			for (i = r; i <= r1; i++) { memset(done + (size_t)i * (size_t)tw + (size_t)c0, 1, (size_t)(c - c0 + 1)); }
 			x0 = c0 * tile;
 			x1 = ((c + 1) * tile > width) ? width : (c + 1) * tile;
+			top = r * tile;
+			bottom = ((r1 + 1) * tile > height) ? height : (r1 + 1) * tile;
+			glY = height - bottom;
 			glReadPixels(x0, glY, x1 - x0, bottom - top, GL_RGBA, GL_UNSIGNED_BYTE, ctx->rgba_readback + ((size_t)glY * (size_t)width + (size_t)x0) * 4u);
 		}
 	}
