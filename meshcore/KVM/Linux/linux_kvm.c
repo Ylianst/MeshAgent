@@ -1433,6 +1433,7 @@ void* kvm_server_mainloop_x11(void* parm)
 		}
 		if (g_shutdown) { break; }
 		frameStartMs = kvm_relay_now_ms();
+		jpeg_frame_begin();
 		//fprintf(logFile, "Before CheckDesktopSwitch.\n"); fflush(logFile);
 		CheckDesktopSwitch(1);
 		//fprintf(logFile, "After CheckDesktopSwitch.\n"); fflush(logFile);
@@ -1794,11 +1795,14 @@ void* kvm_server_mainloop_x11(void* parm)
 
 					if (buf && !g_shutdown)
 					{
+						jpeg_frame_write_begin();
 						written = kvm_write_all(slave2master[1], (char*)buf, (size_t)tilesize);
+						jpeg_frame_write_end();
 						if (written == -1) { /*ILIBMESSAGE("KVMBREAK-K2\r\n");*/ g_shutdown = 1; height = SCREEN_HEIGHT; width = SCREEN_WIDTH; break; }
 					}
 				}
 			}
+			jpeg_frame_end(FRAME_RATE_TIMER);
 		}
 	}
 

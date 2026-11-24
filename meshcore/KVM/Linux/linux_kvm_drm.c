@@ -481,7 +481,11 @@ static int kvm_drm_send_dirty_tiles(const struct tileFrame_t *frame)
 			getTileAt(width, height, &tilePacket, &tilePacketSize, frame, y, x);
 			if (tilePacket != NULL && tilePacketSize > 0)
 			{
-				if (kvm_drm_write_all(slave2master[1], (char *)tilePacket, (size_t)tilePacketSize) != 0)
+				int writeFailed;
+				jpeg_frame_write_begin();
+				writeFailed = (kvm_drm_write_all(slave2master[1], (char *)tilePacket, (size_t)tilePacketSize) != 0);
+				jpeg_frame_write_end();
+				if (writeFailed)
 				{
 					return -1;
 				}
@@ -3263,6 +3267,7 @@ void *kvm_server_mainloop_drm(void *parm)
 			continue;
 		}
 		lastFrameTimeMs = nowMs;
+		jpeg_frame_begin();
 
 		if (g_pause || g_remotepause)
 		{
@@ -3789,6 +3794,7 @@ void *kvm_server_mainloop_drm(void *parm)
 		{
 			g_shutdown = 1;
 		}
+		jpeg_frame_end(FRAME_RATE_TIMER < 20 ? 20 : FRAME_RATE_TIMER);
 	}
 
 	jpeg_output_free();

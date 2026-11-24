@@ -39,6 +39,11 @@ extern int write_JPEG_buffer (JSAMPLE * image_buffer, int image_width, int image
 // JPEG_HEADER_ROOM bytes in front of the JPEG are free for a packet header, so a packet needs no copy.
 extern unsigned char *write_JPEG_rect(const unsigned char *pixels, ptrdiff_t stride, int image_width, int image_height, int components, J_COLOR_SPACE format, int quality, int *length);
 extern void jpeg_output_free(void);
+// Switch for optimized Huffman tables, fed by the frame loop: the frame's start, the time spent writing pictures, and its end with the frame period
+extern void jpeg_frame_begin(void);
+extern void jpeg_frame_write_begin(void);
+extern void jpeg_frame_write_end(void);
+extern void jpeg_frame_end(int periodMs);
 extern JPEG_error_handler default_JPEG_error_handler;
 
 #endif // LINUX_COMPRESSION_H_ 

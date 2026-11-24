@@ -15,6 +15,8 @@ limitations under the License.
 */
 
 #include <setjmp.h>
+#include <stdint.h>
+#include <time.h>
 #include "linux_compression.h"
 #include "../../../microstack/ILibParsers.h"
 
@@ -30,6 +32,69 @@ JPEG_error_handler default_JPEG_error_handler = NULL;
 static unsigned char *jpegOut = NULL;
 static size_t jpegOutSize = 0;
 static int jpegOutLength = 0;
+
+// Optimized tables cost encode time for fewer bytes. They are turned off while the CPU work fills more than half of the frame period,
+// and back on once it stays under a quarter. A frame that waits long on its writes is limited by the link, where fewer bytes help, so they stay on.
+static int jpegOptimizeTables = 1;
+static int jpegBusyFrames = 0;
+static int jpegIdleFrames = 0;
+static uint64_t jpegFrameStart = 0;
+static uint64_t jpegWriteStart = 0;
+static uint64_t jpegFrameBlocked = 0;
+
+static uint64_t jpeg_now_ms(void)
+{
+	struct timespec t;
+	if (clock_gettime(CLOCK_MONOTONIC, &t) != 0) { return 0; }
+	return (uint64_t)t.tv_sec * 1000u + (uint64_t)t.tv_nsec / 1000000u;
+}
+
+void jpeg_frame_begin(void)
+{
+	jpegFrameStart = jpeg_now_ms();
+	jpegFrameBlocked = 0;
+}
+
+void jpeg_frame_write_begin(void)
+{
+	jpegWriteStart = jpeg_now_ms();
+}
+
+void jpeg_frame_write_end(void)
+{
+	uint64_t now = jpeg_now_ms();
+	if (now >= jpegWriteStart) { jpegFrameBlocked += now - jpegWriteStart; }
+}
+
+void jpeg_frame_end(int periodMs)
+{
+	uint64_t now = jpeg_now_ms(), work, cpu;
+	if (jpegFrameStart == 0 || now < jpegFrameStart || periodMs <= 0) { return; }
+	work = now - jpegFrameStart;
+	cpu = (work > jpegFrameBlocked) ? work - jpegFrameBlocked : 0;
+
+	if (jpegFrameBlocked * 4 > (uint64_t)periodMs)
+	{
+		jpegOptimizeTables = 1;
+		jpegBusyFrames = 0;
+		jpegIdleFrames = 0;
+	}
+	else if (cpu * 2 > (uint64_t)periodMs)
+	{
+		jpegIdleFrames = 0;
+		if (++jpegBusyFrames >= 3) { jpegOptimizeTables = 0; }
+	}
+	else if (cpu * 4 < (uint64_t)periodMs)
+	{
+		jpegBusyFrames = 0;
+		if (++jpegIdleFrames >= 25) { jpegOptimizeTables = 1; }
+	}
+	else
+	{
+		jpegBusyFrames = 0;
+		jpegIdleFrames = 0;
+	}
+}
 
 struct jpeg_error_jmp
 {
@@ -129,7 +194,7 @@ unsigned char *write_JPEG_rect(const unsigned char *pixels, ptrdiff_t stride, in
 
 	jpeg_set_quality(&cinfo, quality, TRUE);
 	// Huffman tables built for each rectangle up to 128x128, where the standard tables are a large share of a small JPEG. Larger rectangles gain less for the second pass over the data.
-	if ((long)image_width * image_height <= TILE_JPEG_OPTIMIZE_MAX_AREA) { cinfo.optimize_coding = TRUE; }
+	if (jpegOptimizeTables && (long)image_width * image_height <= TILE_JPEG_OPTIMIZE_MAX_AREA) { cinfo.optimize_coding = TRUE; }
 	jpeg_start_compress(&cinfo, TRUE);
 
 	// The rows are read where they lie in the caller's frame, so no copy of the rectangle is made
