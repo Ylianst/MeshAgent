@@ -5273,13 +5273,13 @@ void ILibStun_ProcessSctpPacket(struct ILibStun_Module *obj, int session, char* 
 				streamId = ntohs(data->StreamID);
 				pid = ntohl(data->ProtocolID);
 
-				if (tsn == o->intsn + 1)
+				if (tsn == o->intsn + 1 || (tsn > o->intsn + 1 && ILibLinkedList_GetNode_Search(o->receiveHoldBuffer, &ILibSCTP_HoldingQueue_TSNComparer, data) == NULL))
 				{
+					// ILibStun_SctpProcessStreamData() takes the session lock itself, as in the ordered path below
+					ILibSpinLock_UnLock(&(o->Lock));
 					ILibStun_SctpProcessStreamData(obj, session, streamId, 0, chunkflags, pid, data->UserData, chunksize - 16);
-				}
-				else if (tsn > o->intsn + 1 && ILibLinkedList_GetNode_Search(o->receiveHoldBuffer, &ILibSCTP_HoldingQueue_TSNComparer, data) == NULL)
-				{
-					ILibStun_SctpProcessStreamData(obj, session, streamId, 0, chunkflags, pid, data->UserData, chunksize - 16);
+					if (obj->dTlsSessions[session] == NULL || obj->dTlsSessions[session]->state == 0) return;
+					ILibSpinLock_Lock(&(o->Lock));
 				}
 			}
 

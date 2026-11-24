@@ -778,12 +778,13 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 	}
 	va_end(vlist); 
 
-	if (lockOverride == 0) { ILibSpinLock_UnLock(&(module->SendLock)); }
+	// ILibAsyncSocket_SendError() expects SendLock to be held, because it unlocks and locks it again
 	if (notok != 0)
 	{
 		retVal = ILibAsyncSocket_BUFFER_TOO_LARGE;
 		ILibAsyncSocket_SendError(module);
 	}
+	if (lockOverride == 0) { ILibSpinLock_UnLock(&(module->SendLock)); }
 
 	if (retVal != ILibAsyncSocket_ALL_DATA_SENT && !ILibIsRunningOnChainThread(module->Transport.ChainLink.ParentChain)) ILibForceUnBlockChain(module->Transport.ChainLink.ParentChain);
 	return (retVal);
