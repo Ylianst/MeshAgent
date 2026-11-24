@@ -1060,20 +1060,24 @@ int kvm_server_inputdata(char* block, int blocklen)
 int kvm_relay_feeddata(char* buf, int len)
 {
 	ssize_t written = 0;
+	int total = 0;
 	if (g_slavekvm <= 0 || master2slave[1] < 0) { return 0; }
 
-	// Write the reply to the pipe.
-	//fprintf(logFile, "Writing to slave in kvm_relay_feeddata\n");
-	written = write(
-		master2slave[1],			// handle to pipe
-		buf,			// buffer to write from
-		len);
-	fsync(master2slave[1]);
-	//fprintf(logFile, "Written %d bytes to slave in kvm_relay_feeddata\n", written);
-
-	if (written == -1) return 0;
-	if (len != (int)written) return written;
-	return len;
+	// The pipe blocks, so a write ends early only when a signal interrupts it, and the rest of the input was lost then.
+	// fsync() did nothing on a pipe and is gone.
+	while (len > 0)
+	{
+		written = write(master2slave[1], buf, (size_t)len);
+		if (written < 0)
+		{
+			if (errno == EINTR) { continue; }
+			return 0;
+		}
+		buf += written;
+		len -= (int)written;
+		total += (int)written;
+	}
+	return total;
 }
 
 // Set the KVM pause state
