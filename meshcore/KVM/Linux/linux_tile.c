@@ -127,6 +127,18 @@ int tile_frame_from_ximage(struct tileFrame_t *frame, XImage *image)
 // Marks the tiles that differ from the reference frame, and copies the parts that differ, so the reference holds the frame afterwards.
 // Compared a pixel row at a time in memory order because tile by tile measured 6.2 against 1.05 ms per 1080p frame on a Cortex-A76.
 // Exact, where the hash it replaces could miss a change.
+// Compares two runs of 4 byte pixels without the byte at unusedByte, which holds no colour
+static int tile_colours_equal(const unsigned char *a, const unsigned char *b, size_t n, int unusedByte)
+{
+	size_t i;
+	for (i = 0; i + 4 <= n; i += 4)
+	{
+		if ((unusedByte != 0 && a[i] != b[i]) || (unusedByte != 1 && a[i + 1] != b[i + 1]) ||
+			(unusedByte != 2 && a[i + 2] != b[i + 2]) || (unusedByte != 3 && a[i + 3] != b[i + 3])) { return 0; }
+	}
+	return 1;
+}
+
 void tile_start_pass(const struct tileFrame_t *frame)
 {
 	int all = tileRefreshPending;
@@ -135,6 +147,17 @@ void tile_start_pass(const struct tileFrame_t *frame)
 	size_t len = (size_t)TILE_WIDTH * bpp;
 	size_t lastLen = refStride - (size_t)(TILE_WIDTH_COUNT - 1) * len;
 	int row, col, r, rows;
+	// The byte of a 4 byte pixel that holds no colour. A change there alone, which some X servers and compositors make, is no change of the picture.
+	int unusedByte = -1;
+
+	if (frame->bytesPerPixel == 4)
+	{
+#ifdef JCS_EXTENSIONS
+		unusedByte = (frame->format == JCS_EXT_XRGB || frame->format == JCS_EXT_XBGR) ? 0 : 3;
+#else
+		unusedByte = 3;
+#endif
+	}
 
 	// A frame that does not match the tile grid sends nothing now, and the whole screen once it does
 	if (frame->pixels == NULL || frame->width <= 0 || frame->height <= 0 ||
@@ -185,7 +208,8 @@ void tile_start_pass(const struct tileFrame_t *frame)
 			{
 				// The last tile of a row ends at the frame edge
 				size_t n = (col == TILE_WIDTH_COUNT - 1) ? lastLen : len;
-				if (!tiles[col].stale && ((hint != NULL && !hint[col]) || memcmp(cur + col * len, ref + col * len, n) == 0)) { continue; }
+				if (!tiles[col].stale && ((hint != NULL && !hint[col]) || memcmp(cur + col * len, ref + col * len, n) == 0 ||
+					(unusedByte >= 0 && tile_colours_equal(cur + col * len, ref + col * len, n, unusedByte)))) { continue; }
 				memcpy(ref + col * len, cur + col * len, n);
 				tiles[col].flag = TILE_CHANGED;
 			}
