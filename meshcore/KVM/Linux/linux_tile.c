@@ -148,7 +148,7 @@ void tile_start_pass(const struct tileFrame_t *frame)
 	size_t lastLen = refStride - (size_t)(TILE_WIDTH_COUNT - 1) * len;
 	int row, col, r, rows;
 	// The byte of a 4 byte pixel that holds no colour. A change there alone, which some X servers and compositors make, is no change of the picture.
-	int unusedByte = -1;
+	int unusedByte = -1, colourSame;
 
 	if (frame->bytesPerPixel == 4)
 	{
@@ -208,9 +208,11 @@ void tile_start_pass(const struct tileFrame_t *frame)
 			{
 				// The last tile of a row ends at the frame edge
 				size_t n = (col == TILE_WIDTH_COUNT - 1) ? lastLen : len;
-				if (!tiles[col].stale && ((hint != NULL && !hint[col]) || memcmp(cur + col * len, ref + col * len, n) == 0 ||
-					(unusedByte >= 0 && tile_colours_equal(cur + col * len, ref + col * len, n, unusedByte)))) { continue; }
+				if (!tiles[col].stale && ((hint != NULL && !hint[col]) || memcmp(cur + col * len, ref + col * len, n) == 0)) { continue; }
+				colourSame = (!tiles[col].stale && unusedByte >= 0 && tile_colours_equal(cur + col * len, ref + col * len, n, unusedByte));
+				// Copied also when only the unused byte changed, so the next frame finds the row equal with the plain compare again
 				memcpy(ref + col * len, cur + col * len, n);
+				if (colourSame) { continue; }
 				tiles[col].flag = TILE_CHANGED;
 			}
 		}
