@@ -160,6 +160,8 @@ int SH_HANDLE = 0;
 int SCREEN_WIDTH = 0;
 int SCREEN_HEIGHT = 0;
 int SCREEN_SCALE = 1;
+static int CAPTURE_WIDTH = 0;	// The display's size in pixels, SCREEN_SCALE times the size that is sent
+static int CAPTURE_HEIGHT = 0;
 int SCREEN_DEPTH = 0;
 int TILE_WIDTH = 0;
 int TILE_HEIGHT = 0;
@@ -368,16 +370,25 @@ int get_kbd_state()
 }
 
 
-// Sets the screen to "width" by "height" pixels, then the tiles and the viewer's resolution.
-// The scale for the mouse is the ratio of pixels to the display's points, 2 on a Retina display. It was kept from earlier sizes and only ever grew, so after a display mode change it could stay wrong.
+// The ratio of pixels to the display's points for a display "width" pixels wide, 2 on a Retina display.
+// It was kept from earlier sizes and only ever grew, so after a display mode change it could stay wrong.
+static int kvm_display_scale(int width)
+{
+	int points = (int)CGDisplayPixelsWide(SCREEN_NUM);
+	return((points > 0 && width >= points) ? (width + points / 2) / points : 1);
+}
+
+// Takes the display's size in pixels, then sets the size that is sent, the tiles and the viewer's resolution.
+// A Retina display is sent at its point size, a quarter of the pixels to compare, encode and send. The viewer's mouse position is then in points too.
 static int kvm_init_size(int width, int height)
 {
 	ILibCriticalLogFilename = "KVMSlave.log";
-	int points = (int)CGDisplayPixelsWide(SCREEN_NUM);
 
-	SCREEN_WIDTH = width;
-	SCREEN_HEIGHT = height;
-	SCREEN_SCALE = (points > 0 && width >= points) ? (width + points / 2) / points : 1;
+	CAPTURE_WIDTH = width;
+	CAPTURE_HEIGHT = height;
+	SCREEN_SCALE = kvm_display_scale(width);
+	SCREEN_WIDTH = width / SCREEN_SCALE;
+	SCREEN_HEIGHT = height / SCREEN_SCALE;
 	// Some magic numbers.
 	TILE_WIDTH = 32;
 	TILE_HEIGHT = 32;
@@ -483,8 +494,8 @@ int kvm_server_inputdata(char* block, int blocklen)
 			// Same as above — process mouse locally in -kvmagent mode.
 			if (size == 10 || size == 12)
 			{
-				x = ((int)ntohs(((unsigned short*)(block))[3])) / (double)SCREEN_SCALE;
-				y = ((int)ntohs(((unsigned short*)(block))[4])) / (double)SCREEN_SCALE;
+				x = (double)ntohs(((unsigned short*)(block))[3]);
+				y = (double)ntohs(((unsigned short*)(block))[4]);
 				
 				if (size == 12) w = ((short)ntohs(((short*)(block))[5]));
 				
@@ -713,7 +724,7 @@ static void kvm_send_tiles(const struct tileFrame_t *frame)
 	KvmDebugLog("...exit for loop\n");
 }
 
-// 1 when the display mode's pixel size is no longer the size the stream was started with, read at most once a second.
+// 1 when the display mode's pixel size or scale is no longer the one the stream was started with, read at most once a second.
 // A size of 0 is read at once, because a new session sets it to 0 to get the size sent again.
 static int kvm_display_size_changed(CGDirectDisplayID display)
 {
@@ -722,12 +733,13 @@ static int kvm_display_size_changed(CGDirectDisplayID display)
 	CGDisplayModeRef mode;
 	int changed = 0;
 
-	if (SCREEN_WIDTH != 0 && now - lastCheck < 1000) { return(0); }
+	if (CAPTURE_WIDTH != 0 && now - lastCheck < 1000) { return(0); }
 	lastCheck = now;
 
 	if ((mode = CGDisplayCopyDisplayMode(display)) != NULL)
 	{
-		changed = (int)CGDisplayModeGetPixelWidth(mode) != SCREEN_WIDTH || (int)CGDisplayModeGetPixelHeight(mode) != SCREEN_HEIGHT;
+		int width = (int)CGDisplayModeGetPixelWidth(mode);
+		changed = width != CAPTURE_WIDTH || (int)CGDisplayModeGetPixelHeight(mode) != CAPTURE_HEIGHT || kvm_display_scale(width) != SCREEN_SCALE;
 		CGDisplayModeRelease(mode);
 	}
 	return(changed);
@@ -859,7 +871,7 @@ kvm_next_session:
 			sckState = 0;
 			close(KVM_AGENT_FD);
 
-			SCREEN_HEIGHT = SCREEN_WIDTH = 0;
+			SCREEN_HEIGHT = SCREEN_WIDTH = CAPTURE_HEIGHT = CAPTURE_WIDTH = 0;
 
 			char stmp[255];
 			int stmpLen = sprintf_s(stmp, sizeof(stmp), "Waiting for NEXT DomainSocket, TILE_HEIGHT_COUNT=%d, TILE_WIDTH_COUNT=%d\n", TILE_HEIGHT_COUNT, TILE_WIDTH_COUNT);
@@ -989,7 +1001,7 @@ kvm_next_session:
 		}
 		else {
 			// The captured image is the screen as it is now, also during a fast user switch or after a display mode change, so a new size comes from it
-			if ((int)CGImageGetWidth(image) != SCREEN_WIDTH || (int)CGImageGetHeight(image) != SCREEN_HEIGHT)
+			if ((int)CGImageGetWidth(image) != CAPTURE_WIDTH || (int)CGImageGetHeight(image) != CAPTURE_HEIGHT)
 			{
 				kvm_init_size((int)CGImageGetWidth(image), (int)CGImageGetHeight(image));
 				CGImageRelease(image);

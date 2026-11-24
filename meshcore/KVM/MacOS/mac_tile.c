@@ -290,13 +290,29 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, const struct t
 }
 
 
-// Get screen buffer from the CGImageRef structure
+// The average of a "scale" by "scale" block of 32-bit pixels.
+// Two bytes of a pixel are summed at a time, each with 16 bits of room, which holds up to a scale of 16.
+static unsigned int average_block(const unsigned int *p, size_t rowWords, int scale)
+{
+	unsigned int even = 0, odd = 0, n = (unsigned int)(scale * scale);
+	int i, j;
+
+	for (j = 0; j < scale; j++, p += rowWords)
+	{
+		for (i = 0; i < scale; i++) { even += p[i] & 0x00FF00FF; odd += (p[i] >> 8) & 0x00FF00FF; }
+	}
+	return(((even & 0xFFFF) / n) | (((even >> 16) / n) << 16) | (((odd & 0xFFFF) / n) << 8) | (((odd >> 16) / n) << 24));
+}
+
+// Get screen buffer from the CGImageRef structure, which holds the display's pixels, at the size that is sent
 int getScreenBuffer(unsigned char **desktop, long long *desktopsize, CGImageRef image)
 {	
 	unsigned int row, col, bpp, len, width_padding_size, height_padding_size, i;
 	unsigned char *output;
-	int height = CGImageGetHeight(image);
-	int width = CGImageGetWidth(image);
+	int scale = SCREEN_SCALE;
+	int height = CGImageGetHeight(image) / scale;
+	int width = CGImageGetWidth(image) / scale;
+	size_t rowWords = CGImageGetBytesPerRow(image) >> 2;
 	int targetWidth = adjust_screen_size(SCREEN_WIDTH);
 	int targetHeight = adjust_screen_size(SCREEN_HEIGHT);
 	long long need;
@@ -324,6 +340,8 @@ int getScreenBuffer(unsigned char **desktop, long long *desktopsize, CGImageRef 
 	
 	output = *desktop;
 	bpp = CGImageGetBitsPerPixel(image);
+	// Only the 32-bit conversion scales, and a Retina display has no 16-bit mode
+	if (scale != 1 && bpp != 32) { CFRelease(dataRef); return -1; }
 	width_padding_size = (adjust_screen_size(SCREEN_WIDTH) - width) * 3;
 	
 	switch(bpp) {
@@ -377,18 +395,18 @@ int getScreenBuffer(unsigned char **desktop, long long *desktopsize, CGImageRef 
 					alphaInfo == kCGImageAlphaPremultipliedFirst ||
 					alphaInfo == kCGImageAlphaFirst) {
 				for (row = 0; row < height; row++) {
-					for (col = 0; col < width; col++) {
-						*output++ = (*tmpPtr1 & 0x0ff0000) >> 16;
-						*output++ = (*tmpPtr1 & 0x0ff00) >> 8;
-						*output++ = (*tmpPtr1 & 0x0FF);
-						tmpPtr1++;
+					const unsigned int *src = tmpPtr1 + (size_t)row * scale * rowWords;
+					for (col = 0; col < width; col++, src += scale) {
+						unsigned int v = (scale == 1) ? *src : average_block(src, rowWords, scale);
+						*output++ = (v & 0x0ff0000) >> 16;
+						*output++ = (v & 0x0ff00) >> 8;
+						*output++ = (v & 0x0FF);
 					}
 					if (width_padding_size > 0) {
 						for (i = 0; i < width_padding_size; i++) {
 							*output++ = 0;
 						}
 					}
-					tmpPtr1 += (CGImageGetBytesPerRow(image) - (bpp >> 3) * width) >> 2;
 				}
 			}
 			else if (alphaInfo == kCGImageAlphaNone ||
@@ -396,18 +414,18 @@ int getScreenBuffer(unsigned char **desktop, long long *desktopsize, CGImageRef 
 					alphaInfo == kCGImageAlphaPremultipliedLast ||
 					alphaInfo == kCGImageAlphaLast) {
 				for (row = 0; row < height; row++) {
-					for (col = 0; col < width; col++) {
-						*output++ = (*tmpPtr1 & 0xFF000000) >> 24;
-						*output++ = (*tmpPtr1 & 0x0ff0000) >> 16;
-						*output++ = (*tmpPtr1 & 0x0ff00) >> 8;
-						tmpPtr1++;
+					const unsigned int *src = tmpPtr1 + (size_t)row * scale * rowWords;
+					for (col = 0; col < width; col++, src += scale) {
+						unsigned int v = (scale == 1) ? *src : average_block(src, rowWords, scale);
+						*output++ = (v & 0xFF000000) >> 24;
+						*output++ = (v & 0x0ff0000) >> 16;
+						*output++ = (v & 0x0ff00) >> 8;
 					}
 					if (width_padding_size != 0) {
 						for (i = 0; i < width_padding_size; i++) {
 							*output++ = 0;
 						}
 					}
-					tmpPtr1 += (CGImageGetBytesPerRow(image) - (bpp >> 3) * width) >> 2;
 				}
 			}
 		}
