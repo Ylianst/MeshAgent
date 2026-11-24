@@ -23,24 +23,45 @@ limitations under the License.
 typedef HRESULT (WINAPI *CreateDXGIFactory1_t)(REFIID, void **);
 typedef HRESULT (WINAPI *D3D11CreateDevice_t)(IDXGIAdapter *, D3D_DRIVER_TYPE, HMODULE, UINT, const D3D_FEATURE_LEVEL *, UINT, UINT, ID3D11Device **, D3D_FEATURE_LEVEL *, ID3D11DeviceContext **);
 
+#define DXGI_MAX_OUTPUTS 8
+
+// One duplication for every output in the captured rectangle, so "all displays" across several monitors works too
+typedef struct dxgi_out
+{
+	ID3D11Device *dev;				// One device per adapter, and each of its outputs holds a reference
+	ID3D11DeviceContext *ctx;
+	IDXGIOutputDuplication *dup;
+	ID3D11Texture2D *staging;
+	unsigned char *upright;			// A rotated output's picture turned to the desktop's orientation, NULL when not rotated
+	int ox;							// Position in the captured rectangle
+	int oy;
+	int w;
+	int h;
+	int tw;							// Size of the output's texture, which has the orientation of the panel
+	int th;
+	int rot;
+	int hasFrame;
+	int full;						// The whole output is copied in this frame
+	int first;						// Start of this output's part of changed[]
+} dxgi_out;
+
 static HMODULE dxgiLib = NULL;
 static HMODULE d3d11Lib = NULL;
-static ID3D11Device *dev = NULL;
-static ID3D11DeviceContext *ctx = NULL;
-static IDXGIOutputDuplication *dup = NULL;
-static ID3D11Texture2D *staging = NULL;
+static D3D11CreateDevice_t createDevice = NULL;
+static dxgi_out outs[DXGI_MAX_OUTPUTS];
+static int outCount = 0;
 static int dupX = 0;
 static int dupY = 0;
 static int dupW = 0;
 static int dupH = 0;
-static int hasFrame = 0;
 static int unsupported = 0;
 static int failed = 0;
 static DWORD failedAt = 0;
 static DWORD failedWait = 0;
 static int startNext = 0;
 
-// The changed areas of the last frame, as move and dirty rectangles from DXGI, and -1 for the whole screen
+// The changed areas of the last frame, one output's part after the other. They are in the coordinates of the output's texture
+// until the copy into dest, which leaves them in the coordinates of the captured rectangle.
 static unsigned char *meta = NULL;
 static UINT metaSize = 0;
 static RECT *changed = NULL;
@@ -48,18 +69,23 @@ static int changedCount = 0;
 static int changedCapacity = 0;
 
 #define DXGI_RETRY_MS 2000
-// No output covers the captured rectangle, as with several monitors or a rotated one, or its mode cannot be duplicated.
+// An output in the captured rectangle is only partly inside it, in a mode that cannot be duplicated or has frames of an unexpected size.
 // A display change ends the wait through dxgi_capture_release(), and the retry finds a change of colour depth alone.
 #define DXGI_RETRY_NO_OUTPUT_MS 30000
 #define DXGI_SAFE_RELEASE(p) do { if ((p) != NULL) { (p)->Release(); (p) = NULL; } } while (0)
 
 static void dxgi_release_objects(void)
 {
-	DXGI_SAFE_RELEASE(staging);
-	DXGI_SAFE_RELEASE(dup);
-	DXGI_SAFE_RELEASE(ctx);
-	DXGI_SAFE_RELEASE(dev);
-	hasFrame = 0;
+	for (int i = 0; i < outCount; i++)
+	{
+		DXGI_SAFE_RELEASE(outs[i].staging);
+		DXGI_SAFE_RELEASE(outs[i].dup);
+		DXGI_SAFE_RELEASE(outs[i].ctx);
+		DXGI_SAFE_RELEASE(outs[i].dev);
+		free(outs[i].upright);
+		outs[i].upright = NULL;
+	}
+	outCount = 0;
 	free(meta);
 	meta = NULL;
 	metaSize = 0;
@@ -89,44 +115,74 @@ static void dxgi_capture_failed(DWORD wait)
 	failedWait = wait;
 }
 
-// Only an output that covers exactly the captured rectangle, so "all displays" across several monitors stays on BitBlt.
-// Returns 1 with the adapter and output for the caller to release, 0 when no output matches.
-static int dxgi_find_output(IDXGIFactory1 *factory, int x, int y, int w, int h, IDXGIAdapter1 **adapter, IDXGIOutput **output)
+// Starts the duplication of one output, dc is its place on the desktop.
+// Returns 0 when it runs, 2 when the output's desktop mode cannot be duplicated and 1 on every other failure.
+// DuplicateOutput() needs a device on the adapter that drives the output, so adev and actx are the caller's device for this adapter.
+static int dxgi_output_start(IDXGIAdapter1 *adapter, IDXGIOutput *output, ID3D11Device **adev, ID3D11DeviceContext **actx, const RECT *dc)
 {
-	UINT a, o;
+	dxgi_out *o = &outs[outCount];
+	IDXGIOutput1 *output1 = NULL;
+	DXGI_OUTDUPL_DESC dd;
+	D3D11_TEXTURE2D_DESC td;
+	HRESULT hr;
 
-	for (a = 0; factory->EnumAdapters1(a, adapter) != DXGI_ERROR_NOT_FOUND; a++)
+	// No IDXGIOutput1 means Windows 7 without the Platform Update, which never gets it, so stop trying
+	if (FAILED(output->QueryInterface(__uuidof(IDXGIOutput1), (void **)&output1))) { unsupported = 1; return 1; }
+	if (*adev == NULL && FAILED(createDevice(adapter, D3D_DRIVER_TYPE_UNKNOWN, NULL, 0, NULL, 0, D3D11_SDK_VERSION, adev, NULL, actx)))
 	{
-		for (o = 0; (*adapter)->EnumOutputs(o, output) != DXGI_ERROR_NOT_FOUND; o++)
-		{
-			DXGI_OUTPUT_DESC d;
-			(*output)->GetDesc(&d);
-			if (d.AttachedToDesktop && d.Rotation == DXGI_MODE_ROTATION_IDENTITY &&
-				d.DesktopCoordinates.left == x && d.DesktopCoordinates.top == y &&
-				d.DesktopCoordinates.right - d.DesktopCoordinates.left == w &&
-				d.DesktopCoordinates.bottom - d.DesktopCoordinates.top == h)
-			{
-				return 1;
-			}
-			DXGI_SAFE_RELEASE(*output);
-		}
-		DXGI_SAFE_RELEASE(*adapter);
+		output1->Release();
+		return 1;
 	}
-	return 0;
+
+	memset(o, 0, sizeof(*o));
+	o->dev = *adev;
+	o->dev->AddRef();
+	o->ctx = *actx;
+	o->ctx->AddRef();
+	outCount++; // Counted from here on, so dxgi_release_objects() also frees an output that failed halfway
+	hr = output1->DuplicateOutput(o->dev, &o->dup);
+	output1->Release();
+	if (FAILED(hr))
+	{
+		// Windows 7 with the Platform Update has IDXGIOutput1 but answers E_NOTIMPL, which never changes
+		if (hr == E_NOTIMPL) { unsupported = 1; }
+		// DXGI_ERROR_UNSUPPORTED is about the desktop mode, like 8 bit colour, so it gets the long wait and DXGI stays on.
+		// E_ACCESSDENIED on the secure desktop and DXGI_ERROR_SESSION_DISCONNECTED are temporary.
+		return hr == DXGI_ERROR_UNSUPPORTED ? 2 : 1;
+	}
+
+	o->ox = dc->left - dupX;
+	o->oy = dc->top - dupY;
+	o->w = dc->right - dc->left;
+	o->h = dc->bottom - dc->top;
+	// A rotated output is duplicated in the orientation of the panel, so its texture has the sides swapped at 90 and 270 degrees
+	o->dup->GetDesc(&dd);
+	o->rot = (dd.Rotation == DXGI_MODE_ROTATION_UNSPECIFIED) ? DXGI_MODE_ROTATION_IDENTITY : dd.Rotation;
+	o->tw = (o->rot == DXGI_MODE_ROTATION_ROTATE90 || o->rot == DXGI_MODE_ROTATION_ROTATE270) ? o->h : o->w;
+	o->th = (o->rot == DXGI_MODE_ROTATION_ROTATE90 || o->rot == DXGI_MODE_ROTATION_ROTATE270) ? o->w : o->h;
+	if (o->rot != DXGI_MODE_ROTATION_IDENTITY && (o->upright = (unsigned char *)malloc((size_t)o->w * o->h * 4)) == NULL) { return 1; }
+	memset(&td, 0, sizeof(td));
+	td.Width = o->tw;
+	td.Height = o->th;
+	td.MipLevels = 1;
+	td.ArraySize = 1;
+	td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+	td.SampleDesc.Count = 1;
+	td.Usage = D3D11_USAGE_STAGING;
+	td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+	return FAILED(o->dev->CreateTexture2D(&td, NULL, &o->staging)) ? 1 : 0;
 }
 
-// Returns 0 when the duplication runs, 2 when no output covers the rectangle or its desktop mode cannot be duplicated, and 1 for every other failure
+// Starts a duplication for every output in the rectangle. An output that is only partly inside it leaves the whole rectangle on BitBlt.
+// Returns 0 when all of them run, 2 for such an output, for a mode that cannot be duplicated or when there is none, and 1 for every other failure.
 static int dxgi_capture_init(int x, int y, int w, int h)
 {
 	CreateDXGIFactory1_t createFactory;
-	D3D11CreateDevice_t createDevice;
 	IDXGIFactory1 *factory = NULL;
 	IDXGIAdapter1 *adapter = NULL;
 	IDXGIOutput *output = NULL;
-	IDXGIOutput1 *output1 = NULL;
-	D3D11_TEXTURE2D_DESC td;
-	HRESULT hr;
-	int found;
+	UINT a, n;
+	int result = 0;
 
 	dxgi_release_objects();
 	if (unsupported) { return 1; }
@@ -139,58 +195,44 @@ static int dxgi_capture_init(int x, int y, int w, int h)
 	createDevice = (D3D11CreateDevice_t)GetProcAddress(d3d11Lib, "D3D11CreateDevice");
 	if (createFactory == NULL || createDevice == NULL || FAILED(createFactory(__uuidof(IDXGIFactory1), (void **)&factory))) { unsupported = 1; return 1; }
 
-	found = dxgi_find_output(factory, x, y, w, h, &adapter, &output);
-	factory->Release();
-	if (!found) { return 2; }
-
-	if (FAILED(output->QueryInterface(__uuidof(IDXGIOutput1), (void **)&output1)))
-	{
-		// No IDXGIOutput1 means Windows 7 without the Platform Update, which never gets it, so stop trying
-		unsupported = 1;
-		output->Release();
-		adapter->Release();
-		return 1;
-	}
-	hr = createDevice(adapter, D3D_DRIVER_TYPE_UNKNOWN, NULL, 0, NULL, 0, D3D11_SDK_VERSION, &dev, NULL, &ctx);
-	if (SUCCEEDED(hr)) { hr = output1->DuplicateOutput(dev, &dup); }
-	output1->Release();
-	output->Release();
-	adapter->Release();
-	if (FAILED(hr))
-	{
-		// Windows 7 with the Platform Update has IDXGIOutput1 but answers E_NOTIMPL, which never changes
-		if (hr == E_NOTIMPL) { unsupported = 1; }
-		// DXGI_ERROR_UNSUPPORTED is about the desktop mode, like 8 bit colour, so it gets the long wait and DXGI stays on.
-		// E_ACCESSDENIED on the secure desktop and DXGI_ERROR_SESSION_DISCONNECTED are temporary.
-		dxgi_release_objects();
-		return hr == DXGI_ERROR_UNSUPPORTED ? 2 : 1;
-	}
-
-	memset(&td, 0, sizeof(td));
-	td.Width = w;
-	td.Height = h;
-	td.MipLevels = 1;
-	td.ArraySize = 1;
-	td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-	td.SampleDesc.Count = 1;
-	td.Usage = D3D11_USAGE_STAGING;
-	td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-	if (FAILED(dev->CreateTexture2D(&td, NULL, &staging))) { dxgi_release_objects(); return 1; }
 	dupX = x;
 	dupY = y;
 	dupW = w;
 	dupH = h;
-	return 0;
+	for (a = 0; result == 0 && factory->EnumAdapters1(a, &adapter) != DXGI_ERROR_NOT_FOUND; a++)
+	{
+		ID3D11Device *adev = NULL;
+		ID3D11DeviceContext *actx = NULL;
+		for (n = 0; result == 0 && adapter->EnumOutputs(n, &output) != DXGI_ERROR_NOT_FOUND; n++)
+		{
+			DXGI_OUTPUT_DESC d;
+			const RECT *dc = &d.DesktopCoordinates;
+			output->GetDesc(&d);
+			if (d.AttachedToDesktop && dc->right > x && dc->left < x + w && dc->bottom > y && dc->top < y + h)
+			{
+				if (dc->left < x || dc->top < y || dc->right > x + w || dc->bottom > y + h || outCount == DXGI_MAX_OUTPUTS) { result = 2; }
+				else { result = dxgi_output_start(adapter, output, &adev, &actx, dc); }
+			}
+			output->Release();
+		}
+		DXGI_SAFE_RELEASE(actx);
+		DXGI_SAFE_RELEASE(adev);
+		adapter->Release();
+	}
+	factory->Release();
+	if (result == 0 && outCount == 0) { result = 2; }
+	if (result != 0) { dxgi_release_objects(); }
+	return result;
 }
 
-// Clamped to the output, empty rectangles are dropped, returns 1 when the list could not grow
-static int dxgi_changed_add(const RECT *r)
+// r is in the coordinates of the output's texture. Clamped to the texture, empty rectangles are dropped, returns 1 when the list could not grow.
+static int dxgi_changed_add(const dxgi_out *o, const RECT *r)
 {
 	RECT c;
 	c.left = r->left < 0 ? 0 : r->left;
 	c.top = r->top < 0 ? 0 : r->top;
-	c.right = r->right > dupW ? dupW : r->right;
-	c.bottom = r->bottom > dupH ? dupH : r->bottom;
+	c.right = r->right > o->tw ? o->tw : r->right;
+	c.bottom = r->bottom > o->th ? o->th : r->bottom;
 	if (c.right <= c.left || c.bottom <= c.top) { return 0; }
 	if (changedCount == changedCapacity)
 	{
@@ -203,14 +245,40 @@ static int dxgi_changed_add(const RECT *r)
 	return 0;
 }
 
-// Collects the dirty rectangles and the destinations of the move rectangles of the acquired frame.
-// Returns 1 when they could not be read or cover more than half the screen, and then the caller takes the whole frame.
-static int dxgi_read_changes(const DXGI_OUTDUPL_FRAME_INFO *fi)
+// Turns the rectangle c of a rotated output's texture into the upright copy, and sets c to its place there.
+// Desktop Duplication delivers a rotated output as the panel has it, and the changed rectangles in that orientation too.
+static void dxgi_turn_rect(const dxgi_out *o, const D3D11_MAPPED_SUBRESOURCE *map, RECT *c)
+{
+	const unsigned char *base = (const unsigned char *)map->pData;
+	ptrdiff_t pitch = (ptrdiff_t)map->RowPitch;
+	RECT d;
+	int x, y;
+
+	if (o->rot == DXGI_MODE_ROTATION_ROTATE90) { d.left = o->w - c->bottom; d.top = c->left; d.right = o->w - c->top; d.bottom = c->right; }
+	else if (o->rot == DXGI_MODE_ROTATION_ROTATE180) { d.left = o->w - c->right; d.top = o->h - c->bottom; d.right = o->w - c->left; d.bottom = o->h - c->top; }
+	else { d.left = c->top; d.top = o->h - c->right; d.right = c->bottom; d.bottom = o->h - c->left; }
+	for (y = d.top; y < d.bottom; y++)
+	{
+		// The texture pixel that the first upright pixel of this row shows, and the step to the one of the next upright pixel
+		const unsigned char *p;
+		ptrdiff_t step;
+		unsigned int *out = (unsigned int *)(o->upright + ((size_t)y * o->w + d.left) * 4);
+		if (o->rot == DXGI_MODE_ROTATION_ROTATE90) { p = base + (ptrdiff_t)(o->w - 1 - d.left) * pitch + (ptrdiff_t)y * 4; step = -pitch; }
+		else if (o->rot == DXGI_MODE_ROTATION_ROTATE180) { p = base + (ptrdiff_t)(o->h - 1 - y) * pitch + (ptrdiff_t)(o->w - 1 - d.left) * 4; step = -4; }
+		else { p = base + (ptrdiff_t)d.left * pitch + (ptrdiff_t)(o->h - 1 - y) * 4; step = pitch; }
+		for (x = d.left; x < d.right; x++, p += step) { *out++ = *(const unsigned int *)p; }
+	}
+	*c = d;
+}
+
+// Collects the dirty rectangles and the destinations of the move rectangles of the output's acquired frame.
+// Returns 1 when they could not be read or cover more than half the output, and then the caller takes the whole output.
+static int dxgi_read_changes(const dxgi_out *o, const DXGI_OUTDUPL_FRAME_INFO *fi)
 {
 	UINT used, i;
 	long long area = 0;
+	int c;
 
-	changedCount = 0;
 	if (fi->TotalMetadataBufferSize == 0) { return 1; }
 	if (metaSize < fi->TotalMetadataBufferSize)
 	{
@@ -220,66 +288,117 @@ static int dxgi_read_changes(const DXGI_OUTDUPL_FRAME_INFO *fi)
 		metaSize = fi->TotalMetadataBufferSize;
 	}
 	// Moves first, the dirty rectangles reuse the buffer afterwards
-	if (FAILED(dup->GetFrameMoveRects(metaSize, (DXGI_OUTDUPL_MOVE_RECT *)meta, &used))) { return 1; }
+	if (FAILED(o->dup->GetFrameMoveRects(metaSize, (DXGI_OUTDUPL_MOVE_RECT *)meta, &used))) { return 1; }
 	for (i = 0; i < used / sizeof(DXGI_OUTDUPL_MOVE_RECT); i++)
 	{
-		if (dxgi_changed_add(&((DXGI_OUTDUPL_MOVE_RECT *)meta)[i].DestinationRect)) { return 1; }
+		if (dxgi_changed_add(o, &((DXGI_OUTDUPL_MOVE_RECT *)meta)[i].DestinationRect)) { return 1; }
 	}
-	if (FAILED(dup->GetFrameDirtyRects(metaSize, (RECT *)meta, &used))) { return 1; }
+	if (FAILED(o->dup->GetFrameDirtyRects(metaSize, (RECT *)meta, &used))) { return 1; }
 	for (i = 0; i < used / sizeof(RECT); i++)
 	{
-		if (dxgi_changed_add(&((RECT *)meta)[i])) { return 1; }
+		if (dxgi_changed_add(o, &((RECT *)meta)[i])) { return 1; }
 	}
 	// Scattered changes in one window come as their bounding box, and copying a large part rectangle by rectangle
-	// costs more than one copy of the whole frame. Overlaps count twice, which only moves the switch a little earlier.
-	for (i = 0; i < (UINT)changedCount; i++) { area += (long long)(changed[i].right - changed[i].left) * (changed[i].bottom - changed[i].top); }
-	if (area * 2 > (long long)dupW * dupH) { return 1; }
+	// costs more than one copy of the whole output. Overlaps count twice, which only moves the switch a little earlier.
+	for (c = o->first; c < changedCount; c++) { area += (long long)(changed[c].right - changed[c].left) * (changed[c].bottom - changed[c].top); }
+	if (area * 2 > (long long)o->w * o->h) { return 1; }
 	return 0;
 }
 
-// Copies the changed areas of the last frame, or all of it when changedCount is -1, from the staging texture into dest.
-// Returns 0 on success and -1 when Map() failed.
-static int dxgi_capture_copy(unsigned char *dest, int destWidth, int destHeight)
-{
-	D3D11_MAPPED_SUBRESOURCE map;
-	int r, i;
-
-	if (changedCount == 0) { return 0; }
-	if (FAILED(ctx->Map(staging, 0, D3D11_MAP_READ, 0, &map))) { return -1; }
-	// The tile code reads a bottom-up DIB with adjust_screen_size() rows, so screen row r goes to DIB row (destHeight - 1 - r)
-	if (changedCount < 0)
-	{
-		for (r = 0; r < dupH; r++)
-		{
-			memcpy(dest + (size_t)(destHeight - 1 - r) * destWidth * 4, (unsigned char *)map.pData + (size_t)r * map.RowPitch, (size_t)dupW * 4);
-		}
-	}
-	for (i = 0; i < changedCount; i++)
-	{
-		const RECT *c = &changed[i];
-		for (r = c->top; r < c->bottom; r++)
-		{
-			memcpy(dest + ((size_t)(destHeight - 1 - r) * destWidth + c->left) * 4, (unsigned char *)map.pData + (size_t)r * map.RowPitch + (size_t)c->left * 4, (size_t)(c->right - c->left) * 4);
-		}
-	}
-	ctx->Unmap(staging, 0);
-	return 0;
-}
-
-extern "C" int dxgi_capture_frame(int x, int y, int w, int h, unsigned char *dest, int destWidth, int destHeight, int destCurrent, const RECT **rects, int *rectCount)
+// Acquires the output's next frame and copies what changed into dest, or all of it when dest does not hold the last frame.
+// Returns 0 when dest holds the output's current picture, 1 when the output has no frame yet, -1 on failure
+// and -2 when the frame has a size that the output's rotation does not explain.
+static int dxgi_output_frame(dxgi_out *o, unsigned char *dest, int destWidth, int destHeight, int destCurrent)
 {
 	DXGI_OUTDUPL_FRAME_INFO fi;
 	IDXGIResource *res = NULL;
 	ID3D11Texture2D *tex = NULL;
-	HRESULT hr;
-	int result;
-	int fresh = 0;
+	D3D11_MAPPED_SUBRESOURCE map;
+	int result = 0;
+	int i, r;
+	HRESULT hr = o->dup->AcquireNextFrame(0, &fi, &res);
+
+	// DXGI_ERROR_ACCESS_LOST on a desktop switch, UAC prompt or mode change
+	if (FAILED(hr) && hr != DXGI_ERROR_WAIT_TIMEOUT) { return -1; }
+
+	o->first = changedCount;
+	o->full = !destCurrent;
+	// A timeout means nothing changed, and a frame with LastPresentTime 0 only moved the pointer
+	if (SUCCEEDED(hr) && fi.LastPresentTime.QuadPart != 0)
+	{
+		if (FAILED(res->QueryInterface(__uuidof(ID3D11Texture2D), (void **)&tex))) { result = -1; }
+		else
+		{
+			D3D11_TEXTURE2D_DESC fd;
+			tex->GetDesc(&fd);
+			// The staging texture has the size that follows from the rotation. A frame of another size cannot be copied into it.
+			if ((int)fd.Width != o->tw || (int)fd.Height != o->th) { result = -2; }
+			// The whole output after a start, after GDI wrote dest and when the rectangles cannot be read
+			else if (o->full || !o->hasFrame || dxgi_read_changes(o, &fi) != 0)
+			{
+				o->ctx->CopyResource(o->staging, tex);
+				o->full = 1;
+				changedCount = o->first;
+			}
+			for (i = o->first; result == 0 && i < changedCount; i++)
+			{
+				D3D11_BOX b = { (UINT)changed[i].left, (UINT)changed[i].top, 0, (UINT)changed[i].right, (UINT)changed[i].bottom, 1 };
+				o->ctx->CopySubresourceRegion(o->staging, 0, b.left, b.top, 0, tex, 0, &b);
+			}
+			tex->Release();
+			if (result == 0) { o->hasFrame = 1; }
+		}
+	}
+	// Right after a start there may be no frame yet, and then GDI captures this one
+	if (result == 0 && !o->hasFrame) { result = 1; }
+	if (result == 0 && o->full)
+	{
+		// One rectangle for the whole output, so the caller checks this output's tiles only
+		RECT all = { 0, 0, o->tw, o->th };
+		changedCount = o->first;
+		if (dxgi_changed_add(o, &all)) { result = -1; }
+	}
+	if (result == 0 && changedCount > o->first)
+	{
+		if (FAILED(o->ctx->Map(o->staging, 0, D3D11_MAP_READ, 0, &map))) { result = -1; }
+		else
+		{
+			const unsigned char *src = (o->upright != NULL) ? o->upright : (const unsigned char *)map.pData;
+			size_t pitch = (o->upright != NULL) ? (size_t)o->w * 4 : (size_t)map.RowPitch;
+			// The tile code reads a bottom-up DIB with adjust_screen_size() rows, so screen row r goes to DIB row (destHeight - 1 - r)
+			for (i = o->first; i < changedCount; i++)
+			{
+				RECT *c = &changed[i];
+				if (o->upright != NULL) { dxgi_turn_rect(o, &map, c); }
+				for (r = c->top; r < c->bottom; r++)
+				{
+					memcpy(dest + ((size_t)(destHeight - 1 - (r + o->oy)) * destWidth + c->left + o->ox) * 4, src + (size_t)r * pitch + (size_t)c->left * 4, (size_t)(c->right - c->left) * 4);
+				}
+				// The caller gets the rectangle in the coordinates of the captured rectangle
+				OffsetRect(c, o->ox, o->oy);
+			}
+			o->ctx->Unmap(o->staging, 0);
+		}
+	}
+	if (SUCCEEDED(hr))
+	{
+		res->Release();
+		o->dup->ReleaseFrame();
+	}
+	return result;
+}
+
+extern "C" int dxgi_capture_frame(int x, int y, int w, int h, unsigned char *dest, int destWidth, int destHeight, int destCurrent, const RECT **rects, int *rectCount)
+{
+	int result = 0;
+	int allFull = 1;
+	int i;
 
 	*rects = NULL;
 	*rectCount = -1;
 	if (unsupported || w > destWidth || h > destHeight) { return 1; }
-	if (dup != NULL && (x != dupX || y != dupY || w != dupW || h != dupH)) { dxgi_release_objects(); }
-	if (dup == NULL)
+	if (outCount > 0 && (x != dupX || y != dupY || w != dupW || h != dupH)) { dxgi_release_objects(); }
+	if (outCount == 0)
 	{
 		if (failed && GetTickCount() - failedAt < failedWait) { return 1; }
 		// The start takes longer than a BitBlt frame and has no frame ready right after it, so GDI takes this frame
@@ -291,53 +410,18 @@ extern "C" int dxgi_capture_frame(int x, int y, int w, int h, unsigned char *des
 		failed = 0;
 	}
 
-	hr = dup->AcquireNextFrame(0, &fi, &res);
-	// DXGI_ERROR_ACCESS_LOST on a desktop switch, UAC prompt or mode change
-	if (FAILED(hr) && hr != DXGI_ERROR_WAIT_TIMEOUT) { dxgi_capture_failed(DXGI_RETRY_MS); return 1; }
-
-	// A timeout means nothing changed, and a frame with LastPresentTime 0 only moved the pointer
-	result = 0;
-	if (SUCCEEDED(hr) && fi.LastPresentTime.QuadPart != 0)
+	// Areas of the rectangle that no output covers are never written, so they keep the black they had
+	changedCount = 0;
+	for (i = 0; i < outCount && result == 0; i++)
 	{
-		if (FAILED(res->QueryInterface(__uuidof(ID3D11Texture2D), (void **)&tex))) { result = -1; }
-		else
-		{
-			// The whole frame after a start, after GDI wrote dest and when the rectangles cannot be read
-			if (!hasFrame || !destCurrent || dxgi_read_changes(&fi) != 0)
-			{
-				ctx->CopyResource(staging, tex);
-				changedCount = -1;
-			}
-			for (int i = 0; i < changedCount; i++)
-			{
-				D3D11_BOX b = { (UINT)changed[i].left, (UINT)changed[i].top, 0, (UINT)changed[i].right, (UINT)changed[i].bottom, 1 };
-				ctx->CopySubresourceRegion(staging, 0, b.left, b.top, 0, tex, 0, &b);
-			}
-			tex->Release();
-			hasFrame = 1;
-			fresh = 1;
-		}
+		result = dxgi_output_frame(&outs[i], dest, destWidth, destHeight, destCurrent);
+		allFull &= outs[i].full;
 	}
-	if (result == 0)
-	{
-		// Right after a start there may be no frame yet, and then GDI captures this one
-		if (!hasFrame) { result = 1; }
-		else
-		{
-			if (!fresh) { changedCount = destCurrent ? 0 : -1; }
-			result = dxgi_capture_copy(dest, destWidth, destHeight);
-		}
-	}
-	if (SUCCEEDED(hr))
-	{
-		res->Release();
-		dup->ReleaseFrame();
-	}
-	if (result < 0) { dxgi_capture_failed(DXGI_RETRY_MS); return 1; }
+	if (result < 0) { dxgi_capture_failed(result == -2 ? DXGI_RETRY_NO_OUTPUT_MS : DXGI_RETRY_MS); return 1; }
 	if (result == 0)
 	{
 		*rects = changed;
-		*rectCount = changedCount;
+		*rectCount = allFull ? -1 : changedCount;
 	}
 	return result;
 }
