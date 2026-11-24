@@ -12,8 +12,28 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      windows: ${{ steps.chk.outputs.windows }}
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # A pull request compares against its base branch, a push against the commit before it.
+      # A tag gets no base, so a release always builds, also when a moved tag is pushed again.
+      - id: chk
+        name: Find the builds this change needs
+        env:
+          BASE_SHA: ${{ github.ref_type != 'tag' && (github.event.pull_request.base.sha || github.event.before) || '' }}
+        run: bash .github/scripts/changed-targets.sh "$BASE_SHA"
+
   windows-build:
-    runs-on: ${{ matrix.platform == 'ARM64' && 'windows-11-arm' || 'windows-2022' }}
+    needs: changes
+    if: needs.changes.outputs.windows == 'true'
+    # ARM64 is cross-built here too, so all three platforms come from the same VS 2022 compiler
+    runs-on: windows-2022
     strategy:
       fail-fast: false
       matrix:

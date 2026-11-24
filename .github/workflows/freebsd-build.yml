@@ -22,7 +22,7 @@ env:
 
 jobs:
   changes:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     outputs:
       freebsd: ${{ steps.chk.outputs.freebsd }}
     steps:
@@ -42,7 +42,7 @@ jobs:
     name: FreeBSD x86_64 (ARCHID=30)
     needs: changes
     if: needs.changes.outputs.freebsd == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       BIN: meshagent_freebsd_x86-64
       # Part of cache key. Bump it when fetch-freebsd-sysroot.sh changes which files end up in the sysroot

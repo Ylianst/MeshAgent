@@ -9,53 +9,70 @@ permissions:
   contents: read
 
 jobs:
-  macos-build-arm64:
-    name: macOS arm64 (ARCHID=29)
-    runs-on: macos-15
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      mac: ${{ steps.chk.outputs.mac }}
     steps:
       - name: Check out repository code
-        uses: actions/checkout@v7.0.0
-      - name: Build meshagent (arm64, KVM enabled)
-        run: make -j4 macos ARCHID=29
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/checkout@v7
         with:
-          if-no-files-found: error
-          name: meshagent-macos-arm64
-          path: ${{ github.workspace }}/meshagent_osx-arm-64
+          fetch-depth: 0
+      # A pull request compares against its base branch, a push against the commit before it.
+      # A tag gets no base, so a release always builds, also when a moved tag is pushed again.
+      - id: chk
+        name: Find the builds this change needs
+        env:
+          BASE_SHA: ${{ github.ref_type != 'tag' && (github.event.pull_request.base.sha || github.event.before) || '' }}
+        run: bash .github/scripts/changed-targets.sh "$BASE_SHA"
 
   macos-build-x86_64:
     name: macOS x86_64 (ARCHID=16)
+    needs: changes
+    if: needs.changes.outputs.mac == 'true'
     runs-on: macos-15-intel
     steps:
       - name: Check out repository code
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7
       - name: Build meshagent (x86_64, KVM enabled)
         run: make -j4 macos ARCHID=16
       - name: Upload artifacts
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7
         with:
           if-no-files-found: error
           name: meshagent-macos-x86_64
           path: ${{ github.workspace }}/meshagent_osx-x86-64
 
-  macos-build-universal:
-    name: macOS universal installer
-    needs: [macos-build-arm64, macos-build-x86_64]
-    runs-on: macos-15
+  # Runs after the x86_64 job, so it can combine both binaries into the universal one without a job of its own
+  macos-build-arm64:
+    name: macOS arm64 (ARCHID=29) and universal installer
+    needs: [changes, macos-build-x86_64]
+    if: needs.changes.outputs.mac == 'true'
+    runs-on: macos-latest
     steps:
-      - uses: actions/download-artifact@v7
+      - name: Check out repository code
+        uses: actions/checkout@v7
+      - name: Build meshagent (arm64, KVM enabled)
+        run: make -j4 macos ARCHID=29
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
         with:
-          pattern: meshagent-macos-*
+          if-no-files-found: error
+          name: meshagent-macos-arm64
+          path: ${{ github.workspace }}/meshagent_osx-arm-64
+      - name: Download the x86_64 binary
+        uses: actions/download-artifact@v7
+        with:
+          name: meshagent-macos-x86_64
           path: binaries
-          merge-multiple: true
       - name: Combine architectures
         run: |
-          lipo -create binaries/meshagent_osx-arm-64 binaries/meshagent_osx-x86-64 -output meshagent_osx-universal-64
+          lipo -create meshagent_osx-arm-64 binaries/meshagent_osx-x86-64 -output meshagent_osx-universal-64
           lipo meshagent_osx-universal-64 -verify_arch arm64 x86_64
           codesign --force --sign - meshagent_osx-universal-64
-      - uses: actions/upload-artifact@v7
+      - name: Upload the universal binary
+        uses: actions/upload-artifact@v7
         with:
+          if-no-files-found: error
           name: meshagent-macos-universal
           path: meshagent_osx-universal-64
-          if-no-files-found: error
