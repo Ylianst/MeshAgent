@@ -795,6 +795,9 @@ void* kvm_server_mainloop(void* param)
 	int screen_num;
 	struct sockaddr_un serveraddr;
 
+	// The thread keeps the QoS it was started with unless a build sets KVM_QOS_CLASS
+	if (KVM_QOS_CLASS != QOS_CLASS_DEFAULT) { pthread_set_qos_class_self_np(KVM_QOS_CLASS, 0); }
+
 	if (param == NULL)
 	{
 		// This is doing I/O via StdIn/StdOut

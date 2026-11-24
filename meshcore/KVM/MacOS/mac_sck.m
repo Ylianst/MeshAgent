@@ -113,7 +113,7 @@ int kvm_sck_start(CGDirectDisplayID display, int width, int height, int interval
 	filter = [[SCContentFilter alloc] initWithDisplay:target excludingWindows:@[]];
 	g_sckOutput = [[KvmStreamOutput alloc] init];
 	g_sckStream = [[SCStream alloc] initWithFilter:filter configuration:g_sckConfig delegate:g_sckOutput];
-	if (![g_sckStream addStreamOutput:g_sckOutput type:SCStreamOutputTypeScreen sampleHandlerQueue:dispatch_queue_create("meshagent.kvm.sck", DISPATCH_QUEUE_SERIAL) error:nil])
+	if (![g_sckStream addStreamOutput:g_sckOutput type:SCStreamOutputTypeScreen sampleHandlerQueue:dispatch_queue_create("meshagent.kvm.sck", dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, KVM_QOS_CLASS, 0)) error:nil])
 	{
 		kvm_sck_stop();
 		return(-1);

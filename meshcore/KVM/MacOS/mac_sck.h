@@ -16,6 +16,14 @@ limitations under the License.
 #define MAC_SCK_H_
 
 #include <CoreGraphics/CoreGraphics.h>
+#include <sys/qos.h>
+
+// The QoS class of the frame loop and of the stream's queue. Default, so the agent stays behind local apps that need the CPU.
+// On Apple Silicon the loop then runs partly on efficiency cores, where the JPEG encode took 1.6 to 2 times as long on an M2.
+// A build that puts the remote picture first can pass -DKVM_QOS_CLASS=QOS_CLASS_USER_INITIATED.
+#ifndef KVM_QOS_CLASS
+#define KVM_QOS_CLASS QOS_CLASS_DEFAULT
+#endif
 
 struct tileFrame_t;
 
