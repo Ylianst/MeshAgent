@@ -22,10 +22,11 @@ extern "C" {
 #endif
 
 // Captures the screen rectangle (x, y, w, h) bottom-up into dest, starting the duplication when needed.
+// spanW and spanH give the part of the screen, from (x, y), that fills the whole of dest. A span larger than dest scales the picture down.
 // destCurrent says dest still holds the last frame this function wrote, so an unchanged screen needs no copy until the next release.
 // Returns 0 when dest holds the current screen, 1 when the caller has to capture this frame with GDI.
-// On 0, rects and rectCount give the screen areas that changed since the last call, and a rectCount of -1 means the whole screen.
-int dxgi_capture_frame(int x, int y, int w, int h, unsigned char *dest, int destWidth, int destHeight, int destCurrent, const RECT **rects, int *rectCount);
+// On 0, rects and rectCount give the areas of dest that changed since the last call, and a rectCount of -1 means all of it.
+int dxgi_capture_frame(int x, int y, int w, int h, int spanW, int spanH, unsigned char *dest, int destWidth, int destHeight, int destCurrent, const RECT **rects, int *rectCount);
 
 void dxgi_capture_release(void);
 

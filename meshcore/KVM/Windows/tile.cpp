@@ -745,6 +745,19 @@ static int cursor_metrics(HCURSOR cursor, int *hotX, int *hotY, int *cw, int *ch
 	return 0;
 }
 
+// A screen distance in the picture, which a scaled session scales with it
+static int cursor_scale(int v)
+{
+	return (int)((long long)v * SCALING_FACTOR / 1024);
+}
+
+// The size of the cursor in the picture, which keeps at least one pixel
+static int cursor_size(int v)
+{
+	v = cursor_scale(v);
+	return v < 1 ? 1 : v;
+}
+
 // Draws the cursor at (x, y) into the DXGI frame. DrawIconEx() draws on a copy of the pixels under it, so masks, alpha
 // and inverting cursors such as the text cursor come out as on the screen. The covered pixels are kept for the restore.
 static void dxgi_cursor_draw(int x, int y, int bufW, int bufH)
@@ -754,12 +767,14 @@ static void dxgi_cursor_draw(int x, int y, int bufW, int bufH)
 
 	info.cbSize = sizeof(info);
 	if (!GetCursorInfo(&info) || (info.flags & CURSOR_SHOWING) == 0 || cursor_metrics(info.hCursor, &hotX, &hotY, &cw, &ch) != 0) { return; }
-	// (x, y) is the hotspot, the image starts that far up and left of it
-	x -= hotX;
-	y -= hotY;
+	// (x, y) is the hotspot on the screen, the image starts that far up and left of it. A scaled picture gets a scaled cursor.
+	x = cursor_scale(x - hotX);
+	y = cursor_scale(y - hotY);
+	cw = cursor_size(cw);
+	ch = cursor_size(ch);
 	int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
-	int x1 = x + cw > SCREEN_WIDTH ? SCREEN_WIDTH : x + cw;
-	int y1 = y + ch > SCREEN_HEIGHT ? SCREEN_HEIGHT : y + ch;
+	int x1 = x + cw > SCALED_WIDTH ? SCALED_WIDTH : x + cw;
+	int y1 = y + ch > SCALED_HEIGHT ? SCALED_HEIGHT : y + ch;
 	size_t need = (size_t)(x1 > x0 ? x1 - x0 : 0) * (y1 > y0 ? y1 - y0 : 0) * 4;
 
 	if (need == 0 || dxgi_cursor_dib(cw, ch) != 0) { return; }
@@ -815,8 +830,8 @@ int get_desktop_buffer(void **buffer, long long *bufferSize, long* mouseMove)
 	*buffer = NULL; // If anything fails, this will be the indication.
 	*bufferSize = 0;
 
-	// Scaled frames stay on GDI. DXGI frames carry no cursor, so dxgi_cursor_draw() adds it when it has to be drawn in.
-	if (SCALING_FACTOR == 1024 && !dxgi_capture_unsupported())
+	// DXGI frames carry no cursor, so dxgi_cursor_draw() adds it when it has to be drawn in
+	if (!dxgi_capture_unsupported())
 	{
 		long long size = (long long)w * h * 4;
 		if (captureBufferSize != size)
@@ -833,7 +848,8 @@ int get_desktop_buffer(void **buffer, long long *bufferSize, long* mouseMove)
 		// The restore puts back what was under the old cursor, so those tiles changed too
 		tile_check_rect(cursorSaveX, cursorSaveY, cursorSaveX + cursorSaveW, cursorSaveY + cursorSaveH);
 		dxgi_cursor_restore(w, h);
-		if (dxgi_capture_frame(SCREEN_X, SCREEN_Y, SCREEN_WIDTH, SCREEN_HEIGHT, (unsigned char *)captureBuffer, w, h, captureHoldsDxgiFrame, &rects, &rectCount) == 0)
+		// The span is the source size of the StretchBlt() below, so a GDI frame and a DXGI frame show the same picture
+		if (dxgi_capture_frame(SCREEN_X, SCREEN_Y, SCREEN_WIDTH, SCREEN_HEIGHT, adjust_screen_size(SCREEN_WIDTH), adjust_screen_size(SCREEN_HEIGHT), (unsigned char *)captureBuffer, w, h, captureHoldsDxgiFrame, &rects, &rectCount) == 0)
 		{
 			if (rectCount < 0) { tileCheckAll = 1; }
 			for (int i = 0; i < rectCount; i++) { tile_check_rect(rects[i].left, rects[i].top, rects[i].right, rects[i].bottom); }
@@ -878,17 +894,6 @@ int get_desktop_buffer(void **buffer, long long *bufferSize, long* mouseMove)
 			KVMDEBUG("BitBlt() returned FALSE", 0);
 			return 1; // If the copy fails, error out.
 		}
-		if (mouseMove[0] != 0)
-		{
-			CURSORINFO info = { 0 };
-			int hotX, hotY, cw, ch;
-			info.cbSize = sizeof(info);
-			if (GetCursorInfo(&info) && (info.flags & CURSOR_SHOWING) != 0 && cursor_metrics(info.hCursor, &hotX, &hotY, &cw, &ch) == 0)
-			{
-				// DrawIconEx() applies the cursor's masks and alpha to the captured pixels, as Windows does on the screen
-				DrawIconEx(hCaptureDC, mouseMove[1] - hotX, mouseMove[2] - hotY, info.hCursor, 0, 0, 0, NULL, DI_NORMAL);
-			}
-		}
 	}
 	else
 	{
@@ -897,6 +902,20 @@ int get_desktop_buffer(void **buffer, long long *bufferSize, long* mouseMove)
 		{
 			KVMDEBUG("StretchBlt() returned FALSE", 0);
 			return 1; // If the copy fails, error out.
+		}
+	}
+
+	if (mouseMove[0] != 0)
+	{
+		CURSORINFO info = { 0 };
+		int hotX, hotY, cw, ch;
+		info.cbSize = sizeof(info);
+		if (GetCursorInfo(&info) && (info.flags & CURSOR_SHOWING) != 0 && cursor_metrics(info.hCursor, &hotX, &hotY, &cw, &ch) == 0)
+		{
+			// DrawIconEx() applies the cursor's masks and alpha to the captured pixels, as Windows does on the screen.
+			// A size of 0 is the cursor's own size, and a scaled picture gets the cursor scaled with it.
+			int scaledCursor = (SCALING_FACTOR != 1024);
+			DrawIconEx(hCaptureDC, cursor_scale(mouseMove[1] - hotX), cursor_scale(mouseMove[2] - hotY), info.hCursor, scaledCursor ? cursor_size(cw) : 0, scaledCursor ? cursor_size(ch) : 0, 0, NULL, DI_NORMAL);
 		}
 	}
 
