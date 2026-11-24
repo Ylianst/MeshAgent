@@ -135,22 +135,28 @@ static int kvm_find_socket(char *buf, size_t bufLen, unsigned int uid)
 
 int KVM_AGENT_FD = -1;
 int KVM_STDOUT_IS_LOG = 0;
+// Writes the whole packet, because a short write would leave the viewer's stream out of step.
+// No fsync(): stdout is a pipe, where it does nothing but cost a system call per packet.
 int KVM_SEND(char *buffer, int bufferLen)
 {
-	int retVal = -1;
-	retVal = write(KVM_AGENT_FD == -1 ? STDOUT_FILENO : KVM_AGENT_FD, buffer, bufferLen);
-	if (KVM_AGENT_FD == -1) { fsync(STDOUT_FILENO); }
-	else
+	int fd = KVM_AGENT_FD == -1 ? STDOUT_FILENO : KVM_AGENT_FD;
+	int done = 0;
+	ssize_t n;
+
+	while (done < bufferLen)
 	{
-		if (retVal < 0)
+		n = write(fd, buffer + done, (size_t)(bufferLen - done));
+		if (n > 0) { done += (int)n; continue; }
+		if (n < 0 && errno == EINTR) { continue; }
+		if (KVM_AGENT_FD != -1)
 		{
 			char tmp[255];
 			int tmpLen = sprintf_s(tmp, sizeof(tmp), "Write Error: %d on %d\n", errno, KVM_AGENT_FD);
 			write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
 		}
+		return(-1);
 	}
-	return(retVal);
+	return(bufferLen);
 }
 
 
