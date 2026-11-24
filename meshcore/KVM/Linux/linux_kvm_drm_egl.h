@@ -39,6 +39,21 @@ limitations under the License.
 
 #define KVM_DRM_EGL_MAX_ERROR 256
 
+#if defined(__linux__)
+#define KVM_DRM_EGL_TARGETS 16
+typedef struct kvm_drm_egl_target
+{
+	GLuint out_tex;
+	GLuint prev_tex;
+	GLuint diff_tex;
+	int w;
+	int h;
+	int diff_w;
+	int diff_h;
+	bool have_prev;
+} kvm_drm_egl_target;
+#endif
+
 typedef struct kvm_drm_egl_context
 {
 	bool initialized;
@@ -60,33 +75,37 @@ typedef struct kvm_drm_egl_context
 	GLuint program;
 	GLuint vbo;
 	GLuint fbo;
-	GLuint out_tex;
 	GLint attr_pos;
 	GLint attr_tex;
 	GLint u_tex;
 
-	// Changed-tile readback: the previous frame stays on the GPU in prev_tex, a second pass writes one value per tile into diff_tex
+	// Changed-tile readback: a second pass compares a frame with the previous one of the same output and writes one value per tile
 	bool es3;
-	bool have_prev;
-	GLuint prev_tex;
-	GLuint diff_tex;
 	GLuint diff_program;
 	GLint diff_attr_pos;
 	GLint diff_u_cur;
 	GLint diff_u_prev;
 	GLint diff_u_size;
 	GLint diff_u_tile;
-	int diff_w;
-	int diff_h;
+	// Render targets per output, because the previous frame of each output stays on the GPU. Target 0 also serves the RGB24 path.
+	kvm_drm_egl_target targets[KVM_DRM_EGL_TARGETS];
 #endif
 
 	uint8_t *rgba_readback;
 	size_t rgba_readback_cap;
 
-	// Set by the caller for a call without an RGB24 buffer: the tile size, or 0 to read the whole frame back
-	int direct_tile_size;
-	// After such a call, when changed_valid is set: one byte per tile, row by row from the top, 0 where the tile equals the previous frame.
-	// rgba_readback then holds new pixels only for the changed tiles, and what it already had for the others.
+	// Set by the caller for a call without an RGB24 buffer. The frame is read back into direct_dest, a 4 byte per pixel buffer
+	// with the bottom row first that can hold several outputs: direct_dest_row_length pixels per row, this output at
+	// column direct_dest_x, its bottom row in buffer row direct_dest_row0.
+	int direct_target;
+	uint8_t *direct_dest;
+	int direct_dest_row_length;
+	int direct_dest_x;
+	int direct_dest_row0;
+	int direct_tile_size;	// The tile size, or 0 to read the whole frame back
+	int direct_force_full;	// 1 when direct_dest does not hold this output's previous frame
+	// After such a call, when changed_valid is set: one byte per tile of this output, row by row from the top, 0 where the tile equals the previous frame.
+	// direct_dest then got new pixels only for the changed tiles.
 	bool changed_valid;
 	uint8_t *changed_tiles;
 	size_t changed_tiles_cap;

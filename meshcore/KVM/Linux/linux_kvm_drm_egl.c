@@ -578,11 +578,10 @@ static bool kvm_drm_egl_init_gpu_readback(kvm_drm_egl_context *g, int drm_fd, ch
 	glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STATIC_DRAW);
 
 	glGenFramebuffers(1, &g->fbo);
-	glGenTextures(1, &g->out_tex);
+	memset(g->targets, 0, sizeof(g->targets));
 
 	// The tile compare pass. Without it every frame is read back whole, as before.
 	g->diff_program = 0;
-	g->have_prev = false;
 	if (g->es3)
 	{
 		// One fragment per tile: 1 when any pixel of the tile differs between the two frames. The frames are stored bottom row first.
@@ -636,13 +635,6 @@ static bool kvm_drm_egl_init_gpu_readback(kvm_drm_egl_context *g, int drm_fd, ch
 		}
 		if (dvs != 0) { glDeleteShader(dvs); }
 		if (dfs != 0) { glDeleteShader(dfs); }
-		if (g->diff_program != 0)
-		{
-			glGenTextures(1, &g->prev_tex);
-			glGenTextures(1, &g->diff_tex);
-			g->diff_w = 0;
-			g->diff_h = 0;
-		}
 		(void)glGetError();
 	}
 
@@ -650,65 +642,71 @@ static bool kvm_drm_egl_init_gpu_readback(kvm_drm_egl_context *g, int drm_fd, ch
 	return true;
 }
 
-static bool kvm_drm_egl_ensure_gpu_target_size(kvm_drm_egl_context *g, int width, int height, char *out_error, size_t out_error_size)
+static void kvm_drm_egl_alloc_target_texture(GLuint *tex, int width, int height)
 {
-	if (g->surf_w == width && g->surf_h == height) { return true; }
-
-	if (g->surf != EGL_NO_SURFACE)
-	{
-		eglDestroySurface(g->dpy, g->surf);
-		g->surf = EGL_NO_SURFACE;
-	}
-
-	const EGLint surf_attribs[] = { EGL_WIDTH, width, EGL_HEIGHT, height, EGL_NONE };
-	g->surf = eglCreatePbufferSurface(g->dpy, g->cfg, surf_attribs);
-	if (g->surf == EGL_NO_SURFACE)
-	{
-		char err[KVM_DRM_EGL_MAX_ERROR];
-		// Also reset the cached size: a stale surf_w/h would make the next call at the old size
-		// short-circuit "true" with no surface at all.
-		g->surf_w = 0;
-		g->surf_h = 0;
-		kvm_drm_egl_format_egl_error(err, sizeof(err), "eglCreatePbufferSurface(size) failed", eglGetError());
-		kvm_drm_egl_copy_error_message(out_error, out_error_size, err);
-		return false;
-	}
-	g->surf_w = width;
-	g->surf_h = height;
-
-	if (!eglMakeCurrent(g->dpy, g->surf, g->surf, g->ctx))
-	{
-		char err[KVM_DRM_EGL_MAX_ERROR];
-		g->surf_w = 0;
-		g->surf_h = 0;
-		kvm_drm_egl_format_egl_error(err, sizeof(err), "eglMakeCurrent(size) failed", eglGetError());
-		kvm_drm_egl_copy_error_message(out_error, out_error_size, err);
-		return false;
-	}
-
-	glBindTexture(GL_TEXTURE_2D, g->out_tex);
+	if (*tex == 0) { glGenTextures(1, tex); }
+	glBindTexture(GL_TEXTURE_2D, *tex);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+}
 
-	// The second render target of the same size. The two swap roles every frame, so the previous frame stays on the GPU without a copy.
-	g->have_prev = false;
-	if (g->diff_program != 0)
+// Makes the render target t the given size. resize_surface also brings the pbuffer surface to that size, as before.
+// Further outputs leave the surface alone, because everything is drawn into the framebuffer object and two sizes would recreate it twice per frame.
+static bool kvm_drm_egl_ensure_gpu_target_size(kvm_drm_egl_context *g, kvm_drm_egl_target *t, bool resize_surface, int width, int height, char *out_error, size_t out_error_size)
+{
+	if (resize_surface && (g->surf_w != width || g->surf_h != height))
 	{
-		glBindTexture(GL_TEXTURE_2D, g->prev_tex);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+		if (g->surf != EGL_NO_SURFACE)
+		{
+			eglDestroySurface(g->dpy, g->surf);
+			g->surf = EGL_NO_SURFACE;
+		}
+
+		const EGLint surf_attribs[] = { EGL_WIDTH, width, EGL_HEIGHT, height, EGL_NONE };
+		g->surf = eglCreatePbufferSurface(g->dpy, g->cfg, surf_attribs);
+		if (g->surf == EGL_NO_SURFACE)
+		{
+			char err[KVM_DRM_EGL_MAX_ERROR];
+			// Also reset the cached size: a stale surf_w/h would make the next call at the old size
+			// short-circuit "true" with no surface at all.
+			g->surf_w = 0;
+			g->surf_h = 0;
+			kvm_drm_egl_format_egl_error(err, sizeof(err), "eglCreatePbufferSurface(size) failed", eglGetError());
+			kvm_drm_egl_copy_error_message(out_error, out_error_size, err);
+			return false;
+		}
+		g->surf_w = width;
+		g->surf_h = height;
+
+		if (!eglMakeCurrent(g->dpy, g->surf, g->surf, g->ctx))
+		{
+			char err[KVM_DRM_EGL_MAX_ERROR];
+			g->surf_w = 0;
+			g->surf_h = 0;
+			kvm_drm_egl_format_egl_error(err, sizeof(err), "eglMakeCurrent(size) failed", eglGetError());
+			kvm_drm_egl_copy_error_message(out_error, out_error_size, err);
+			return false;
+		}
 	}
 
+	if (t->out_tex != 0 && t->w == width && t->h == height) { return true; }
+
+	kvm_drm_egl_alloc_target_texture(&t->out_tex, width, height);
+	// The second render target of the same size. The two swap roles every frame, so the previous frame stays on the GPU without a copy.
+	t->have_prev = false;
+	if (g->diff_program != 0) { kvm_drm_egl_alloc_target_texture(&t->prev_tex, width, height); }
+	t->w = width;
+	t->h = height;
+
 	glBindFramebuffer(GL_FRAMEBUFFER, g->fbo);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g->out_tex, 0);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t->out_tex, 0);
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
 	{
+		t->w = 0;
+		t->h = 0;
 		kvm_drm_egl_copy_error_message(out_error, out_error_size, "GPU readback framebuffer is incomplete");
 		return false;
 	}
@@ -719,9 +717,10 @@ static bool kvm_drm_egl_ensure_gpu_target_size(kvm_drm_egl_context *g, int width
 #endif
 
 #if defined(__linux__)
-// Compares out_tex with prev_tex tile by tile on the GPU and reads back the changed tiles into their place in rgba_readback.
+// Compares out_tex with prev_tex tile by tile on the GPU and reads back the changed tiles into their place in dest,
+// which has row_length pixels per row and holds this output's bottom left pixel at dest.
 // Returns false when it could not, and then the caller reads the whole frame.
-static bool kvm_drm_egl_read_changed_tiles(kvm_drm_egl_context *ctx, int width, int height, int tile)
+static bool kvm_drm_egl_read_changed_tiles(kvm_drm_egl_context *ctx, kvm_drm_egl_target *t, int width, int height, int tile, uint8_t *dest, int row_length)
 {
 	int tw = (width + tile - 1) / tile;
 	int th = (height + tile - 1) / tile;
@@ -740,28 +739,23 @@ static bool kvm_drm_egl_read_changed_tiles(kvm_drm_egl_context *ctx, int width, 
 	}
 
 	(void)glGetError();
-	if (ctx->diff_w != tw || ctx->diff_h != th)
+	if (t->diff_tex == 0 || t->diff_w != tw || t->diff_h != th)
 	{
-		glBindTexture(GL_TEXTURE_2D, ctx->diff_tex);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tw, th, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-		ctx->diff_w = tw;
-		ctx->diff_h = th;
+		kvm_drm_egl_alloc_target_texture(&t->diff_tex, tw, th);
+		t->diff_w = tw;
+		t->diff_h = th;
 	}
 
 	// Pass 2: one fragment per tile. Fragment row 0 is the top tile row, the shader turns the rows over.
 	glBindFramebuffer(GL_FRAMEBUFFER, ctx->fbo);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ctx->diff_tex, 0);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t->diff_tex, 0);
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) { (void)glGetError(); return false; }
 	glViewport(0, 0, tw, th);
 	glUseProgram(ctx->diff_program);
 	glActiveTexture(GL_TEXTURE1);
-	glBindTexture(GL_TEXTURE_2D, ctx->prev_tex);
+	glBindTexture(GL_TEXTURE_2D, t->prev_tex);
 	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, ctx->out_tex);
+	glBindTexture(GL_TEXTURE_2D, t->out_tex);
 	glUniform1i(ctx->diff_u_cur, 0);
 	glUniform1i(ctx->diff_u_prev, 1);
 	glUniform2i(ctx->diff_u_size, width, height);
@@ -781,10 +775,10 @@ static bool kvm_drm_egl_read_changed_tiles(kvm_drm_egl_context *ctx, int width, 
 	// The compare result is not needed anymore, so its buffer serves as the map of tiles that are already read
 	done = ctx->diff_readback;
 
-	// Read back the changed tiles as rectangles, straight into their place in the bottom-up frame buffer.
+	// Read back the changed tiles as rectangles, straight into their place in the bottom-up destination.
 	// A run of changed tiles is extended down over the tile rows that have changed across its whole width, so a changed window is one read and not one per tile row.
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ctx->out_tex, 0);
-	glPixelStorei(0x0D02 /* GL_PACK_ROW_LENGTH */, width);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t->out_tex, 0);
+	glPixelStorei(0x0D02 /* GL_PACK_ROW_LENGTH */, row_length);
 	memset(done, 0, tiles);
 	for (r = 0; r < th; r++)
 	{
@@ -808,7 +802,7 @@ static bool kvm_drm_egl_read_changed_tiles(kvm_drm_egl_context *ctx, int width, 
 			top = r * tile;
 			bottom = ((r1 + 1) * tile > height) ? height : (r1 + 1) * tile;
 			glY = height - bottom;
-			glReadPixels(x0, glY, x1 - x0, bottom - top, GL_RGBA, GL_UNSIGNED_BYTE, ctx->rgba_readback + ((size_t)glY * (size_t)width + (size_t)x0) * 4u);
+			glReadPixels(x0, glY, x1 - x0, bottom - top, GL_RGBA, GL_UNSIGNED_BYTE, dest + ((size_t)glY * (size_t)row_length + (size_t)x0) * 4u);
 		}
 	}
 	glPixelStorei(0x0D02 /* GL_PACK_ROW_LENGTH */, 0);
@@ -865,7 +859,14 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 		kvm_drm_egl_format_egl_error(out_error, out_error_size, "eglMakeCurrent failed", eglGetError());
 		return false;
 	}
-	if (!kvm_drm_egl_ensure_gpu_target_size(ctx, (int)width, (int)height, out_error, out_error_size)) { return false; }
+	// A call without an RGB24 buffer uses the caller's target, so each output keeps its own previous frame. The RGB24 path uses target 0.
+	kvm_drm_egl_target *t = &ctx->targets[(rgb == NULL && ctx->direct_target > 0 && ctx->direct_target < KVM_DRM_EGL_TARGETS) ? ctx->direct_target : 0];
+	if (rgb == NULL && (ctx->direct_dest == NULL || ctx->direct_dest_row_length < (int)width || (!ctx->es3 && ctx->direct_dest_row_length != (int)width)))
+	{
+		kvm_drm_egl_copy_error_message(out_error, out_error_size, "No usable destination for the GPU readback");
+		return false;
+	}
+	if (!kvm_drm_egl_ensure_gpu_target_size(ctx, t, (t == &ctx->targets[0]), (int)width, (int)height, out_error, out_error_size)) { return false; }
 
 	static const EGLint planeFdAttr[4]     = { EGL_DMA_BUF_PLANE0_FD_EXT,         EGL_DMA_BUF_PLANE1_FD_EXT,         EGL_DMA_BUF_PLANE2_FD_EXT,         EGL_DMA_BUF_PLANE3_FD_EXT };
 	static const EGLint planeOffsetAttr[4] = { EGL_DMA_BUF_PLANE0_OFFSET_EXT,     EGL_DMA_BUF_PLANE1_OFFSET_EXT,     EGL_DMA_BUF_PLANE2_OFFSET_EXT,     EGL_DMA_BUF_PLANE3_OFFSET_EXT };
@@ -948,10 +949,10 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 	}
 
 	glBindFramebuffer(GL_FRAMEBUFFER, ctx->fbo);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ctx->out_tex, 0);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t->out_tex, 0);
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
 	{
-		ctx->have_prev = false;
+		t->have_prev = false;
 		ctx->eglDestroyImageKHRFn(ctx->dpy, image);
 		glDeleteTextures(1, &src_tex);
 		kvm_drm_egl_copy_error_message(out_error, out_error_size, "GPU readback framebuffer became incomplete");
@@ -979,36 +980,46 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 	}
 
 	const size_t rgba_size = (size_t)width * (size_t)height * 4u;
-	if (ctx->rgba_readback_cap < rgba_size)
-	{
-		uint8_t *tmp = (uint8_t*)realloc(ctx->rgba_readback, rgba_size);
-		if (tmp == NULL)
-		{
-			ctx->eglDestroyImageKHRFn(ctx->dpy, image);
-			glDeleteTextures(1, &src_tex);
-			kvm_drm_egl_copy_error_message(out_error, out_error_size, "Failed to allocate temporary RGBA readback buffer");
-			return false;
-		}
-		ctx->rgba_readback = tmp;
-		ctx->rgba_readback_cap = rgba_size;
-	}
-
-	// Reading the whole frame back costs most of the CPU time of this path (measured 15 of 21 ms per 1920x1080 frame on a Mali-G610),
-	// so when the previous frame is on the GPU, the tiles are compared there and only the changed ones are read back.
 	ctx->changed_valid = false;
-	if (rgb == NULL && ctx->have_prev && ctx->diff_program != 0 && ctx->direct_tile_size > 0)
+	if (rgb == NULL)
 	{
-		ctx->changed_valid = kvm_drm_egl_read_changed_tiles(ctx, (int)width, (int)height, ctx->direct_tile_size);
+		uint8_t *dest = ctx->direct_dest + ((size_t)ctx->direct_dest_row0 * (size_t)ctx->direct_dest_row_length + (size_t)ctx->direct_dest_x) * 4u;
+
+		// Reading the whole frame back costs most of the CPU time of this path (measured 15 of 21 ms per 1920x1080 frame on a Mali-G610),
+		// so when the previous frame is on the GPU, the tiles are compared there and only the changed ones are read back.
+		if (t->have_prev && !ctx->direct_force_full && ctx->diff_program != 0 && ctx->direct_tile_size > 0)
+		{
+			ctx->changed_valid = kvm_drm_egl_read_changed_tiles(ctx, t, (int)width, (int)height, ctx->direct_tile_size, dest, ctx->direct_dest_row_length);
+		}
+		if (!ctx->changed_valid)
+		{
+			glBindFramebuffer(GL_FRAMEBUFFER, ctx->fbo);
+			glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t->out_tex, 0);
+			if (ctx->es3) { glPixelStorei(0x0D02 /* GL_PACK_ROW_LENGTH */, ctx->direct_dest_row_length); }
+			glReadPixels(0, 0, (GLsizei)width, (GLsizei)height, GL_RGBA, GL_UNSIGNED_BYTE, dest);
+			if (ctx->es3) { glPixelStorei(0x0D02 /* GL_PACK_ROW_LENGTH */, 0); }
+		}
 	}
-	if (!ctx->changed_valid)
+	else
 	{
-		glBindFramebuffer(GL_FRAMEBUFFER, ctx->fbo);
-		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ctx->out_tex, 0);
+		if (ctx->rgba_readback_cap < rgba_size)
+		{
+			uint8_t *tmp = (uint8_t*)realloc(ctx->rgba_readback, rgba_size);
+			if (tmp == NULL)
+			{
+				ctx->eglDestroyImageKHRFn(ctx->dpy, image);
+				glDeleteTextures(1, &src_tex);
+				kvm_drm_egl_copy_error_message(out_error, out_error_size, "Failed to allocate temporary RGBA readback buffer");
+				return false;
+			}
+			ctx->rgba_readback = tmp;
+			ctx->rgba_readback_cap = rgba_size;
+		}
 		glReadPixels(0, 0, (GLsizei)width, (GLsizei)height, GL_RGBA, GL_UNSIGNED_BYTE, ctx->rgba_readback);
 	}
 	if (!kvm_drm_egl_check_gl_error("glReadPixels", out_error, out_error_size))
 	{
-		ctx->have_prev = false;
+		t->have_prev = false;
 		ctx->changed_valid = false;
 		ctx->eglDestroyImageKHRFn(ctx->dpy, image);
 		glDeleteTextures(1, &src_tex);
@@ -1018,23 +1029,23 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 	ctx->eglDestroyImageKHRFn(ctx->dpy, image);
 	glDeleteTextures(1, &src_tex);
 
-	// This frame becomes the previous one. Only a caller that takes the readback as it is keeps rgba_readback in step with it.
+	// This frame becomes the previous one of its target. Only a caller that takes the readback as it is keeps its destination in step with it.
 	if (rgb == NULL && ctx->diff_program != 0)
 	{
-		GLuint t = ctx->out_tex;
-		ctx->out_tex = ctx->prev_tex;
-		ctx->prev_tex = t;
-		ctx->have_prev = true;
+		GLuint swap = t->out_tex;
+		t->out_tex = t->prev_tex;
+		t->prev_tex = swap;
+		t->have_prev = true;
 	}
 	else
 	{
-		ctx->have_prev = false;
+		t->have_prev = false;
 	}
 
 	const size_t rgb_size = (size_t)width * (size_t)height * 3u;
 	if (rgb == NULL)
 	{
-		// The caller takes the frame from ctx->rgba_readback: RGBA, 4 bytes per pixel, bottom row first
+		// The frame is in the caller's destination: RGBA, 4 bytes per pixel, bottom row first
 		if (rgb_size_out != NULL) { *rgb_size_out = rgba_size; }
 		return true;
 	}
@@ -1090,9 +1101,13 @@ void kvm_drm_egl_destroy_context(kvm_drm_egl_context *ctx)
 		if (ctx->program != 0) { glDeleteProgram(ctx->program); ctx->program = 0; }
 		if (ctx->vbo != 0) { glDeleteBuffers(1, &ctx->vbo); ctx->vbo = 0; }
 		if (ctx->fbo != 0) { glDeleteFramebuffers(1, &ctx->fbo); ctx->fbo = 0; }
-		if (ctx->out_tex != 0) { glDeleteTextures(1, &ctx->out_tex); ctx->out_tex = 0; }
-		if (ctx->prev_tex != 0) { glDeleteTextures(1, &ctx->prev_tex); ctx->prev_tex = 0; }
-		if (ctx->diff_tex != 0) { glDeleteTextures(1, &ctx->diff_tex); ctx->diff_tex = 0; }
+		for (int i = 0; i < KVM_DRM_EGL_TARGETS; i++)
+		{
+			if (ctx->targets[i].out_tex != 0) { glDeleteTextures(1, &ctx->targets[i].out_tex); }
+			if (ctx->targets[i].prev_tex != 0) { glDeleteTextures(1, &ctx->targets[i].prev_tex); }
+			if (ctx->targets[i].diff_tex != 0) { glDeleteTextures(1, &ctx->targets[i].diff_tex); }
+		}
+		memset(ctx->targets, 0, sizeof(ctx->targets));
 		if (ctx->diff_program != 0) { glDeleteProgram(ctx->diff_program); ctx->diff_program = 0; }
 		eglMakeCurrent(ctx->dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 		if (ctx->ctx != EGL_NO_CONTEXT) { eglDestroyContext(ctx->dpy, ctx->ctx); ctx->ctx = EGL_NO_CONTEXT; }
@@ -1112,8 +1127,6 @@ void kvm_drm_egl_destroy_context(kvm_drm_egl_context *ctx)
 	ctx->u_tex = 0;
 #endif
 
-#if defined(__linux__)
-	ctx->have_prev = false;
-#endif
+	ctx->direct_dest = NULL;
 	ctx->initialized = false;
 }

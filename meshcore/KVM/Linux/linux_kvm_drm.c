@@ -434,6 +434,16 @@ static int kvm_drm_direct_format(uint32_t format, int gpuReadback, J_COLOR_SPACE
 	return 0;
 }
 
+// Marks the desktop tiles that the pixel rectangle touches. An output does not have to lie on the desktop's tile grid.
+static void kvm_drm_mark_desktop_tiles(unsigned char *tiles, int tw, int th, int tile, int x, int y, int w, int h)
+{
+	int c0 = x / tile, c1 = (x + w - 1) / tile, r0 = y / tile, r1 = (y + h - 1) / tile, r;
+	if (w <= 0 || h <= 0 || x < 0 || y < 0) { return; }
+	if (c1 >= tw) { c1 = tw - 1; }
+	if (r1 >= th) { r1 = th - 1; }
+	for (r = r0; r <= r1; r++) { if (c1 >= c0) { memset(tiles + (size_t)r * (size_t)tw + (size_t)c0, 1, (size_t)(c1 - c0 + 1)); } }
+}
+
 static int kvm_drm_send_dirty_tiles(const struct tileFrame_t *frame)
 {
 	int x = 0;
@@ -3092,6 +3102,13 @@ void *kvm_server_mainloop_drm(void *parm)
 	size_t rgbRotatedBufferSize = 0;
 	unsigned char *desktopRgbBuffer = NULL;
 	size_t desktopRgbBufferSize = 0;
+	// The desktop as 4 bytes per pixel with the bottom row first, which the GPU outputs are read back into, and its changed tiles
+	unsigned char *desktopRgbaBuffer = NULL;
+	size_t desktopRgbaBufferSize = 0;
+	unsigned char *desktopChanged = NULL;
+	size_t desktopChangedSize = 0;
+	uint64_t gpuLayoutSig = 0;
+	int gpuDirectOff = 0;
 	uint32_t lastLoggedFbId = 0;
 	uint32_t lastLoggedWidth = 0;
 	uint32_t lastLoggedHeight = 0;
@@ -3342,8 +3359,50 @@ void *kvm_server_mainloop_drm(void *parm)
 		// Not while MESH_KVM_DRM_DUMP is set, because the dump reads the composed RGB24 desktop.
 		struct tileFrame_t directFrame;
 		int direct = 0;
-		int directAllowed = (outputCount == 1 && (getenv("MESH_KVM_DRM_DUMP") == NULL || getenv("MESH_KVM_DRM_DUMP")[0] == 0));
+		int dumpOn = (getenv("MESH_KVM_DRM_DUMP") != NULL && getenv("MESH_KVM_DRM_DUMP")[0] != 0);
+		int directAllowed = (outputCount == 1 && !dumpOn);
 		int desktopCleared = 0;
+
+		// Outputs on the GPU path are read back into one 4 byte per pixel desktop, each with its own previous frame on the GPU,
+		// so several monitors do not fall back to the RGB24 conversion. gpuDirectOff is set when an output cannot take part, until the layout changes.
+		int gpuTile = (TILE_WIDTH == TILE_HEIGHT && TILE_WIDTH > 0) ? TILE_WIDTH : 0;
+		int gpuTw = (gpuTile > 0) ? (SCREEN_WIDTH + gpuTile - 1) / gpuTile : 0;
+		int gpuTh = (gpuTile > 0) ? (SCREEN_HEIGHT + gpuTile - 1) / gpuTile : 0;
+		int gpuDirect = 0, gpuUsed = 0, legacyUsed = 0, gpuForceFull = 0, frameAborted = 0;
+		{
+			uint64_t sig = 1469598103934665603ULL;
+			int k;
+			#define KVM_DRM_SIG(v) sig = (sig ^ (uint64_t)(uint32_t)(v)) * 1099511628211ULL
+			KVM_DRM_SIG(SCREEN_WIDTH); KVM_DRM_SIG(SCREEN_HEIGHT); KVM_DRM_SIG(CAPTURE_X); KVM_DRM_SIG(CAPTURE_Y); KVM_DRM_SIG(layout.min_x); KVM_DRM_SIG(layout.min_y); KVM_DRM_SIG(outputCount);
+			for (k = 0; k < outputCount; k++) { KVM_DRM_SIG(outputs[k].x); KVM_DRM_SIG(outputs[k].y); KVM_DRM_SIG(outputs[k].width); KVM_DRM_SIG(outputs[k].height); KVM_DRM_SIG(outputs[k].device_index); }
+			#undef KVM_DRM_SIG
+			if (sig != gpuLayoutSig) { gpuLayoutSig = sig; gpuDirectOff = 0; gpuForceFull = 1; }
+		}
+		if (!dumpOn && !gpuDirectOff && gpuTile > 0 && gpuTw > 0 && gpuTh > 0 && outputCount <= KVM_DRM_EGL_TARGETS)
+		{
+			size_t need = (size_t)SCREEN_WIDTH * (size_t)SCREEN_HEIGHT * 4u;
+			size_t needTiles = (size_t)gpuTw * (size_t)gpuTh;
+			if (desktopRgbaBufferSize != need)
+			{
+				free(desktopRgbaBuffer);
+				desktopRgbaBuffer = (unsigned char *)calloc(1, need);
+				desktopRgbaBufferSize = (desktopRgbaBuffer != NULL) ? need : 0;
+				gpuForceFull = 1;
+			}
+			if (desktopChangedSize != needTiles)
+			{
+				free(desktopChanged);
+				desktopChanged = (unsigned char *)malloc(needTiles);
+				desktopChangedSize = (desktopChanged != NULL) ? needTiles : 0;
+			}
+			if (desktopRgbaBuffer != NULL && desktopChanged != NULL)
+			{
+				gpuDirect = 1;
+				// A new layout leaves pixels of the old one between the outputs
+				if (gpuForceFull) { memset(desktopRgbaBuffer, 0, need); }
+				memset(desktopChanged, gpuForceFull ? 1 : 0, needTiles);
+			}
+		}
 		int capturedOutputs = 0;
 		int outputIndex = 0;
 		for (outputIndex = 0; outputIndex < outputCount; ++outputIndex)
@@ -3438,21 +3497,99 @@ void *kvm_server_mainloop_drm(void *parm)
 					lastLoggedPath = 1;
 				}
 
-				// Without an RGB24 buffer the readback stays in the EGL context as RGBA with the bottom row first, and is used from there
-				outputDirect = (outputDirect && kvm_drm_direct_format(frame.format, 1, &directFormat));
-				// With square tiles the readback compares the tiles on the GPU and fetches only the changed ones
-				dev->eglCtx.direct_tile_size = (TILE_WIDTH == TILE_HEIGHT) ? TILE_WIDTH : 0;
+				// Where this output lies in the captured screen
+				int dx = outputs[outputIndex].x - layout.min_x - CAPTURE_X;
+				int dy = outputs[outputIndex].y - layout.min_y - CAPTURE_Y;
+				int inside = (dx >= 0 && dy >= 0 && dx + (int)frame.width <= SCREEN_WIDTH && dy + (int)frame.height <= SCREEN_HEIGHT);
+				int outside = (dx >= SCREEN_WIDTH || dy >= SCREEN_HEIGHT || dx + (int)frame.width <= 0 || dy + (int)frame.height <= 0);
+				// Without ES 3 a readback cannot be placed inside a wider buffer, and before the first call the context's version is not known
+				int rowOk = ((dx == 0 && (int)frame.width == SCREEN_WIDTH) || (dev->eglCtx.initialized && dev->eglCtx.es3));
+				int gpuOk = (gpuDirect && inside && frame.rotation == KVM_DRM_ROTATION_0 &&
+					outputs[outputIndex].width == frame.width && outputs[outputIndex].height == frame.height &&
+					kvm_drm_direct_format(frame.format, 1, &directFormat));
+
+				if (gpuDirect && outside)
+				{
+					// Another monitor is selected, so this output is not in the picture and needs no readback
+					kvm_drm_close_frame_handles(dev->fd, &frame);
+					continue;
+				}
+				if (gpuOk && !rowOk)
+				{
+					// Only for this frame when the context is new, for good when it is ES 2
+					if (dev->eglCtx.initialized) { gpuDirectOff = 1; }
+					gpuOk = 0;
+				}
+				else if (gpuDirect && !gpuOk)
+				{
+					gpuDirectOff = 1;
+				}
+				if (gpuOk && legacyUsed) { gpuOk = 0; }
+				if (!gpuOk && gpuUsed)
+				{
+					// One output is already in the 4 byte desktop and this one cannot follow, so this frame is dropped and the next one takes the RGB24 path
+					kvm_drm_close_frame_handles(dev->fd, &frame);
+					gpuDirectOff = 1;
+					frameAborted = 1;
+					break;
+				}
+
+				if (gpuOk)
+				{
+					dev->eglCtx.direct_target = outputIndex;
+					dev->eglCtx.direct_dest = desktopRgbaBuffer;
+					dev->eglCtx.direct_dest_row_length = SCREEN_WIDTH;
+					dev->eglCtx.direct_dest_x = dx;
+					dev->eglCtx.direct_dest_row0 = SCREEN_HEIGHT - dy - (int)frame.height;
+					dev->eglCtx.direct_tile_size = gpuTile;
+					dev->eglCtx.direct_force_full = gpuForceFull;
+				}
+				else
+				{
+					gpuDirect = 0;
+					legacyUsed = 1;
+				}
 				converted = kvm_drm_egl_convert_to_rgb24_gpu(&dev->eglCtx, dev->fd, frame.width, frame.height,
 															 frame.plane_count, frame.plane_handles, frame.plane_pitches, frame.plane_offsets,
 															 frame.format, frame.modifier,
-															 outputDirect ? NULL : rgbBuffer, rgbBufferSize, &rgbSize, err, sizeof(err));
+															 gpuOk ? NULL : rgbBuffer, rgbBufferSize, &rgbSize, err, sizeof(err));
 				kvm_drm_close_frame_handles(dev->fd, &frame);
-				if (converted && outputDirect)
+				if (converted && gpuOk)
 				{
-					directFrame.pixels = dev->eglCtx.rgba_readback + (size_t)(frame.height - 1u) * (size_t)frame.width * 4u;
-					directFrame.stride = -(ptrdiff_t)((size_t)frame.width * 4u);
-					directFrame.changed = dev->eglCtx.changed_valid ? dev->eglCtx.changed_tiles : NULL;
-					direct = 1;
+					// The output's changed tiles as desktop tiles, or all of its tiles after a whole readback
+					if (dev->eglCtx.changed_valid)
+					{
+						int otw = ((int)frame.width + gpuTile - 1) / gpuTile, oth = ((int)frame.height + gpuTile - 1) / gpuTile, tr, tc;
+						for (tr = 0; tr < oth; tr++)
+						{
+							for (tc = 0; tc < otw; tc++)
+							{
+								if (dev->eglCtx.changed_tiles[(size_t)tr * (size_t)otw + (size_t)tc])
+								{
+									int pw = ((tc + 1) * gpuTile > (int)frame.width) ? (int)frame.width - tc * gpuTile : gpuTile;
+									int ph = ((tr + 1) * gpuTile > (int)frame.height) ? (int)frame.height - tr * gpuTile : gpuTile;
+									kvm_drm_mark_desktop_tiles(desktopChanged, gpuTw, gpuTh, gpuTile, dx + tc * gpuTile, dy + tr * gpuTile, pw, ph);
+								}
+							}
+						}
+					}
+					else
+					{
+						kvm_drm_mark_desktop_tiles(desktopChanged, gpuTw, gpuTh, gpuTile, dx, dy, (int)frame.width, (int)frame.height);
+					}
+					directFormat = JCS_RGB;
+					(void)kvm_drm_direct_format(frame.format, 1, &directFormat);
+					directFrame.format = directFormat;
+					gpuUsed = 1;
+					capturedOutputs++;
+					continue;
+				}
+				if (gpuOk)
+				{
+					// The readback failed, so the desktop no longer holds this output's previous frame
+					gpuDirectOff = 1;
+					frameAborted = 1;
+					break;
 				}
 			}
 			else
@@ -3480,6 +3617,16 @@ void *kvm_server_mainloop_drm(void *parm)
 					}
 
 					const uint8_t *src = dev->map.addr + frame.offset;
+					if (gpuUsed)
+					{
+						// A mapped output cannot join the outputs that are already in the 4 byte desktop
+						gpuDirectOff = 1;
+						frameAborted = 1;
+						break;
+					}
+					if (gpuDirect && outputCount > 1) { gpuDirectOff = 1; }
+					gpuDirect = 0;
+					legacyUsed = 1;
 					if (outputDirect && frame.pitch >= frame.width * 4u && kvm_drm_direct_format(frame.format, 0, &directFormat))
 					{
 						// The mapped scanout buffer itself. The tile code reads it once in its compare and encodes from its own reference frame.
@@ -3538,6 +3685,21 @@ void *kvm_server_mainloop_drm(void *parm)
 			capturedOutputs++;
 		}
 
+		if (frameAborted)
+		{
+			forceTileReset = 1;
+			continue;
+		}
+		if (gpuUsed)
+		{
+			directFrame.pixels = desktopRgbaBuffer + (size_t)(SCREEN_HEIGHT - 1) * (size_t)SCREEN_WIDTH * 4u;
+			directFrame.stride = -(ptrdiff_t)((size_t)SCREEN_WIDTH * 4u);
+			directFrame.bytesPerPixel = 4;
+			directFrame.width = SCREEN_WIDTH;
+			directFrame.height = SCREEN_HEIGHT;
+			directFrame.changed = desktopChanged;
+			direct = 1;
+		}
 		if (capturedOutputs <= 0)
 		{
 			// Scanout has been unavailable on every output for longer than the grace period. If the
@@ -3617,6 +3779,8 @@ void *kvm_server_mainloop_drm(void *parm)
 		free(desktopRgbBuffer);
 		desktopRgbBuffer = NULL;
 	}
+	free(desktopRgbaBuffer);
+	free(desktopChanged);
 	kvm_drm_close_all_devices(devices, deviceCount);
 
 	close(slave2master[1]);
