@@ -20,37 +20,55 @@ permissions:
   contents: read
   security-events: write
 
+# A new push to a pull request cancels its running analysis, a push to master always finishes
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   analyze:
-    name: CodeQL (${{ matrix.language }})
-    runs-on: ubuntu-24.04
+    name: CodeQL (${{ matrix.language }}${{ matrix.os == 'windows-2022' && ', Windows' || '' }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - language: c-cpp
             build-mode: manual
+            os: ubuntu-26.04
+            category: /language:c-cpp
+          # The Windows-only C code (meshservice, Windows KVM, wincrypto) is compiled out of the Linux build, so it gets its own analysis
+          - language: c-cpp
+            build-mode: manual
+            os: windows-2022
+            category: /language:c-cpp-windows
           - language: javascript-typescript
             build-mode: none
+            os: ubuntu-26.04
+            category: /language:javascript-typescript
           - language: actions
             build-mode: none
+            os: ubuntu-26.04
+            category: /language:actions
     steps:
       - uses: actions/checkout@v7
+      # paths only limits the languages analyzed without a build. C/C++ covers what its build step compiles
       - uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
           config: |
-            paths-ignore:
-              - test/**
-              - webrtc/**
             paths:
-              - 'modules/*.js'
-              - .github/workflows
-      - if: matrix.build-mode == 'manual'
+              - modules
+              - .github
+      - if: matrix.build-mode == 'manual' && runner.os == 'Linux'
         run: |
           sudo apt-get -qq update && sudo apt-get -qq -y install libx11-dev libxtst-dev libxext-dev libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev libjpeg62-dev
-          make -j4 linux ARCHID=6
+          make -s -j4 linux ARCHID=6
+      - if: matrix.build-mode == 'manual' && runner.os == 'Windows'
+        uses: microsoft/setup-msbuild@v3
+      - if: matrix.build-mode == 'manual' && runner.os == 'Windows'
+        run: msbuild MeshAgent-2022.sln /p:Configuration=Release /p:Platform=x64
       - uses: github/codeql-action/analyze@v4
         with:
-          category: /language:${{ matrix.language }}
+          category: ${{ matrix.category }}
