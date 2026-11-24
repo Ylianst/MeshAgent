@@ -132,14 +132,14 @@ int tile_pass_pending(void)
 	return(tileStalePending || __atomic_load_n(&tileRefreshPending, __ATOMIC_SEQ_CST));
 }
 
-void tile_frame_from_rgb24(struct tileFrame_t *frame, const unsigned char *pixels, size_t stride, int width, int height)
+void tile_frame_from_rgbx(struct tileFrame_t *frame, const unsigned char *pixels, size_t stride, int width, int height)
 {
 	frame->pixels = pixels;
 	frame->stride = stride;
-	frame->bytesPerPixel = 3;
+	frame->bytesPerPixel = 4;
 	frame->width = width;
 	frame->height = height;
-	frame->format = JCS_RGB;
+	frame->format = JCS_EXT_RGBX;
 }
 
 // Marks the tiles that differ from the reference frame, and copies the parts that differ, so the reference holds the frame afterwards.
@@ -290,163 +290,32 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, const struct t
 }
 
 
-// The average of a "scale" by "scale" block of 32-bit pixels.
-// Two bytes of a pixel are summed at a time, each with 16 bits of room, which holds up to a scale of 16.
-static unsigned int average_block(const unsigned int *p, size_t rowWords, int scale)
-{
-	unsigned int even = 0, odd = 0, n = (unsigned int)(scale * scale);
-	int i, j;
-
-	for (j = 0; j < scale; j++, p += rowWords)
-	{
-		for (i = 0; i < scale; i++) { even += p[i] & 0x00FF00FF; odd += (p[i] >> 8) & 0x00FF00FF; }
-	}
-	return(((even & 0xFFFF) / n) | (((even >> 16) / n) << 16) | (((odd & 0xFFFF) / n) << 8) | (((odd >> 16) / n) << 24));
-}
-
-// Get screen buffer from the CGImageRef structure, which holds the display's pixels, at the size that is sent
+// Draws the captured image at the size that is sent, as RGBX rows without padding.
+// CoreGraphics scales it, so the display's pixels and any scaling of the viewer are handled alike.
 int getScreenBuffer(unsigned char **desktop, long long *desktopsize, CGImageRef image)
-{	
-	unsigned int row, col, bpp, len, width_padding_size, height_padding_size, i;
-	unsigned char *output;
-	int scale = SCREEN_SCALE;
-	int height = CGImageGetHeight(image) / scale;
-	int width = CGImageGetWidth(image) / scale;
-	size_t rowWords = CGImageGetBytesPerRow(image) >> 2;
-	int targetWidth = adjust_screen_size(SCREEN_WIDTH);
-	int targetHeight = adjust_screen_size(SCREEN_HEIGHT);
-	long long need;
+{
+	size_t stride = (size_t)SCREEN_WIDTH * 4;
+	long long need = (long long)stride * SCREEN_HEIGHT;
+	CGColorSpaceRef srgb;
+	CGContextRef ctx;
 
-	CGImageAlphaInfo alphaInfo = CGImageGetAlphaInfo(image);
-
-	CFDataRef dataRef = CGDataProviderCopyData(CGImageGetDataProvider(image));
-	if (dataRef == NULL) { return -1; }
-	const unsigned char *sourceBytesPtr = CFDataGetBytePtr(dataRef);
-	len = CFDataGetLength(dataRef);
-
-	// The image can be larger than the screen size the caller read just before the capture, for example while a fast user switch changes the display mode.
-	// The paddings below are unsigned, so a negative one became about 4 GB, and the zero fill ran past the buffer (SIGSEGV in __bzero on macOS 26.7, an image 3420 pixels wide).
-	if (width > targetWidth || height > targetHeight) { CFRelease(dataRef); return -1; }
-
-	// The buffer holds the padded screen at 3 bytes per pixel, which a small image's own data length need not cover
-	need = (long long)targetWidth * targetHeight * 3;
-	if (need < len) { need = len; }
-	if (*desktopsize != need) {
-		if (*desktop != NULL) { free(*desktop); }
-		*desktopsize = need;
-		*desktop = (unsigned char *) malloc (*desktopsize);
-		if (*desktop == NULL) { *desktopsize = 0; CFRelease(dataRef); return -1; }
+	if (SCREEN_WIDTH <= 0 || SCREEN_HEIGHT <= 0) { return -1; }
+	if (*desktopsize != need)
+	{
+		free(*desktop);
+		*desktop = (unsigned char *)malloc((size_t)need);
+		*desktopsize = (*desktop != NULL) ? need : 0;
+		if (*desktop == NULL) { return -1; }
 	}
-	
-	output = *desktop;
-	bpp = CGImageGetBitsPerPixel(image);
-	// Only the 32-bit conversion scales, and a Retina display has no 16-bit mode
-	if (scale != 1 && bpp != 32) { CFRelease(dataRef); return -1; }
-	width_padding_size = (adjust_screen_size(SCREEN_WIDTH) - width) * 3;
-	
-	switch(bpp) {
-		case 16:
-		{
-			const unsigned short *tmpPtr = (const unsigned short *)sourceBytesPtr;
-			if(alphaInfo == kCGImageAlphaNoneSkipFirst ||
-					alphaInfo == kCGImageAlphaPremultipliedFirst ||
-					alphaInfo == kCGImageAlphaFirst) {
-				for (row = 0; row < height; row++) {
-					for (col = 0; col < width; col++) {
-						*output++ = (*tmpPtr & 0x7C00) >> 7;
-						*output++ = (*tmpPtr & 0x3E0) >> 2;
-						*output++ = (*tmpPtr & 0x1F) << 3;
-						tmpPtr++;
-					}
 
-					if (width_padding_size != 0) {
-						for (i = 0; i < width_padding_size; i++) {
-							*output++ = 0;
-						}
-					}
-					tmpPtr += (CGImageGetBytesPerRow(image) - (bpp >> 3) * width) >> 2;
-				}
-			}
-			else if (alphaInfo == kCGImageAlphaNone ||
-					alphaInfo == kCGImageAlphaNoneSkipLast ||
-					alphaInfo == kCGImageAlphaPremultipliedLast ||
-					alphaInfo == kCGImageAlphaLast) {
-				for (row = 0; row < height; row++) {
-					for (col = 0; col < width; col++) {
-						*output++ = (*tmpPtr & 0xF800) >> 8;
-						*output++ = (*tmpPtr & 0x7C0) >> 3;
-						*output++ = (*tmpPtr & 0x3E) << 2;
-						tmpPtr++;
-					}
-					if (width_padding_size != 0) {
-						for (i = 0; i < width_padding_size; i++) {
-							*output++ = 0;
-						}
-					}
-					tmpPtr += (CGImageGetBytesPerRow(image) - (bpp >> 3) * width) >> 2;
-				}
-			}
-		}
-		break;
-		case 32:
-		{
-			const unsigned int *tmpPtr1 = (const unsigned int *)sourceBytesPtr;
-			if(alphaInfo == kCGImageAlphaNoneSkipFirst ||
-					alphaInfo == kCGImageAlphaPremultipliedFirst ||
-					alphaInfo == kCGImageAlphaFirst) {
-				for (row = 0; row < height; row++) {
-					const unsigned int *src = tmpPtr1 + (size_t)row * scale * rowWords;
-					for (col = 0; col < width; col++, src += scale) {
-						unsigned int v = (scale == 1) ? *src : average_block(src, rowWords, scale);
-						*output++ = (v & 0x0ff0000) >> 16;
-						*output++ = (v & 0x0ff00) >> 8;
-						*output++ = (v & 0x0FF);
-					}
-					if (width_padding_size > 0) {
-						for (i = 0; i < width_padding_size; i++) {
-							*output++ = 0;
-						}
-					}
-				}
-			}
-			else if (alphaInfo == kCGImageAlphaNone ||
-					alphaInfo == kCGImageAlphaNoneSkipLast ||
-					alphaInfo == kCGImageAlphaPremultipliedLast ||
-					alphaInfo == kCGImageAlphaLast) {
-				for (row = 0; row < height; row++) {
-					const unsigned int *src = tmpPtr1 + (size_t)row * scale * rowWords;
-					for (col = 0; col < width; col++, src += scale) {
-						unsigned int v = (scale == 1) ? *src : average_block(src, rowWords, scale);
-						*output++ = (v & 0xFF000000) >> 24;
-						*output++ = (v & 0x0ff0000) >> 16;
-						*output++ = (v & 0x0ff00) >> 8;
-					}
-					if (width_padding_size != 0) {
-						for (i = 0; i < width_padding_size; i++) {
-							*output++ = 0;
-						}
-					}
-				}
-			}
-		}
-		break;
-		default:
-			fprintf(stderr, "This image depth is not supported.\n");
-			return -1;
-	}
-	
-	height_padding_size = adjust_screen_size(SCREEN_HEIGHT) - height;
-	
-	if (height_padding_size > 0) {
-		for (row = 0; row < height_padding_size; row++) {
-			for (col = 0; col < (width * 3) + width_padding_size; col++) {
-				*output++ = 0;
-			}
-		}
-	}
-	
-	CFRelease(dataRef);
-	
+	// sRGB, because the JPEG carries no profile and a viewer reads it as sRGB. CoreGraphics converts from the display's colour space while it draws.
+	srgb = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+	ctx = CGBitmapContextCreate(*desktop, (size_t)SCREEN_WIDTH, (size_t)SCREEN_HEIGHT, 8, stride, srgb, kCGImageAlphaNoneSkipLast);
+	CGColorSpaceRelease(srgb);
+	if (ctx == NULL) { return -1; }
+	CGContextSetInterpolationQuality(ctx, kCGInterpolationMedium);
+	CGContextDrawImage(ctx, CGRectMake(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT), image);
+	CGContextRelease(ctx);
 	return 0;
 }
 

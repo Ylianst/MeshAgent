@@ -41,7 +41,7 @@ extern void tile_info_alloc(void);
 extern void tile_info_free(void);
 extern void tile_request_refresh(void);
 extern int tile_pass_pending(void);
-extern void tile_frame_from_rgb24(struct tileFrame_t *frame, const unsigned char *pixels, size_t stride, int width, int height);
+extern void tile_frame_from_rgbx(struct tileFrame_t *frame, const unsigned char *pixels, size_t stride, int width, int height);
 extern void tile_start_pass(const struct tileFrame_t *frame);
 extern int adjust_screen_size(int pixles);
 extern int getTileAt(int x, int y, void** buffer, long long *bufferSize, const struct tileFrame_t *frame, int row, int col);

@@ -160,8 +160,9 @@ int SH_HANDLE = 0;
 int SCREEN_WIDTH = 0;
 int SCREEN_HEIGHT = 0;
 int SCREEN_SCALE = 1;
-static int CAPTURE_WIDTH = 0;	// The display's size in pixels, SCREEN_SCALE times the size that is sent
+static int CAPTURE_WIDTH = 0;	// The display's size in pixels, which the size that is sent is made from
 static int CAPTURE_HEIGHT = 0;
+static int SCREEN_SCALING = 1024;	// The viewer's scaling the size that is sent was made with
 int SCREEN_DEPTH = 0;
 int TILE_WIDTH = 0;
 int TILE_HEIGHT = 0;
@@ -170,6 +171,7 @@ int TILE_HEIGHT_COUNT = 0;
 int COMPRESSION_RATIO = 0;
 int FRAME_RATE_TIMER = 0;
 volatile int g_viewerFrameTimer = 0; // The viewer's frame timer, kept apart because kvm_init() sets FRAME_RATE_TIMER back to 100 after every display change
+volatile int g_viewerScaling = 1024; // The viewer's scaling, 1024 is 100%, which is the display's point size
 struct tileInfo_t **g_tileInfo = NULL;
 int g_remotepause = 0;
 int g_pause = 0;
@@ -378,8 +380,15 @@ static int kvm_display_scale(int width)
 	return((points > 0 && width >= points) ? (width + points / 2) / points : 1);
 }
 
+// The size that is sent for "pixels" of the display: its points times the viewer's scaling, at most the pixels
+static int kvm_sent_size(int pixels)
+{
+	int sent = (int)((long long)(pixels / SCREEN_SCALE) * SCREEN_SCALING / 1024);
+	return(sent > pixels ? pixels : (sent < 1 ? 1 : sent));
+}
+
 // Takes the display's size in pixels, then sets the size that is sent, the tiles and the viewer's resolution.
-// A Retina display is sent at its point size, a quarter of the pixels to compare, encode and send. The viewer's mouse position is then in points too.
+// At a scaling of 100% a Retina display is sent at its point size, a quarter of the pixels to compare, encode and send.
 static int kvm_init_size(int width, int height)
 {
 	ILibCriticalLogFilename = "KVMSlave.log";
@@ -387,8 +396,9 @@ static int kvm_init_size(int width, int height)
 	CAPTURE_WIDTH = width;
 	CAPTURE_HEIGHT = height;
 	SCREEN_SCALE = kvm_display_scale(width);
-	SCREEN_WIDTH = width / SCREEN_SCALE;
-	SCREEN_HEIGHT = height / SCREEN_SCALE;
+	SCREEN_SCALING = g_viewerScaling;
+	SCREEN_WIDTH = kvm_sent_size(width);
+	SCREEN_HEIGHT = kvm_sent_size(height);
 	// Some magic numbers.
 	TILE_WIDTH = 32;
 	TILE_HEIGHT = 32;
@@ -492,10 +502,11 @@ int kvm_server_inputdata(char* block, int blocklen)
 			double x, y;
 			short w = 0;
 			// Same as above — process mouse locally in -kvmagent mode.
-			if (size == 10 || size == 12)
+			if ((size == 10 || size == 12) && SCREEN_WIDTH > 0 && SCREEN_HEIGHT > 0)
 			{
-				x = (double)ntohs(((unsigned short*)(block))[3]);
-				y = (double)ntohs(((unsigned short*)(block))[4]);
+				// The viewer's position is in the pixels that are sent, MouseAction() takes points
+				x = (double)ntohs(((unsigned short*)(block))[3]) * (CAPTURE_WIDTH / SCREEN_SCALE) / SCREEN_WIDTH;
+				y = (double)ntohs(((unsigned short*)(block))[4]) * (CAPTURE_HEIGHT / SCREEN_SCALE) / SCREEN_HEIGHT;
 				
 				if (size == 12) w = ((short)ntohs(((short*)(block))[5]));
 				
@@ -507,8 +518,9 @@ int kvm_server_inputdata(char* block, int blocklen)
 		}
 		case MNG_KVM_COMPRESSION: // Compression
 		{
-			// The server sends 10 bytes, with the scaling at offset 6, which is not used here, and the frame timer at offset 8
+			// The server sends 10 bytes, with the scaling at offset 6 and the frame timer at offset 8
 			if (size >= 10) { int fr = ((int)ntohs(ILibUnaligned_Read16(block + 8))); if (fr >= 20 && fr <= 5000) g_viewerFrameTimer = fr; }
+			if (size >= 8) { int ns = ((int)ntohs(ILibUnaligned_Read16(block + 6))); if (ns >= 64 && ns <= 4096) g_viewerScaling = ns; }
 			if (size >= 6) { set_tile_compression((int)block[4], (int)block[5]); }
 			COMPRESSION_RATIO = 100;
 			break;
@@ -948,8 +960,9 @@ kvm_next_session:
 		// Before macOS 12.3 there is no ScreenCaptureKit, so CGDisplayCreateImage() captures every frame as before
 		if (sckState == 0 && !kvm_sck_available()) { sckState = -2; }
 
-		// The size is checked before the stream starts, and not during the fallback, which takes it from the captured image
-		if (SCREEN_NUM != screen_num || (sckState >= 0 && kvm_display_size_changed(screen_num)))
+		// The size is checked before the stream starts, and not during the fallback, which takes it from the captured image.
+		// A new scaling from the viewer sets the size again on both.
+		if (SCREEN_NUM != screen_num || g_viewerScaling != SCREEN_SCALING || (sckState >= 0 && kvm_display_size_changed(screen_num)))
 		{
 			if (sckState == 1) { kvm_sck_stop(); sckState = 0; }
 			kvm_init();
@@ -1010,7 +1023,7 @@ kvm_next_session:
 			//senddebug(100);
 			if (getScreenBuffer((unsigned char **)&desktop, &desktopsize, image) != 0)
 			{
-				// The image did not fit the buffer, so the size is read again as after a display change, after a short pause in case it stays so
+				// No buffer or no bitmap context, so the size is read again as after a display change, after a short pause in case it stays so
 				CGImageRelease(image);
 				usleep(100000);
 				kvm_init();
@@ -1019,7 +1032,7 @@ kvm_next_session:
 
 			{
 				struct tileFrame_t frame;
-				tile_frame_from_rgb24(&frame, (const unsigned char *)desktop, (size_t)adjust_screen_size(SCREEN_WIDTH) * 3, SCREEN_WIDTH, SCREEN_HEIGHT);
+				tile_frame_from_rgbx(&frame, (const unsigned char *)desktop, (size_t)SCREEN_WIDTH * 4, SCREEN_WIDTH, SCREEN_HEIGHT);
 				kvm_send_tiles(&frame);
 			}
 
