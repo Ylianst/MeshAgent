@@ -145,9 +145,13 @@ int get_tile_buffer(int x, int y, void **buffer, void *desktop, int tilewidth, i
 
 // libjpeg writes the JPEG straight into the tile packet, behind room for the 8-byte header.
 // Static, because the error branch reads it after the longjmp(), and only the KVM thread encodes.
+// Two compress objects are kept across rectangles, because optimized Huffman tables replace the standard ones in the object that built them.
 static struct
 {
-	struct jpeg_compress_struct cinfo;
+	struct jpeg_compress_struct cinfo[2];	// [0] standard tables, [1] tables built for each rectangle
+	int created[2];
+	int quality[2];							// The settings each object was set up with
+	int pixelSize[2];
 	struct jpeg_error_mgr err;
 	jmp_buf jump;
 	struct jpeg_destination_mgr dest;
@@ -201,56 +205,73 @@ static char* tile_jpeg_encode(int x, int y, int width, int height, void *desktop
 	JSAMPROW top, row;
 	unsigned char *packet, *grown;
 	size_t size;
+	int quality = (int)encCompression;
+	// Huffman tables built for each rectangle up to 128x128, where the standard tables are a large share of a small JPEG.
+	// Larger rectangles gain less for the second pass over the data.
+	int optimize = ((long long)width * height <= TILE_JPEG_OPTIMIZE_MAX_AREA) ? 1 : 0;
+	struct jpeg_compress_struct *cinfo = &tileJpeg.cinfo[optimize];
 
-	// jpeg_create_compress() keeps cinfo.err, so the error and destination managers are set up once
-	if (tileJpeg.dest.init_destination == NULL)
+	if (!tileJpeg.created[optimize])
 	{
-		tileJpeg.cinfo.err = jpeg_std_error(&tileJpeg.err);
+		// jpeg_create_compress() keeps cinfo.err, both objects share the error and destination managers
+		cinfo->err = jpeg_std_error(&tileJpeg.err);
 		tileJpeg.err.error_exit = tile_jpeg_error_exit;
 		tileJpeg.err.output_message = tile_jpeg_output_message;
 		tileJpeg.dest.init_destination = tile_jpeg_dest_init;
 		tileJpeg.dest.empty_output_buffer = tile_jpeg_dest_grow;
 		tileJpeg.dest.term_destination = tile_jpeg_dest_term;
+		if (setjmp(tileJpeg.jump))
+		{
+			jpeg_destroy_compress(cinfo);
+			return NULL;
+		}
+		jpeg_create_compress(cinfo);
+		cinfo->dest = &tileJpeg.dest;
+		tileJpeg.created[optimize] = 1;
+		tileJpeg.quality[optimize] = 0;
 	}
 
 	tileJpeg.capacity = TILE_JPEG_START_SIZE;
 	if ((tileJpeg.packet = (unsigned char*)malloc(tileJpeg.capacity)) == NULL) { return NULL; }
 	if (setjmp(tileJpeg.jump))
 	{
-		jpeg_destroy_compress(&tileJpeg.cinfo);
+		// Ends this image only, the object and its settings stay for the next rectangle
+		jpeg_abort_compress(cinfo);
 		free(tileJpeg.packet);
 		tileJpeg.packet = NULL;
 		return NULL;
 	}
 
-	jpeg_create_compress(&tileJpeg.cinfo);
-	tileJpeg.cinfo.dest = &tileJpeg.dest;
-	tileJpeg.cinfo.image_width = width;
-	tileJpeg.cinfo.image_height = height;
-	tileJpeg.cinfo.input_components = PIXEL_SIZE;
-	tileJpeg.cinfo.in_color_space = (PIXEL_SIZE == 4) ? JCS_EXT_BGRX : JCS_EXT_BGR;
-	jpeg_set_defaults(&tileJpeg.cinfo);
-	// 4:4:4 like Linux and macOS, not the 4:2:0 of the defaults and of the old GDI+ encoder.
-	// 4:2:0 averages the colour over 2x2 pixels, and a text stroke is thinner than that, so coloured text turned dull and dark.
-	for (int c = 0; c < 3; c++) { tileJpeg.cinfo.comp_info[c].h_samp_factor = 1; tileJpeg.cinfo.comp_info[c].v_samp_factor = 1; }
-	// No 18-byte JFIF block in every tile. Without it, decoders still take 3 components with IDs 1 to 3 as YCbCr.
-	tileJpeg.cinfo.write_JFIF_header = FALSE;
-	// Huffman tables built for each rectangle up to 128x128, where the standard tables are a large share of a small JPEG.
-	// Larger rectangles gain less for the second pass over the data.
-	if ((long long)width * height <= TILE_JPEG_OPTIMIZE_MAX_AREA) { tileJpeg.cinfo.optimize_coding = TRUE; }
-	jpeg_set_quality(&tileJpeg.cinfo, (int)encCompression, TRUE);
-	jpeg_start_compress(&tileJpeg.cinfo, TRUE);
+	cinfo->image_width = width;
+	cinfo->image_height = height;
+	// The settings stay in the object, so they are only set again when the quality or the pixel format changed
+	if (tileJpeg.quality[optimize] != quality || tileJpeg.pixelSize[optimize] != PIXEL_SIZE)
+	{
+		tileJpeg.quality[optimize] = 0;
+		cinfo->input_components = PIXEL_SIZE;
+		cinfo->in_color_space = (PIXEL_SIZE == 4) ? JCS_EXT_BGRX : JCS_EXT_BGR;
+		jpeg_set_defaults(cinfo);
+		// 4:4:4 like Linux and macOS, not the 4:2:0 of the defaults and of the old GDI+ encoder.
+		// 4:2:0 averages the colour over 2x2 pixels, and a text stroke is thinner than that, so coloured text turned dull and dark.
+		for (int c = 0; c < 3; c++) { cinfo->comp_info[c].h_samp_factor = 1; cinfo->comp_info[c].v_samp_factor = 1; }
+		// No 18-byte JFIF block in every tile. Without it, decoders still take 3 components with IDs 1 to 3 as YCbCr.
+		cinfo->write_JFIF_header = FALSE;
+		cinfo->optimize_coding = optimize ? TRUE : FALSE;
+		jpeg_set_quality(cinfo, quality, TRUE);
+		tileJpeg.quality[optimize] = quality;
+		tileJpeg.pixelSize[optimize] = PIXEL_SIZE;
+	}
+	jpeg_start_compress(cinfo, TRUE);
 
 	// The top row of the rectangle is its last row in the buffer, so the rows are walked backwards
 	top = (JSAMPROW)desktop + (size_t)(adjust_screen_size(SCALED_HEIGHT) - 1 - y) * stride + (size_t)x * PIXEL_SIZE;
-	while (tileJpeg.cinfo.next_scanline < tileJpeg.cinfo.image_height)
+	while (cinfo->next_scanline < cinfo->image_height)
 	{
-		row = top - tileJpeg.cinfo.next_scanline * stride;
-		jpeg_write_scanlines(&tileJpeg.cinfo, &row, 1);
+		row = top - cinfo->next_scanline * stride;
+		jpeg_write_scanlines(cinfo, &row, 1);
 	}
 
-	jpeg_finish_compress(&tileJpeg.cinfo);
-	jpeg_destroy_compress(&tileJpeg.cinfo);
+	jpeg_finish_compress(cinfo);
 
 	packet = tileJpeg.packet;
 	tileJpeg.packet = NULL;
@@ -267,6 +288,14 @@ static char* tile_jpeg_encode(int x, int y, int width, int height, void *desktop
 	}
 	*jpegSize = (unsigned long)size;
 	return (char*)packet;
+}
+
+static void tile_jpeg_free(void)
+{
+	for (int i = 0; i < 2; i++)
+	{
+		if (tileJpeg.created[i]) { jpeg_destroy_compress(&tileJpeg.cinfo[i]); tileJpeg.created[i] = 0; }
+	}
 }
 
 // Writes the tile header in front of the encoded image, a jumbo header when it is over 65500 bytes
@@ -678,58 +707,85 @@ static int dxgi_cursor_dib(int cw, int ch)
 	return 0;
 }
 
+// Hotspot and size of a cursor. GetIconInfo() creates two bitmaps on every call, so the answer is kept
+// until the handle changes, and for a second at most in case a handle is used again for another cursor.
+static int cursor_metrics(HCURSOR cursor, int *hotX, int *hotY, int *cw, int *ch)
+{
+	static HCURSOR last = NULL;
+	static DWORD lastAt = 0;
+	static int lastHotX = 0, lastHotY = 0, lastW = 0, lastH = 0;
+	DWORD now = GetTickCount();
+
+	if (cursor == NULL) { return 1; }
+	if (cursor != last || now - lastAt >= 1000)
+	{
+		ICONINFO ii = { 0 };
+		BITMAP bm;
+
+		last = NULL;
+		if (!GetIconInfo(cursor, &ii)) { return 1; }
+		if (GetObject(ii.hbmMask, sizeof(bm), &bm) == sizeof(bm))
+		{
+			lastHotX = (int)ii.xHotspot;
+			lastHotY = (int)ii.yHotspot;
+			lastW = bm.bmWidth;
+			lastH = ii.hbmColor ? bm.bmHeight : (bm.bmHeight / 2); // A mask-only cursor holds the AND and XOR masks one above the other
+			last = cursor;
+			lastAt = now;
+		}
+		// GetIconInfo returns copies of the cursor bitmaps that we own
+		if (ii.hbmMask != NULL) { DeleteObject(ii.hbmMask); }
+		if (ii.hbmColor != NULL) { DeleteObject(ii.hbmColor); }
+		if (last == NULL) { return 1; }
+	}
+	*hotX = lastHotX;
+	*hotY = lastHotY;
+	*cw = lastW;
+	*ch = lastH;
+	return 0;
+}
+
 // Draws the cursor at (x, y) into the DXGI frame. DrawIconEx() draws on a copy of the pixels under it, so masks, alpha
 // and inverting cursors such as the text cursor come out as on the screen. The covered pixels are kept for the restore.
 static void dxgi_cursor_draw(int x, int y, int bufW, int bufH)
 {
 	CURSORINFO info = { 0 };
-	ICONINFO ii = { 0 };
-	BITMAP bm;
+	int hotX, hotY, cw, ch;
 
 	info.cbSize = sizeof(info);
-	if (!GetCursorInfo(&info) || (info.flags & CURSOR_SHOWING) == 0 || !GetIconInfo(info.hCursor, &ii)) { return; }
+	if (!GetCursorInfo(&info) || (info.flags & CURSOR_SHOWING) == 0 || cursor_metrics(info.hCursor, &hotX, &hotY, &cw, &ch) != 0) { return; }
 	// (x, y) is the hotspot, the image starts that far up and left of it
-	x -= (int)ii.xHotspot;
-	y -= (int)ii.yHotspot;
-	if (GetObject(ii.hbmMask, sizeof(bm), &bm) == sizeof(bm))
-	{
-		int cw = bm.bmWidth, ch = ii.hbmColor ? bm.bmHeight : (bm.bmHeight / 2);
-		int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
-		int x1 = x + cw > SCREEN_WIDTH ? SCREEN_WIDTH : x + cw;
-		int y1 = y + ch > SCREEN_HEIGHT ? SCREEN_HEIGHT : y + ch;
-		size_t need = (size_t)(x1 > x0 ? x1 - x0 : 0) * (y1 > y0 ? y1 - y0 : 0) * 4;
+	x -= hotX;
+	y -= hotY;
+	int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
+	int x1 = x + cw > SCREEN_WIDTH ? SCREEN_WIDTH : x + cw;
+	int y1 = y + ch > SCREEN_HEIGHT ? SCREEN_HEIGHT : y + ch;
+	size_t need = (size_t)(x1 > x0 ? x1 - x0 : 0) * (y1 > y0 ? y1 - y0 : 0) * 4;
 
-		if (need > 0 && dxgi_cursor_dib(cw, ch) == 0)
-		{
-			if (need > cursorSaveSize)
-			{
-				unsigned char *grown = (unsigned char *)realloc(cursorSave, need);
-				if (grown != NULL) { cursorSave = grown; cursorSaveSize = need; }
-			}
-			if (need <= cursorSaveSize)
-			{
-				cursorSaveX = x0;
-				cursorSaveY = y0;
-				cursorSaveW = x1 - x0;
-				cursorSaveH = y1 - y0;
-				for (int r = y0; r < y1; r++)
-				{
-					unsigned char *row = capture_row(r, bufW, bufH) + (size_t)x0 * 4;
-					memcpy(cursorSave + (size_t)(r - y0) * cursorSaveW * 4, row, (size_t)cursorSaveW * 4);
-					memcpy(cursorBits + ((size_t)(r - y) * cw + (x0 - x)) * 4, row, (size_t)cursorSaveW * 4);
-				}
-				DrawIconEx(hCursorDC, 0, 0, info.hCursor, cw, ch, 0, NULL, DI_NORMAL);
-				GdiFlush();
-				for (int r = y0; r < y1; r++)
-				{
-					memcpy(capture_row(r, bufW, bufH) + (size_t)x0 * 4, cursorBits + ((size_t)(r - y) * cw + (x0 - x)) * 4, (size_t)cursorSaveW * 4);
-				}
-			}
-		}
+	if (need == 0 || dxgi_cursor_dib(cw, ch) != 0) { return; }
+	if (need > cursorSaveSize)
+	{
+		unsigned char *grown = (unsigned char *)realloc(cursorSave, need);
+		if (grown == NULL) { return; }
+		cursorSave = grown;
+		cursorSaveSize = need;
 	}
-	// GetIconInfo returns copies of the cursor bitmaps that we own
-	if (ii.hbmMask != NULL) { DeleteObject(ii.hbmMask); }
-	if (ii.hbmColor != NULL) { DeleteObject(ii.hbmColor); }
+	cursorSaveX = x0;
+	cursorSaveY = y0;
+	cursorSaveW = x1 - x0;
+	cursorSaveH = y1 - y0;
+	for (int r = y0; r < y1; r++)
+	{
+		unsigned char *row = capture_row(r, bufW, bufH) + (size_t)x0 * 4;
+		memcpy(cursorSave + (size_t)(r - y0) * cursorSaveW * 4, row, (size_t)cursorSaveW * 4);
+		memcpy(cursorBits + ((size_t)(r - y) * cw + (x0 - x)) * 4, row, (size_t)cursorSaveW * 4);
+	}
+	DrawIconEx(hCursorDC, 0, 0, info.hCursor, cw, ch, 0, NULL, DI_NORMAL);
+	GdiFlush();
+	for (int r = y0; r < y1; r++)
+	{
+		memcpy(capture_row(r, bufW, bufH) + (size_t)x0 * 4, cursorBits + ((size_t)(r - y) * cw + (x0 - x)) * 4, (size_t)cursorSaveW * 4);
+	}
 }
 
 static void dxgi_cursor_free(void)
@@ -825,15 +881,12 @@ int get_desktop_buffer(void **buffer, long long *bufferSize, long* mouseMove)
 		if (mouseMove[0] != 0)
 		{
 			CURSORINFO info = { 0 };
-			ICONINFO ii = { 0 };
+			int hotX, hotY, cw, ch;
 			info.cbSize = sizeof(info);
-			if (GetCursorInfo(&info) && (info.flags & CURSOR_SHOWING) != 0 && GetIconInfo(info.hCursor, &ii))
+			if (GetCursorInfo(&info) && (info.flags & CURSOR_SHOWING) != 0 && cursor_metrics(info.hCursor, &hotX, &hotY, &cw, &ch) == 0)
 			{
 				// DrawIconEx() applies the cursor's masks and alpha to the captured pixels, as Windows does on the screen
-				DrawIconEx(hCaptureDC, mouseMove[1] - (int)ii.xHotspot, mouseMove[2] - (int)ii.yHotspot, info.hCursor, 0, 0, 0, NULL, DI_NORMAL);
-				// GetIconInfo returns copies of the cursor bitmaps that we own
-				if (ii.hbmMask != NULL) { DeleteObject(ii.hbmMask); }
-				if (ii.hbmColor != NULL) { DeleteObject(ii.hbmColor); }
+				DrawIconEx(hCaptureDC, mouseMove[1] - hotX, mouseMove[2] - hotY, info.hCursor, 0, 0, 0, NULL, DI_NORMAL);
 			}
 		}
 	}
@@ -944,6 +997,7 @@ void teardown_gdiplus()
 	free(refFrame);
 	refFrame = NULL;
 	refFrameSize = 0;
+	tile_jpeg_free();
 	GdiplusShutdown(gdiplusToken);
 	DeleteDC(hCaptureDC);
 	DeleteObject(hCapturedBitmap);

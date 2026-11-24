@@ -37,6 +37,7 @@ static int hasFrame = 0;
 static int unsupported = 0;
 static int failed = 0;
 static DWORD failedAt = 0;
+static DWORD failedWait = 0;
 static int startNext = 0;
 
 // The changed areas of the last frame, as move and dirty rectangles from DXGI, and -1 for the whole screen
@@ -46,9 +47,13 @@ static RECT *changed = NULL;
 static int changedCount = 0;
 static int changedCapacity = 0;
 
+#define DXGI_RETRY_MS 2000
+// No output covers the captured rectangle, as with several monitors or a rotated one, or its mode cannot be duplicated.
+// A display change ends the wait through dxgi_capture_release(), and the retry finds a change of colour depth alone.
+#define DXGI_RETRY_NO_OUTPUT_MS 30000
 #define DXGI_SAFE_RELEASE(p) do { if ((p) != NULL) { (p)->Release(); (p) = NULL; } } while (0)
 
-extern "C" void dxgi_capture_release(void)
+static void dxgi_release_objects(void)
 {
 	DXGI_SAFE_RELEASE(staging);
 	DXGI_SAFE_RELEASE(dup);
@@ -63,16 +68,25 @@ extern "C" void dxgi_capture_release(void)
 	changedCount = changedCapacity = 0;
 }
 
+// Called on a display, resolution or desktop change and at the end of a session, so the next frame may try a start at once
+extern "C" void dxgi_capture_release(void)
+{
+	dxgi_release_objects();
+	failed = 0;
+}
+
 extern "C" int dxgi_capture_unsupported(void)
 {
 	return unsupported;
 }
 
-static void dxgi_capture_failed(void)
+// One attempt per wait, so the secure desktop or a disconnected session does not cost a failed start per frame
+static void dxgi_capture_failed(DWORD wait)
 {
-	dxgi_capture_release();
+	dxgi_release_objects();
 	failed = 1;
 	failedAt = GetTickCount();
+	failedWait = wait;
 }
 
 // Only an output that covers exactly the captured rectangle, so "all displays" across several monitors stays on BitBlt.
@@ -101,6 +115,7 @@ static int dxgi_find_output(IDXGIFactory1 *factory, int x, int y, int w, int h, 
 	return 0;
 }
 
+// Returns 0 when the duplication runs, 2 when no output covers the rectangle or its desktop mode cannot be duplicated, and 1 for every other failure
 static int dxgi_capture_init(int x, int y, int w, int h)
 {
 	CreateDXGIFactory1_t createFactory;
@@ -113,7 +128,7 @@ static int dxgi_capture_init(int x, int y, int w, int h)
 	HRESULT hr;
 	int found;
 
-	dxgi_capture_release();
+	dxgi_release_objects();
 	if (unsupported) { return 1; }
 
 	// Loaded at runtime so the agent still starts on Windows 7, which has no Desktop Duplication
@@ -126,7 +141,7 @@ static int dxgi_capture_init(int x, int y, int w, int h)
 
 	found = dxgi_find_output(factory, x, y, w, h, &adapter, &output);
 	factory->Release();
-	if (!found) { return 1; }
+	if (!found) { return 2; }
 
 	if (FAILED(output->QueryInterface(__uuidof(IDXGIOutput1), (void **)&output1)))
 	{
@@ -145,10 +160,10 @@ static int dxgi_capture_init(int x, int y, int w, int h)
 	{
 		// Windows 7 with the Platform Update has IDXGIOutput1 but answers E_NOTIMPL, which never changes
 		if (hr == E_NOTIMPL) { unsupported = 1; }
-		// E_ACCESSDENIED on the secure desktop and DXGI_ERROR_SESSION_DISCONNECTED are temporary, DXGI_ERROR_UNSUPPORTED is not
-		if (hr == DXGI_ERROR_UNSUPPORTED) { unsupported = 1; }
-		dxgi_capture_release();
-		return 1;
+		// DXGI_ERROR_UNSUPPORTED is about the desktop mode, like 8 bit colour, so it gets the long wait and DXGI stays on.
+		// E_ACCESSDENIED on the secure desktop and DXGI_ERROR_SESSION_DISCONNECTED are temporary.
+		dxgi_release_objects();
+		return hr == DXGI_ERROR_UNSUPPORTED ? 2 : 1;
 	}
 
 	memset(&td, 0, sizeof(td));
@@ -160,7 +175,7 @@ static int dxgi_capture_init(int x, int y, int w, int h)
 	td.SampleDesc.Count = 1;
 	td.Usage = D3D11_USAGE_STAGING;
 	td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-	if (FAILED(dev->CreateTexture2D(&td, NULL, &staging))) { dxgi_capture_release(); return 1; }
+	if (FAILED(dev->CreateTexture2D(&td, NULL, &staging))) { dxgi_release_objects(); return 1; }
 	dupX = x;
 	dupY = y;
 	dupW = w;
@@ -263,22 +278,22 @@ extern "C" int dxgi_capture_frame(int x, int y, int w, int h, unsigned char *des
 	*rects = NULL;
 	*rectCount = -1;
 	if (unsupported || w > destWidth || h > destHeight) { return 1; }
-	if (dup != NULL && (x != dupX || y != dupY || w != dupW || h != dupH)) { dxgi_capture_release(); }
+	if (dup != NULL && (x != dupX || y != dupY || w != dupW || h != dupH)) { dxgi_release_objects(); }
 	if (dup == NULL)
 	{
-		// One attempt every 2 seconds, so the secure desktop or a disconnected session does not cost a failed init per frame
-		if (failed && GetTickCount() - failedAt < 2000) { return 1; }
+		if (failed && GetTickCount() - failedAt < failedWait) { return 1; }
 		// The start takes longer than a BitBlt frame and has no frame ready right after it, so GDI takes this frame
 		// and the start follows on the next one. Otherwise the first picture of a session waits for the start.
 		if (!startNext) { startNext = 1; return 1; }
 		startNext = 0;
-		if (dxgi_capture_init(x, y, w, h) != 0) { dxgi_capture_failed(); return 1; }
+		result = dxgi_capture_init(x, y, w, h);
+		if (result != 0) { dxgi_capture_failed(result == 2 ? DXGI_RETRY_NO_OUTPUT_MS : DXGI_RETRY_MS); return 1; }
 		failed = 0;
 	}
 
 	hr = dup->AcquireNextFrame(0, &fi, &res);
 	// DXGI_ERROR_ACCESS_LOST on a desktop switch, UAC prompt or mode change
-	if (FAILED(hr) && hr != DXGI_ERROR_WAIT_TIMEOUT) { dxgi_capture_failed(); return 1; }
+	if (FAILED(hr) && hr != DXGI_ERROR_WAIT_TIMEOUT) { dxgi_capture_failed(DXGI_RETRY_MS); return 1; }
 
 	// A timeout means nothing changed, and a frame with LastPresentTime 0 only moved the pointer
 	result = 0;
@@ -318,7 +333,7 @@ extern "C" int dxgi_capture_frame(int x, int y, int w, int h, unsigned char *des
 		res->Release();
 		dup->ReleaseFrame();
 	}
-	if (result < 0) { dxgi_capture_failed(); return 1; }
+	if (result < 0) { dxgi_capture_failed(DXGI_RETRY_MS); return 1; }
 	if (result == 0)
 	{
 		*rects = changed;
