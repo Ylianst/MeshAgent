@@ -635,6 +635,7 @@ static void dxgi_output_copy(const dxgi_out *o, unsigned char *dest, int destWid
 		s.top = (LONG)((long long)c->top * mapDstH / mapSrcH);
 		s.right = (LONG)(((long long)c->right * mapDstW + mapSrcW - 1) / mapSrcW);
 		s.bottom = (LONG)(((long long)c->bottom * mapDstH + mapSrcH - 1) / mapSrcH);
+		// The span can end a part of a scaled pixel before the screen does, and dest ends with the span
 		if (s.right > mapDstW) { s.right = mapDstW; }
 		if (s.bottom > mapDstH) { s.bottom = mapDstH; }
 		*c = s;
@@ -663,12 +664,14 @@ extern "C" int dxgi_capture_frame(int x, int y, int w, int h, int spanW, int spa
 	*rects = NULL;
 	*rectCount = -1;
 	// A span smaller than dest would enlarge the picture, which stays on GDI
-	if (unsupported || w > spanW || h > spanH || destWidth > spanW || destHeight > spanH) { return 1; }
+	if (unsupported || destWidth > spanW || destHeight > spanH) { return 1; }
 	mapSrcW = spanW;
 	mapSrcH = spanH;
 	mapDstW = destWidth;
 	mapDstH = destHeight;
 	scaled = (spanW != destWidth || spanH != destHeight);
+	// Unscaled rows are copied as they are, so the rectangle has to fit. A scaled copy is limited to dest instead.
+	if (!scaled && (w > destWidth || h > destHeight)) { return 1; }
 	if (outCount > 0 && (x != dupX || y != dupY || w != dupW || h != dupH)) { dxgi_release_objects(); }
 	if (outCount == 0)
 	{

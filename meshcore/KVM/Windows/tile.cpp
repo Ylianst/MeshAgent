@@ -826,6 +826,10 @@ int get_desktop_buffer(void **buffer, long long *bufferSize, long* mouseMove)
 	BITMAPINFO bmpInfo;
 	int w = adjust_screen_size(SCALED_WIDTH);
 	int h = adjust_screen_size(SCALED_HEIGHT);
+	// The part of the screen that fills the buffer at exactly the scaling factor. The buffer is rounded up to whole tiles,
+	// and with the screen rounded up on its own the ratio changed, so the picture lost its edge and the mouse was off.
+	int spanW = (int)(((long long)w * 1024 + SCALING_FACTOR / 2) / SCALING_FACTOR);
+	int spanH = (int)(((long long)h * 1024 + SCALING_FACTOR / 2) / SCALING_FACTOR);
 
 	*buffer = NULL; // If anything fails, this will be the indication.
 	*bufferSize = 0;
@@ -849,7 +853,7 @@ int get_desktop_buffer(void **buffer, long long *bufferSize, long* mouseMove)
 		tile_check_rect(cursorSaveX, cursorSaveY, cursorSaveX + cursorSaveW, cursorSaveY + cursorSaveH);
 		dxgi_cursor_restore(w, h);
 		// The span is the source size of the StretchBlt() below, so a GDI frame and a DXGI frame show the same picture
-		if (dxgi_capture_frame(SCREEN_X, SCREEN_Y, SCREEN_WIDTH, SCREEN_HEIGHT, adjust_screen_size(SCREEN_WIDTH), adjust_screen_size(SCREEN_HEIGHT), (unsigned char *)captureBuffer, w, h, captureHoldsDxgiFrame, &rects, &rectCount) == 0)
+		if (dxgi_capture_frame(SCREEN_X, SCREEN_Y, SCREEN_WIDTH, SCREEN_HEIGHT, spanW, spanH, (unsigned char *)captureBuffer, w, h, captureHoldsDxgiFrame, &rects, &rectCount) == 0)
 		{
 			if (rectCount < 0) { tileCheckAll = 1; }
 			for (int i = 0; i < rectCount; i++) { tile_check_rect(rects[i].left, rects[i].top, rects[i].right, rects[i].bottom); }
@@ -898,7 +902,7 @@ int get_desktop_buffer(void **buffer, long long *bufferSize, long* mouseMove)
 	else
 	{
 		if (SetStretchBltMode(hCaptureDC, HALFTONE) == 0) { KVMDEBUG("SetStretchBltMode() failed", 0); return(1); }
-		if (StretchBlt(hCaptureDC, 0, 0, w, h, hDesktopDC, SCREEN_X, SCREEN_Y, adjust_screen_size(SCREEN_WIDTH), adjust_screen_size(SCREEN_HEIGHT), SRCCOPY) == FALSE)
+		if (StretchBlt(hCaptureDC, 0, 0, w, h, hDesktopDC, SCREEN_X, SCREEN_Y, spanW, spanH, SRCCOPY) == FALSE)
 		{
 			KVMDEBUG("StretchBlt() returned FALSE", 0);
 			return 1; // If the copy fails, error out.
