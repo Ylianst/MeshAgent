@@ -335,7 +335,7 @@ long ILibGetTimeStamp();
 	static inline void ILibSpinLock_Lock(ILibSpinLock *lock)
 	{
 #ifdef WIN32
-		while (!InterlockedCompareExchange(lock, 1, 0))
+		while (InterlockedCompareExchange(lock, 1, 0) != 0)
 		{
 			YieldProcessor();
 		}
