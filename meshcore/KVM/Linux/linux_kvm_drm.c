@@ -3363,12 +3363,13 @@ void *kvm_server_mainloop_drm(void *parm)
 		int directAllowed = (outputCount == 1 && !dumpOn);
 		int desktopCleared = 0;
 
-		// Outputs on the GPU path are read back into one 4 byte per pixel desktop, each with its own previous frame on the GPU,
-		// so several monitors do not fall back to the RGB24 conversion. gpuDirectOff is set when an output cannot take part, until the layout changes.
+		// With several outputs, each one goes into one 4 byte per pixel desktop: a GPU output is read back there with its own previous frame on the GPU,
+		// a mapped one is copied there. So several monitors do not fall back to the RGB24 conversion. gpuDirectOff is set when an output cannot take part, until the layout changes.
 		int gpuTile = (TILE_WIDTH == TILE_HEIGHT && TILE_WIDTH > 0) ? TILE_WIDTH : 0;
 		int gpuTw = (gpuTile > 0) ? (SCREEN_WIDTH + gpuTile - 1) / gpuTile : 0;
 		int gpuTh = (gpuTile > 0) ? (SCREEN_HEIGHT + gpuTile - 1) / gpuTile : 0;
 		int gpuDirect = 0, gpuUsed = 0, legacyUsed = 0, gpuForceFull = 0, frameAborted = 0;
+		J_COLOR_SPACE deskFormat = JCS_RGB;	// The pixel format of the outputs already in the desktop, JCS_RGB while there are none
 		{
 			uint64_t sig = 1469598103934665603ULL;
 			int k;
@@ -3506,7 +3507,7 @@ void *kvm_server_mainloop_drm(void *parm)
 				int rowOk = ((dx == 0 && (int)frame.width == SCREEN_WIDTH) || (dev->eglCtx.initialized && dev->eglCtx.es3));
 				int gpuOk = (gpuDirect && inside && frame.rotation == KVM_DRM_ROTATION_0 &&
 					outputs[outputIndex].width == frame.width && outputs[outputIndex].height == frame.height &&
-					kvm_drm_direct_format(frame.format, 1, &directFormat));
+					kvm_drm_direct_format(frame.format, 1, &directFormat) && (deskFormat == JCS_RGB || deskFormat == directFormat));
 
 				if (gpuDirect && outside)
 				{
@@ -3580,6 +3581,7 @@ void *kvm_server_mainloop_drm(void *parm)
 					directFormat = JCS_RGB;
 					(void)kvm_drm_direct_format(frame.format, 1, &directFormat);
 					directFrame.format = directFormat;
+					deskFormat = directFormat;
 					gpuUsed = 1;
 					capturedOutputs++;
 					continue;
@@ -3617,14 +3619,41 @@ void *kvm_server_mainloop_drm(void *parm)
 					}
 
 					const uint8_t *src = dev->map.addr + frame.offset;
+					if (gpuDirect && outputCount > 1)
+					{
+						int dx = outputs[outputIndex].x - layout.min_x - CAPTURE_X;
+						int dy = outputs[outputIndex].y - layout.min_y - CAPTURE_Y;
+						J_COLOR_SPACE mapFormat = JCS_RGB;
+
+						// Another monitor is selected, so this output is not in the picture
+						if (dx >= SCREEN_WIDTH || dy >= SCREEN_HEIGHT || dx + (int)frame.width <= 0 || dy + (int)frame.height <= 0) { continue; }
+						if (!legacyUsed && dx >= 0 && dy >= 0 && dx + (int)frame.width <= SCREEN_WIDTH && dy + (int)frame.height <= SCREEN_HEIGHT &&
+							frame.rotation == KVM_DRM_ROTATION_0 && outputs[outputIndex].width == frame.width && outputs[outputIndex].height == frame.height &&
+							frame.pitch >= frame.width * 4u && kvm_drm_direct_format(frame.format, 0, &mapFormat) && (deskFormat == JCS_RGB || deskFormat == mapFormat))
+						{
+							// Copied in as it is, rows turned over because the desktop has its bottom row first. Its tiles are compared by the tile code.
+							uint32_t row;
+							for (row = 0; row < frame.height; ++row)
+							{
+								memcpy(desktopRgbaBuffer + ((size_t)(SCREEN_HEIGHT - 1 - dy - (int)row) * (size_t)SCREEN_WIDTH + (size_t)dx) * 4u,
+									src + (size_t)row * frame.pitch, (size_t)frame.width * 4u);
+							}
+							kvm_drm_mark_desktop_tiles(desktopChanged, gpuTw, gpuTh, gpuTile, dx, dy, (int)frame.width, (int)frame.height);
+							deskFormat = mapFormat;
+							directFrame.format = mapFormat;
+							gpuUsed = 1;
+							capturedOutputs++;
+							continue;
+						}
+						gpuDirectOff = 1;
+					}
 					if (gpuUsed)
 					{
-						// A mapped output cannot join the outputs that are already in the 4 byte desktop
+						// This output cannot join the outputs that are already in the 4 byte desktop
 						gpuDirectOff = 1;
 						frameAborted = 1;
 						break;
 					}
-					if (gpuDirect && outputCount > 1) { gpuDirectOff = 1; }
 					gpuDirect = 0;
 					legacyUsed = 1;
 					if (outputDirect && frame.pitch >= frame.width * 4u && kvm_drm_direct_format(frame.format, 0, &directFormat))
