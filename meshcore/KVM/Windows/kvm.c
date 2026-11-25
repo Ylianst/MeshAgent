@@ -486,6 +486,10 @@ int kvm_server_inputdata(char *block, int blocklen, ILibKVM_WriteHandler writeHa
 
 	ILibRemoteLogging_printf(gKVMRemoteLogging, ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_2, "KVM [SLAVE]: Handle Input [Len = %d, type = %u, size = %u]", blocklen, type, size);
 
+	// A command is at least its 4 byte header, so a smaller size can never be completed and the callers waited on it for good.
+	// The stream cannot be read past such a header, so what is in the buffer is dropped and reading starts again with the next data.
+	if (size < 4)
+		return blocklen;
 	if (size > blocklen)
 		return 0;
 
@@ -705,8 +709,13 @@ typedef struct kvm_data_handler
 	char buffer[];
 } kvm_data_handler;
 
-// Feed network data into the KVM. Return the number of bytes consumed.
-// This method consumes as many input commands as it can.
+// Console mode gets the viewer's data as the stream hands it over, and the caller does not keep what was not used.
+// So a command split over two writes waits here for its rest. Any command fits, its size field is 16 bit.
+static char kvmConsoleInput[65536];
+static int kvmConsoleInputLen = 0;
+
+// Feed network data into the KVM. Return the number of bytes consumed, which is all of it.
+// This method consumes as many input commands as it can and keeps the start of an incomplete one.
 int kvm_relay_feeddata(char *buf, int len, ILibKVM_WriteHandler writeHandler, void *reserved)
 {
 	if (gChildProcess != NULL)
@@ -723,14 +732,21 @@ int kvm_relay_feeddata(char *buf, int len, ILibKVM_WriteHandler writeHandler, vo
 	}
 	else
 	{
-		int len2 = 0;
-		int ptr = 0;
-		// while ((len2 = kvm_server_inputdata(buf + ptr, len - ptr, kvm_relay_feeddata_ex, (void*[]) {writeHandler, reserved})) != 0) { ptr += len2; }
-		while ((len2 = kvm_server_inputdata(buf + ptr, len - ptr, writeHandler, reserved)) != 0)
+		int len2, ptr, take, used = 0;
+		while (used < len)
 		{
-			ptr += len2;
+			// An incomplete command is shorter than the buffer, so there is always room for more
+			take = len - used;
+			if (take > (int)sizeof(kvmConsoleInput) - kvmConsoleInputLen) { take = (int)sizeof(kvmConsoleInput) - kvmConsoleInputLen; }
+			memcpy(kvmConsoleInput + kvmConsoleInputLen, buf + used, (size_t)take);
+			kvmConsoleInputLen += take;
+			used += take;
+			ptr = 0;
+			while (ptr < kvmConsoleInputLen && (len2 = kvm_server_inputdata(kvmConsoleInput + ptr, kvmConsoleInputLen - ptr, writeHandler, reserved)) != 0) { ptr += len2; }
+			if (ptr > 0 && ptr < kvmConsoleInputLen) { memmove(kvmConsoleInput, kvmConsoleInput + ptr, (size_t)(kvmConsoleInputLen - ptr)); }
+			kvmConsoleInputLen -= ptr;
 		}
-		return ptr;
+		return len;
 	}
 }
 
@@ -789,7 +805,8 @@ DWORD WINAPI kvm_mainloopinput_ex(LPVOID Param)
 	int ptr = 0;
 	int ptr2 = 0;
 	int len = 0;
-	char pchRequest2[30000];
+	// The size field of a command is 16 bit, so this holds any command. With 30000 bytes a larger one never completed and the KVM shut down.
+	static char pchRequest2[65536];
 	BOOL fSuccess = FALSE;
 	DWORD cbBytesRead = 0;
 	ILibKVM_WriteHandler writeHandler = (ILibKVM_WriteHandler)((void **)Param)[0];
@@ -801,7 +818,7 @@ DWORD WINAPI kvm_mainloopinput_ex(LPVOID Param)
 
 	while (!g_shutdown)
 	{
-		fSuccess = ReadFile(hStdIn, pchRequest2 + len, 30000 - len, &cbBytesRead, NULL);
+		fSuccess = ReadFile(hStdIn, pchRequest2 + len, (DWORD)(sizeof(pchRequest2) - len), &cbBytesRead, NULL);
 		if (!fSuccess || cbBytesRead == 0 || g_shutdown)
 		{
 			ILibRemoteLogging_printf(gKVMRemoteLogging, ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "KVM [SLAVE]: fSuccess/%d  cbBytesRead/%d  g_shutdown/%d", fSuccess, cbBytesRead, g_shutdown);
@@ -810,17 +827,14 @@ DWORD WINAPI kvm_mainloopinput_ex(LPVOID Param)
 			break;
 		}
 		len += cbBytesRead;
-		ptr2 = 0;
-		while ((ptr2 = kvm_server_inputdata((char *)pchRequest2 + ptr, len - ptr, writeHandler, reserved)) != 0)
+		ptr = 0;
+		while (ptr < len && (ptr2 = kvm_server_inputdata((char *)pchRequest2 + ptr, len - ptr, writeHandler, reserved)) != 0)
 		{
 			ptr += ptr2;
 		}
-		if (ptr == len)
-		{
-			len = 0;
-			ptr = 0;
-		}
-		// TODO: else move the reminder.
+		// A command split over two reads stays in the buffer, moved to its start. Left in place, each one made the buffer fuller until the KVM shut down.
+		if (ptr > 0 && ptr < len) { memmove(pchRequest2, pchRequest2 + ptr, (size_t)(len - ptr)); }
+		len -= ptr;
 	}
 	ILibRemoteLogging_printf(gKVMRemoteLogging, ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "KVM [SLAVE]: (mainloopinput) Exiting...");
 	ILibRemoteLogging_Destroy(gKVMRemoteLogging);
@@ -1357,6 +1371,8 @@ int kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler wr
 			free(parms);
 			return 0;
 		}
+		// A new session does not continue a command the last one left unfinished
+		kvmConsoleInputLen = 0;
 		kvmthread = CreateThread(NULL, 0, kvm_server_mainloop, (void *)parms, 0, 0);
 		if (kvmthread != 0)
 		{
