@@ -60,6 +60,14 @@ typedef struct dxgi_out
 	int full;						// The whole output is copied in this frame
 	int first;						// Start and end of this output's part of changed[]
 	int end;
+	int gdi;						// Captured with BitBlt, because it cannot be duplicated or lies only partly in the rectangle
+	RECT desk;						// Its part of the rectangle on the desktop, for BitBlt
+	IDXGIOutput1 *output1;			// Kept so a whole output on BitBlt can try the duplication again
+	DWORD retryAt;
+	HDC memDC;
+	HBITMAP dib;
+	HGDIOBJ oldBitmap;
+	unsigned char *bits;			// Top-down 32 bpp, w * 4 bytes per row
 } dxgi_out;
 
 static HMODULE dxgiLib = NULL;
@@ -110,7 +118,7 @@ static int changedCapacity = 0;
 #define DXGI_RETRY_MS 2000
 // The longest wait for the first frame of an output in a scaled session, which starts with DXGI
 #define DXGI_FIRST_FRAME_MS 200
-// An output in the captured rectangle is only partly inside it, in a mode that cannot be duplicated or has frames of an unexpected size.
+// More outputs in the captured rectangle than DXGI_MAX_OUTPUTS, none that can be duplicated, or frames of an unexpected size.
 // A display change ends the wait through dxgi_capture_release(), and the retry finds a change of colour depth alone.
 #define DXGI_RETRY_NO_OUTPUT_MS 30000
 #define DXGI_SAFE_RELEASE(p) do { if ((p) != NULL) { (p)->Release(); (p) = NULL; } } while (0)
@@ -123,10 +131,25 @@ static void dxgi_taps_free(dxgi_taps *t)
 	memset(t, 0, sizeof(*t));
 }
 
+static void dxgi_gdi_free(dxgi_out *o)
+{
+	if (o->memDC != NULL)
+	{
+		if (o->dib != NULL) { SelectObject(o->memDC, o->oldBitmap); }
+		DeleteDC(o->memDC);
+		o->memDC = NULL;
+	}
+	if (o->dib != NULL) { DeleteObject(o->dib); o->dib = NULL; }
+	o->bits = NULL;
+	o->gdi = 0;
+}
+
 static void dxgi_release_objects(void)
 {
 	for (int i = 0; i < outCount; i++)
 	{
+		dxgi_gdi_free(&outs[i]);
+		DXGI_SAFE_RELEASE(outs[i].output1);
 		DXGI_SAFE_RELEASE(outs[i].staging);
 		DXGI_SAFE_RELEASE(outs[i].dup);
 		DXGI_SAFE_RELEASE(outs[i].ctx);
@@ -166,41 +189,11 @@ static void dxgi_capture_failed(DWORD wait)
 	failedWait = wait;
 }
 
-// Starts the duplication of one output, dc is its place on the desktop.
-// Returns 0 when it runs, 2 when the output's desktop mode cannot be duplicated and 1 on every other failure.
-// DuplicateOutput() needs a device on the adapter that drives the output, so adev and actx are the caller's device for this adapter.
-static int dxgi_output_start(IDXGIAdapter1 *adapter, IDXGIOutput *output, ID3D11Device **adev, ID3D11DeviceContext **actx, const RECT *dc)
+// Sets up a duplicated output at dc, its place on the desktop. Returns 1 when its textures or the upright copy could not be made.
+static int dxgi_output_setup(dxgi_out *o, const RECT *dc)
 {
-	dxgi_out *o = &outs[outCount];
-	IDXGIOutput1 *output1 = NULL;
 	DXGI_OUTDUPL_DESC dd;
 	D3D11_TEXTURE2D_DESC td;
-	HRESULT hr;
-
-	// No IDXGIOutput1 means Windows 7 without the Platform Update, which never gets it, so stop trying
-	if (FAILED(output->QueryInterface(__uuidof(IDXGIOutput1), (void **)&output1))) { unsupported = 1; return 1; }
-	if (*adev == NULL && FAILED(createDevice(adapter, D3D_DRIVER_TYPE_UNKNOWN, NULL, 0, NULL, 0, D3D11_SDK_VERSION, adev, NULL, actx)))
-	{
-		output1->Release();
-		return 1;
-	}
-
-	memset(o, 0, sizeof(*o));
-	o->dev = *adev;
-	o->dev->AddRef();
-	o->ctx = *actx;
-	o->ctx->AddRef();
-	outCount++; // Counted from here on, so dxgi_release_objects() also frees an output that failed halfway
-	hr = output1->DuplicateOutput(o->dev, &o->dup);
-	output1->Release();
-	if (FAILED(hr))
-	{
-		// Windows 7 with the Platform Update has IDXGIOutput1 but answers E_NOTIMPL, which never changes
-		if (hr == E_NOTIMPL) { unsupported = 1; }
-		// DXGI_ERROR_UNSUPPORTED is about the desktop mode, like 8 bit colour, so it gets the long wait and DXGI stays on.
-		// E_ACCESSDENIED on the secure desktop and DXGI_ERROR_SESSION_DISCONNECTED are temporary.
-		return hr == DXGI_ERROR_UNSUPPORTED ? 2 : 1;
-	}
 
 	o->ox = dc->left - dupX;
 	o->oy = dc->top - dupY;
@@ -224,8 +217,96 @@ static int dxgi_output_start(IDXGIAdapter1 *adapter, IDXGIOutput *output, ID3D11
 	return FAILED(o->dev->CreateTexture2D(&td, NULL, &o->staging)) ? 1 : 0;
 }
 
-// Starts a duplication for every output in the rectangle. An output that is only partly inside it leaves the whole rectangle on BitBlt.
-// Returns 0 when all of them run, 2 for such an output, for a mode that cannot be duplicated or when there is none, and 1 for every other failure.
+// Starts the duplication of one output, dc is its place on the desktop.
+// Returns 0 when it runs, 2 when the output's desktop mode cannot be duplicated and 1 on every other failure.
+// DuplicateOutput() needs a device on the adapter that drives the output, so adev and actx are the caller's device for this adapter.
+static int dxgi_output_start(IDXGIAdapter1 *adapter, IDXGIOutput *output, ID3D11Device **adev, ID3D11DeviceContext **actx, const RECT *dc)
+{
+	dxgi_out *o = &outs[outCount];
+	IDXGIOutput1 *output1 = NULL;
+	HRESULT hr;
+
+	// No IDXGIOutput1 means Windows 7 without the Platform Update, which never gets it, so stop trying
+	if (FAILED(output->QueryInterface(__uuidof(IDXGIOutput1), (void **)&output1))) { unsupported = 1; return 1; }
+	if (*adev == NULL && FAILED(createDevice(adapter, D3D_DRIVER_TYPE_UNKNOWN, NULL, 0, NULL, 0, D3D11_SDK_VERSION, adev, NULL, actx)))
+	{
+		output1->Release();
+		return 1;
+	}
+
+	memset(o, 0, sizeof(*o));
+	o->dev = *adev;
+	o->dev->AddRef();
+	o->ctx = *actx;
+	o->ctx->AddRef();
+	outCount++; // Counted from here on, so dxgi_release_objects() also frees an output that failed halfway
+	hr = output1->DuplicateOutput(o->dev, &o->dup);
+	if (FAILED(hr))
+	{
+		// Windows 7 with the Platform Update has IDXGIOutput1 but answers E_NOTIMPL, which never changes
+		if (hr == E_NOTIMPL) { unsupported = 1; }
+		// DXGI_ERROR_UNSUPPORTED is about the desktop mode, like 8 bit colour. The output keeps IDXGIOutput1 for a later try.
+		// E_ACCESSDENIED on the secure desktop and DXGI_ERROR_SESSION_DISCONNECTED are temporary.
+		if (hr == DXGI_ERROR_UNSUPPORTED) { o->output1 = output1; return 2; }
+		output1->Release();
+		return 1;
+	}
+	output1->Release();
+	return dxgi_output_setup(o, dc);
+}
+
+// Captures the part p of the desktop for slot o with BitBlt, for an output that cannot be duplicated or lies only partly in the rectangle.
+// The slot keeps the device and IDXGIOutput1 of an output that could not be duplicated, so it can try again.
+static int dxgi_output_gdi(dxgi_out *o, const RECT *p)
+{
+	BITMAPINFO bi;
+
+	o->gdi = 1;
+	o->desk = *p;
+	o->ox = p->left - dupX;
+	o->oy = p->top - dupY;
+	o->w = o->tw = p->right - p->left;
+	o->h = o->th = p->bottom - p->top;
+	o->rot = DXGI_MODE_ROTATION_IDENTITY;
+	o->retryAt = GetTickCount() + DXGI_RETRY_NO_OUTPUT_MS;
+	ZeroMemory(&bi, sizeof(bi));
+	bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	bi.bmiHeader.biWidth = o->w;
+	bi.bmiHeader.biHeight = -o->h;
+	bi.bmiHeader.biPlanes = 1;
+	bi.bmiHeader.biBitCount = 32;
+	bi.bmiHeader.biCompression = BI_RGB;
+	if ((o->memDC = CreateCompatibleDC(NULL)) == NULL) { return 1; }
+	if ((o->dib = CreateDIBSection(o->memDC, &bi, DIB_RGB_COLORS, (void **)&o->bits, NULL, 0)) == NULL) { return 1; }
+	o->oldBitmap = SelectObject(o->memDC, o->dib);
+	return 0;
+}
+
+// Tries the duplication of a BitBlt output again. Returns 0 when it runs, and its first frame is then copied in full.
+static int dxgi_output_regain(dxgi_out *o)
+{
+	RECT dc = o->desk;
+
+	if (o->output1 == NULL || o->dev == NULL || FAILED(o->output1->DuplicateOutput(o->dev, &o->dup))) { return 1; }
+	if (dxgi_output_setup(o, &dc) != 0)
+	{
+		DXGI_SAFE_RELEASE(o->staging);
+		DXGI_SAFE_RELEASE(o->dup);
+		free(o->upright);
+		o->upright = NULL;
+		o->tw = o->w;
+		o->th = o->h;
+		o->rot = DXGI_MODE_ROTATION_IDENTITY;
+		return 1;
+	}
+	dxgi_gdi_free(o);
+	DXGI_SAFE_RELEASE(o->output1);
+	o->hasFrame = 0;
+	return 0;
+}
+
+// Starts a duplication for every output in the rectangle. One that lies only partly inside it or cannot be duplicated is captured with BitBlt.
+// Returns 0 when they run, 2 for more outputs than DXGI_MAX_OUTPUTS or none that can be duplicated, and 1 for every other failure.
 static int dxgi_capture_init(int x, int y, int w, int h)
 {
 	CreateDXGIFactory1_t createFactory;
@@ -234,6 +315,7 @@ static int dxgi_capture_init(int x, int y, int w, int h)
 	IDXGIOutput *output = NULL;
 	UINT a, n;
 	int result = 0;
+	int i, gdiCount = 0;
 
 	dxgi_release_objects();
 	if (unsupported) { return 1; }
@@ -261,8 +343,20 @@ static int dxgi_capture_init(int x, int y, int w, int h)
 			output->GetDesc(&d);
 			if (d.AttachedToDesktop && dc->right > x && dc->left < x + w && dc->bottom > y && dc->top < y + h)
 			{
-				if (dc->left < x || dc->top < y || dc->right > x + w || dc->bottom > y + h || outCount == DXGI_MAX_OUTPUTS) { result = 2; }
-				else { result = dxgi_output_start(adapter, output, &adev, &actx, dc); }
+				if (outCount == DXGI_MAX_OUTPUTS) { result = 2; }
+				else if (dc->left < x || dc->top < y || dc->right > x + w || dc->bottom > y + h)
+				{
+					// The copy out of a texture has no offset, so BitBlt takes the part inside
+					RECT part = { dc->left < x ? x : dc->left, dc->top < y ? y : dc->top, dc->right > x + w ? x + w : dc->right, dc->bottom > y + h ? y + h : dc->bottom };
+					memset(&outs[outCount], 0, sizeof(dxgi_out));
+					result = dxgi_output_gdi(&outs[outCount++], &part);
+				}
+				else
+				{
+					result = dxgi_output_start(adapter, output, &adev, &actx, dc);
+					// The other outputs can still be duplicated, so only this one goes to BitBlt
+					if (result == 2) { result = dxgi_output_gdi(&outs[outCount - 1], dc); }
+				}
 			}
 			output->Release();
 		}
@@ -271,7 +365,9 @@ static int dxgi_capture_init(int x, int y, int w, int h)
 		adapter->Release();
 	}
 	factory->Release();
-	if (result == 0 && outCount == 0) { result = 2; }
+	// With no output on DXGI, one BitBlt of the whole rectangle is cheaper
+	for (i = 0; i < outCount; i++) { gdiCount += outs[i].gdi; }
+	if (result == 0 && gdiCount == outCount) { result = 2; }
 	if (result != 0) { dxgi_release_objects(); }
 	return result;
 }
@@ -541,6 +637,24 @@ static void dxgi_scale_rect(const dxgi_out *o, unsigned char *dest, int destWidt
 	}
 }
 
+// A BitBlt output: all of its part is captured and listed as changed, because GDI tells nothing about changes
+static int dxgi_output_gdi_frame(dxgi_out *o)
+{
+	RECT all = { 0, 0, o->w, o->h };
+	HDC screen = GetDC(NULL);
+	BOOL ok = (screen != NULL) && BitBlt(o->memDC, 0, 0, o->w, o->h, screen, o->desk.left, o->desk.top, SRCCOPY);
+
+	if (screen != NULL) { ReleaseDC(NULL, screen); }
+	if (!ok) { return -1; }
+	GdiFlush();
+	o->first = changedCount;
+	o->full = 1;
+	o->hasFrame = 1;
+	if (dxgi_changed_add(o, &all)) { return -1; }
+	o->end = changedCount;
+	return 0;
+}
+
 // Acquires the output's next frame and copies what changed into its staging texture, or all of it when dest does not hold the last frame.
 // Returns 0 when the staging texture holds the output's current picture, 1 when the output has no frame yet, -1 on failure
 // and -2 when the frame has a size that the output's rotation does not explain.
@@ -549,6 +663,7 @@ static int dxgi_output_acquire(dxgi_out *o, int destCurrent)
 	DXGI_OUTDUPL_FRAME_INFO fi;
 	ID3D11Texture2D *tex = NULL;
 	int i;
+	if (o->gdi) { return dxgi_output_gdi_frame(o); }
 	// A scaled session has no GDI frame before the first DXGI frame, so that one is waited for
 	HRESULT hr = o->dup->AcquireNextFrame((scaled && !o->hasFrame) ? DXGI_FIRST_FRAME_MS : 0, &fi, &o->res);
 
@@ -600,10 +715,18 @@ static int dxgi_output_map(dxgi_out *o)
 {
 	int i;
 
-	if (FAILED(o->ctx->Map(o->staging, 0, D3D11_MAP_READ, 0, &o->map))) { return -1; }
-	o->mapped = 1;
-	o->src = (o->upright != NULL) ? o->upright : (const unsigned char *)o->map.pData;
-	o->pitch = (o->upright != NULL) ? (size_t)o->w * 4 : (size_t)o->map.RowPitch;
+	if (o->gdi)
+	{
+		o->src = o->bits;
+		o->pitch = (size_t)o->w * 4;
+	}
+	else
+	{
+		if (FAILED(o->ctx->Map(o->staging, 0, D3D11_MAP_READ, 0, &o->map))) { return -1; }
+		o->mapped = 1;
+		o->src = (o->upright != NULL) ? o->upright : (const unsigned char *)o->map.pData;
+		o->pitch = (o->upright != NULL) ? (size_t)o->w * 4 : (size_t)o->map.RowPitch;
+	}
 	for (i = o->first; i < o->end; i++)
 	{
 		if (o->upright != NULL) { dxgi_turn_rect(o, &o->map, &changed[i]); }
@@ -663,8 +786,8 @@ extern "C" int dxgi_capture_frame(int x, int y, int w, int h, int spanW, int spa
 
 	*rects = NULL;
 	*rectCount = -1;
-	// A span smaller than dest would enlarge the picture, which stays on GDI
-	if (unsupported || destWidth > spanW || destHeight > spanH) { return 1; }
+	// A span smaller than dest enlarges the picture with the same weights: a scaled pixel then lies in one or two screen pixels
+	if (unsupported || spanW < 1 || spanH < 1) { return 1; }
 	mapSrcW = spanW;
 	mapSrcH = spanH;
 	mapDstW = destWidth;
@@ -687,6 +810,12 @@ extern "C" int dxgi_capture_frame(int x, int y, int w, int h, int spanW, int spa
 	}
 	// After the start, which releases the lists of an earlier scaling
 	if (scaled && (dxgi_taps_build(&tapsX, spanW, destWidth) != 0 || dxgi_taps_build(&tapsY, spanH, destHeight) != 0)) { return 1; }
+	// A mode change can make a BitBlt output duplicable again, so it tries every DXGI_RETRY_NO_OUTPUT_MS
+	for (i = 0; i < outCount; i++)
+	{
+		dxgi_out *o = &outs[i];
+		if (o->gdi && o->output1 != NULL && (int)(GetTickCount() - o->retryAt) >= 0 && dxgi_output_regain(o) != 0) { o->retryAt = GetTickCount() + DXGI_RETRY_NO_OUTPUT_MS; }
+	}
 
 	// Areas of the rectangle that no output covers are never written, so they keep the black they had
 	changedCount = 0;

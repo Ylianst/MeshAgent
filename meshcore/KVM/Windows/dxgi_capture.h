@@ -22,7 +22,7 @@ extern "C" {
 #endif
 
 // Captures the screen rectangle (x, y, w, h) bottom-up into dest, starting the duplication when needed.
-// spanW and spanH give the part of the screen, from (x, y), that fills the whole of dest. A span larger than dest scales the picture down.
+// spanW and spanH give the part of the screen, from (x, y), that fills the whole of dest. A span larger than dest scales the picture down, a smaller one enlarges it.
 // destCurrent says dest still holds the last frame this function wrote, so an unchanged screen needs no copy until the next release.
 // Returns 0 when dest holds the current screen, 1 when the caller has to capture this frame with GDI.
 // On 0, rects and rectCount give the areas of dest that changed since the last call, and a rectCount of -1 means all of it.
