@@ -1634,7 +1634,7 @@ void* kvm_server_mainloop_x11(void* parm)
 				ZPixmap, NULL, &shminfo, SCREEN_WIDTH, SCREEN_HEIGHT);
 			if (image != NULL)
 			{
-				shminfo.shmid = shmget(IPC_PRIVATE, image->bytes_per_line * image->height, IPC_CREAT | 0777);
+				shminfo.shmid = shmget(IPC_PRIVATE, (size_t)image->bytes_per_line * (size_t)image->height, IPC_CREAT | 0777);
 				shminfo.shmaddr = image->data = (shminfo.shmid < 0) ? (char*)-1 : (char*)shmat(shminfo.shmid, 0, 0);
 				shminfo.readOnly = False;
 				if (image->data == (char*)-1)
