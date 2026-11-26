@@ -138,6 +138,11 @@ typedef struct RemoteDesktop_Ptrs
 	void *kvmPipe;
 #ifdef __APPLE__
 	int kvmDomainSocket;
+	int reconnectTicks;
+	long long reconnectedAt;
+	// The viewer's last compression command, sent again to the agent that takes over the session
+	int compressionLen;
+	char compression[16];
 #endif
 #endif
 	ILibDuktape_DuplexStream *stream;
@@ -921,6 +926,17 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(char *
 	}
 	return ILibTransport_DoneState_ERROR;
 }
+#if defined(_LINKVM) && defined(__APPLE__)
+// The pause sink of the viewer's unpipe used the freed stdout pipe of an exited -kvm0 child and crashed the daemon with SIGSEGV.
+// Ending the stream closes the viewer's session, and the next connect starts a new child.
+void ILibDuktape_MeshAgent_RemoteDesktop_KVM_Exited(void *reserved)
+{
+	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)reserved;
+	if (!ILibMemory_CanaryOK(ptrs)) { return; }
+	ptrs->kvmPipe = NULL;
+	if (ptrs->ctx != NULL && ptrs->stream != NULL) { ILibDuktape_DuplexStream_WriteEnd(ptrs->stream); }
+}
+#endif
 ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_WriteSink(ILibDuktape_DuplexStream *stream, char *buffer, int bufferLen, void *user)
 {
 #ifdef _LINKVM
@@ -928,6 +944,20 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_WriteSink(ILibDuktap
 	kvm_relay_feeddata(buffer, bufferLen, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, user);
 #else
 #ifdef __APPLE__
+	{
+		// The viewer sends its compression settings once, so the last command is kept for an agent that takes over later
+		RemoteDesktop_Ptrs *rd = (RemoteDesktop_Ptrs*)user;
+		int i = 0, size;
+		while (i + 4 <= bufferLen && (size = (int)ntohs(ILibUnaligned_Read16(buffer + i + 2))) >= 4 && i + size <= bufferLen)
+		{
+			if (ntohs(ILibUnaligned_Read16(buffer + i)) == MNG_KVM_COMPRESSION && size <= (int)sizeof(rd->compression))
+			{
+				memcpy_s(rd->compression, sizeof(rd->compression), buffer + i, (size_t)size);
+				rd->compressionLen = size;
+			}
+			i += size;
+		}
+	}
 	if (((RemoteDesktop_Ptrs*)user)->kvmPipe == NULL)
 	{
 		// Write to AF_UNIX Domain Socket
@@ -1001,6 +1031,10 @@ void ILibDuktape_MeshAgent_RemoteDesktop_EndSink(ILibDuktape_DuplexStream *strea
 			ILibProcessPipe_Pipe_SetBrokenPipeHandler(ptrs->kvmPipe, NULL);
 			ILibProcessPipe_FreePipe(ptrs->kvmPipe);
 		}
+#endif
+#if defined(_LINKVM) && defined(__APPLE__)
+		// A wait for the next agent must not fire on the cleared session
+		ILibLifeTime_Remove(ILibGetBaseTimer(duk_ctx_chain(ptrs->ctx)), ptrs);
 #endif
 		memset(ptrs, 0, sizeof(RemoteDesktop_Ptrs));
 	}
@@ -1078,6 +1112,9 @@ duk_ret_t ILibDuktape_MeshAgent_RemoteDesktop_Finalizer(duk_context *ctx)
 			ILibProcessPipe_FreePipe(ptrs->kvmPipe);
 		}
 #endif
+#ifdef __APPLE__
+		ILibLifeTime_Remove(ILibGetBaseTimer(duk_ctx_chain(ptrs->ctx)), ptrs);
+#endif
 		kvm_cleanup();
 #endif
 	}
@@ -1105,6 +1142,66 @@ int ILibDuktape_MeshAgent_remoteDesktop_unshiftSink(ILibDuktape_DuplexStream *se
 }
 
 #ifdef __APPLE__
+#define KVM_RECONNECT_MS 500
+#define KVM_RECONNECT_TICKS 60
+#define KVM_RECONNECT_KICK_TICKS 10
+#define KVM_RECONNECT_STABLE_MS 5000
+
+// At a login macOS ends the login window agent, and the user's agent listened 8 s later on an M2 MacBook Air. One try of 4 s gave up before that and left the viewer on a dead session.
+// So the viewer's stream is kept and the agent that has the screen is tried every 500 ms, after a login, a logout or a user switch. After 30 s without one the stream ends.
+void ILibDuktape_MeshAgent_RemoteDesktop_Reconnect(void *obj)
+{
+	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)obj;
+	MeshAgentHostContainer *agent;
+	int uid = 0;
+
+	if (!ILibMemory_CanaryOK(ptrs) || ptrs->ctx == NULL || ptrs->stream == NULL || !duk_ctx_is_alive(ptrs->ctx)) { return; }
+
+	duk_push_heapptr(ptrs->ctx, ptrs->MeshAgentObject);			// [MeshAgent]
+	duk_get_prop_string(ptrs->ctx, -1, MESH_AGENT_PTR);			// [MeshAgent][ptr]
+	agent = (MeshAgentHostContainer*)duk_get_pointer(ptrs->ctx, -1);
+	duk_pop_2(ptrs->ctx);										// ...
+
+	ptrs->kvmPipe = kvm_relay_connect_console(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, &uid);
+	if (ptrs->kvmPipe != NULL)
+	{
+		ptrs->reconnectedAt = ILibGetUptime();
+		MeshAgent_sendConsoleText(ptrs->ctx, "KVM: connected to the agent of uid %d", uid);
+		// The new agent starts with its defaults and sends the screen size and a whole picture by itself
+		if (ptrs->compressionLen > 0) { kvm_relay_feeddata(ptrs->compression, ptrs->compressionLen); }
+	}
+	else if (++ptrs->reconnectTicks < KVM_RECONNECT_TICKS)
+	{
+		// After a normal login the user's agent comes by itself. Still without one after 5 s, launchd is asked once to start it, for a session where macOS holds it back
+		if (ptrs->reconnectTicks == KVM_RECONNECT_KICK_TICKS) { kvm_agent_kickstart(uid); }
+		ILibLifeTime_AddEx(ILibGetBaseTimer(duk_ctx_chain(ptrs->ctx)), ptrs, KVM_RECONNECT_MS, ILibDuktape_MeshAgent_RemoteDesktop_Reconnect, NULL);
+	}
+	else
+	{
+		MeshAgent_sendConsoleText(ptrs->ctx, "KVM: no agent to connect to after the last one ended");
+		ILibDuktape_DuplexStream_WriteEnd(ptrs->stream);
+	}
+}
+
+// The socket to the session's agent ended: its user logged out or left the screen, or the agent restarted. The pipe is freed after this call, so the first try comes from the timer.
+// An agent that accepts and closes at once would be tried forever, so only a connection that held 5 s gets the whole 30 s again, and a shorter one costs 5 s of it.
+void ILibDuktape_MeshAgent_RemoteDesktop_KVM_Lost(void *reserved)
+{
+	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)reserved;
+	if (!ILibMemory_CanaryOK(ptrs)) { return; }
+	ptrs->kvmPipe = NULL;
+	if (ptrs->ctx == NULL || ptrs->stream == NULL) { return; }
+	if (ILibGetUptime() - ptrs->reconnectedAt >= KVM_RECONNECT_STABLE_MS) { ptrs->reconnectTicks = 0; }
+	else if ((ptrs->reconnectTicks += KVM_RECONNECT_STABLE_MS / KVM_RECONNECT_MS) >= KVM_RECONNECT_TICKS)
+	{
+		MeshAgent_sendConsoleText(ptrs->ctx, "KVM: the agent keeps ending the connection");
+		ILibDuktape_DuplexStream_WriteEnd(ptrs->stream);
+		return;
+	}
+	ILibLifeTime_Remove(ILibGetBaseTimer(duk_ctx_chain(ptrs->ctx)), ptrs);
+	ILibLifeTime_AddEx(ILibGetBaseTimer(duk_ctx_chain(ptrs->ctx)), ptrs, KVM_RECONNECT_MS, ILibDuktape_MeshAgent_RemoteDesktop_Reconnect, NULL);
+}
+
 duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop_DomainIPC_EndSink(duk_context *ctx)
 {
 	MeshAgent_sendConsoleText(ctx, "IPC Connection Closed...");
@@ -1112,32 +1209,36 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop_DomainIPC_EndSink(duk_context *
 	duk_push_this(ctx);
 	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)Duktape_GetPointerProperty(ctx, -1, KVM_IPC_SOCKET);
 
-	// Check to see if there is a user logged in
-	if (duk_peval_string(ctx, "require('user-sessions').consoleUid()") == 0)
+	// When the viewer left first, its end sink already cleared the session
+	if (ptrs == NULL || ptrs->ctx == NULL || ptrs->stream == NULL) { return(0); }
+
+	// An install without the user LaunchAgent has no agent to wait for: its -kvm1 helper just ended, and its user gets a -kvm0 child at once, as before
+	if (!kvm_login_window_agent())
 	{
-		int console_uid = duk_get_int(ctx, -1);
-		char tmp[255];
-		sprintf_s(tmp, sizeof(tmp), "User id: %d has logged in", console_uid);
-		MeshAgent_sendConsoleText(ctx, tmp);
-
-		duk_push_heapptr(ctx, ptrs->MeshAgentObject);
-		duk_get_prop_string(ctx, -1, MESH_AGENT_PTR);
-		MeshAgentHostContainer *agent = (MeshAgentHostContainer*)duk_get_pointer(ctx, -1);
-
-		if (ptrs != NULL && ptrs->ctx != NULL && ptrs->stream != NULL)
+		if (duk_peval_string(ctx, "require('user-sessions').consoleUid()") == 0)
 		{
+			int console_uid = duk_get_int(ctx, -1);
+			MeshAgent_sendConsoleText(ctx, "User id: %d has logged in", console_uid);
+
+			duk_push_heapptr(ctx, ptrs->MeshAgentObject);
+			duk_get_prop_string(ctx, -1, MESH_AGENT_PTR);
+			MeshAgentHostContainer *agent = (MeshAgentHostContainer*)duk_get_pointer(ctx, -1);
 			ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
 		}
-	}
-	else
-	{
-		if (ptrs != NULL && ptrs->ctx != NULL && ptrs->stream != NULL)
+		else
 		{
 			ILibDuktape_DuplexStream_WriteEnd(ptrs->stream);
 		}
+		return(0);
 	}
 
+	// The ended socket is taken off the session, so the write sink drops the viewer's input until the user's agent is connected
+	duk_push_heapptr(ctx, ptrs->object);						// [IPC][rd]
+	duk_del_prop_string(ctx, -1, KVM_IPC_SOCKET);
+	duk_pop(ctx);												// [IPC]
 
+	ptrs->reconnectTicks = 0;
+	ILibDuktape_MeshAgent_RemoteDesktop_Reconnect(ptrs);
 	return(0);
 }
 duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop_DomainIPC_DataSink(duk_context *ctx)
@@ -1153,12 +1254,25 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop_DomainIPC_DataSink(duk_context 
 	// We need to properly frame the data before we propagate it up
 	if (bufferLen > 4)
 	{
-		size = ntohs(ILibUnaligned_Read16(buffer + 2));
-		if (size <= bufferLen)
+		if (ntohs(ILibUnaligned_Read16(buffer)) == MNG_JUMBO)
 		{
-			// We have all the data, to be able to frame it
-			consumed = size;
-			ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(buffer, (int)size, ptrs);
+			// A tile over 65500 bytes comes as an 8-byte jumbo header with the 32-bit length of the packet behind it, whose own size field is 0.
+			// Framed by the 16-bit size, the header went out alone and the next read of size 0 consumed nothing, so the stream stopped and the login screen stayed black.
+			if (bufferLen >= 8 && bufferLen >= 8 + (duk_size_t)ntohl(ILibUnaligned_Read32(buffer + 4)))
+			{
+				consumed = 8 + (duk_size_t)ntohl(ILibUnaligned_Read32(buffer + 4));
+				ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(buffer, (int)consumed, ptrs);
+			}
+		}
+		else
+		{
+			size = ntohs(ILibUnaligned_Read16(buffer + 2));
+			if (size <= bufferLen)
+			{
+				// We have all the data, to be able to frame it
+				consumed = size;
+				ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(buffer, (int)size, ptrs);
+			}
 		}
 	}
 
@@ -1389,10 +1503,23 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		}
 		else
 		{
-			ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
-			if (ptrs->kvmPipe == NULL)
+			// On an install with the LaunchAgent a user without a socket gets no -kvm0 child: started by the daemon it sent the screen size and no picture (macOS 11.7)
+			int hasLaunchAgent = kvm_login_window_agent();
+			if (!hasLaunchAgent || kvm_agent_socket(console_uid))
 			{
-				// Only report the failure here. kvm_relay_setup() returns NULL when /tmp/meshagent-kvm-<uid>.sock is still on disk but the user LaunchAgent is stopped, so nothing accepts on it.
+				ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+			}
+			if (ptrs->kvmPipe == NULL && hasLaunchAgent)
+			{
+				// The user's agent does not listen: macOS holds it back during a first-login setup, or it was stopped. launchd is asked to start it and the session waits for it
+				MeshAgent_sendConsoleText(ctx, "KVM: the agent of uid %d does not listen, asking launchd to start it", console_uid);
+				kvm_agent_kickstart(console_uid);
+				ptrs->reconnectTicks = KVM_RECONNECT_KICK_TICKS;
+				ILibLifeTime_AddEx(ILibGetBaseTimer(duk_ctx_chain(ctx)), ptrs, KVM_RECONNECT_MS, ILibDuktape_MeshAgent_RemoteDesktop_Reconnect, NULL);
+			}
+			else if (ptrs->kvmPipe == NULL)
+			{
+				// Only report the failure here. kvm_relay_setup() returns NULL when the KVM socket of the uid is still on disk but the user LaunchAgent is stopped, so nothing accepts on it.
 				// The session object stays cached on purpose. The end sink already deletes REMOTE_DESKTOP_STREAM when the tunnel closes, and deleting it here makes that same end sink read a property off undefined and kill the agent the same way.
 				MeshAgent_sendConsoleText(ctx, "KVM: no connection to the user agent for uid %d, is the user service running?", console_uid);
 			}
@@ -4751,13 +4878,6 @@ void agentDumpKeysSink(ILibSimpleDataStore sender, char* Key, int KeyLen, void *
 
 MeshAgentHostContainer* MeshAgent_Create(MeshCommand_AuthInfo_CapabilitiesMask capabilities)
 {
-
-#if defined(_LINKVM) && defined(__APPLE__)
-    //Before anything, check for permissions (macos requirement)
-    kvm_check_permission();
-#endif
-
-
 	MeshAgentHostContainer* retVal = (MeshAgentHostContainer*)ILibMemory_Allocate(sizeof(MeshAgentHostContainer), 0, NULL, NULL);
 #ifdef WIN32
 	SYSTEM_POWER_STATUS stats;

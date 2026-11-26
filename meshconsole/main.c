@@ -76,6 +76,7 @@ void BreakSink(int s)
 #endif
 
 #if defined(_LINKVM) && defined(__APPLE__)
+#include "meshcore/KVM/MacOS/mac_kvm.h"
 extern void* kvm_server_mainloop(void *parm);
 extern void senddebug(int val);
 ILibTransport_DoneState kvm_serviceWriteSink(char *buffer, int bufferLen, void *reserved)
@@ -280,6 +281,9 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		return(0);
 	}
 #if defined(_LINKVM) && defined(__APPLE__)
+	// The KVM modes return before the SIGPIPE handling further down, and a write after the daemon closed the socket killed the -kvmagent (launchd: "Broken pipe: 13").
+	// Ignored, the write fails with EPIPE, the read side sees the closed socket and the -kvmagent waits for the next session, while -kvm0 and -kvm1 end as before.
+	if (argc > 1 && (strcasecmp(argv[1], "-kvm0") == 0 || strcasecmp(argv[1], "-kvm1") == 0 || strcasecmp(argv[1], "-kvmagent") == 0)) { signal(SIGPIPE, SIG_IGN); }
 	if (argc > 1 && strcasecmp(argv[1], "-kvm0") == 0)
 	{
 		// Tahoe audit-session join: pre-exec in SpawnProcessEx4 (as
@@ -294,6 +298,8 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		// arbitrary asids on Tahoe).
 		extern int ILibProcessPipe_JoinUserAuditSession_OSX_PostExec(uid_t uid);
 		ILibProcessPipe_JoinUserAuditSession_OSX_PostExec(getuid());
+		// Without a LaunchAgent this child is the only process of the user that can ask
+		if (getuid() != 0) { kvm_permission_prompt_start(KVM_PROMPT_EXIT); }
 		kvm_server_mainloop(NULL);
 		return 0;
 	}
@@ -314,7 +320,6 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		// opens, instead of fork+exec'ing a -kvm0 helper.
 		// Optional argv[2] = socket path; defaults to a tmp-dir path
 		// keyed by uid so the agent can bind it as a non-root user.
-		extern void kvm_set_listener_path(const char *path);
 		char defaultPath[128];
 		if (argc > 2 && argv[2] != NULL && argv[2][0] != '\0')
 		{
@@ -322,12 +327,18 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		}
 		else
 		{
-			snprintf(defaultPath, sizeof(defaultPath),
-				"/tmp/meshagent-kvm-%u.sock", (unsigned)getuid());
+			kvm_socket_path(defaultPath, sizeof(defaultPath), (unsigned int)getuid(), 0);
 			kvm_set_listener_path(defaultPath);
 		}
+		// The login window instance runs as root and has nobody to ask
+		if (getuid() != 0) { kvm_permission_prompt_start(KVM_PROMPT_RESTART); }
 		kvm_server_mainloop((void*)(uint64_t)getpid());
-		return 0;
+		// The plist's KeepAlive SuccessfulExit = false restarts only a non-zero exit, and launchd removes the job before a bootout ends it, so uninstall is unaffected
+		return 3;
+	}
+	else if (argc > 1 && strcasecmp(argv[1], "-kvmpermcheck") == 0)
+	{
+		return(kvm_permissions());
 	}
 #endif
 
@@ -421,6 +432,9 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	wmain_free(argv);
 	_CrtDumpMemoryLeaks();
 #else
+#if defined(_LINKVM) && defined(__APPLE__)
+	kvm_flags_prepare();
+#endif
 	agentHost = MeshAgent_Create(capabilities);
 	agentHost->meshCoreCtx_embeddedScript = integratedJavaScript;
 	agentHost->meshCoreCtx_embeddedScriptLen = integratedJavaScriptLen;
