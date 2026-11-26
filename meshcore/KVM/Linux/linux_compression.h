@@ -19,7 +19,9 @@ limitations under the License.
 
 #include <stdio.h>
 #include <stdlib.h>
-#ifdef __APPLE__
+#include <stddef.h>
+// The makefile sets KVM_BUNDLED_JPEG_HEADERS on Linux when the bundled libjpeg-turbo archive is linked
+#if defined(__APPLE__) || defined(KVM_BUNDLED_JPEG_HEADERS)
 #include "lib-jpeg-turbo/includes/jpeglib.h"
 #include "lib-jpeg-turbo/includes/jerror.h"
 #else
@@ -33,11 +35,16 @@ limitations under the License.
 typedef void(*JPEG_error_handler)(char *msg);
 
 extern int write_JPEG_buffer (JSAMPLE * image_buffer, int image_width, int image_height, int quality);
-// Encodes a rectangle straight from the caller's pixels. stride is the byte distance between two rows, components the bytes per pixel.
-// Returns the JPEG and sets *length. The JPEG lies in the encoder's one output buffer and holds until the next call.
+// Encodes a rectangle straight from the caller's pixels. stride is the byte distance between two rows, negative for a bottom-up frame, components the bytes per pixel.
+// Returns the JPEG and sets *length, or NULL when libjpeg reported an error. The JPEG lies in the encoder's one output buffer and holds until the next call.
 // JPEG_HEADER_ROOM bytes in front of the JPEG are free for a packet header, so a packet needs no copy.
-extern unsigned char *write_JPEG_rect(const unsigned char *pixels, size_t stride, int image_width, int image_height, int components, J_COLOR_SPACE format, int quality, int *length);
+extern unsigned char *write_JPEG_rect(const unsigned char *pixels, ptrdiff_t stride, int image_width, int image_height, int components, J_COLOR_SPACE format, int quality, int *length);
 extern void jpeg_output_free(void);
+// Switch for optimized Huffman tables, fed by the frame loop: the frame's start, the time spent writing pictures, and its end with the frame period
+extern void jpeg_frame_begin(void);
+extern void jpeg_frame_write_begin(void);
+extern void jpeg_frame_write_end(void);
+extern void jpeg_frame_end(int periodMs);
 extern JPEG_error_handler default_JPEG_error_handler;
 
 #endif // LINUX_COMPRESSION_H_ 

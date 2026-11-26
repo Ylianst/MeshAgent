@@ -14,6 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+#include <setjmp.h>
+#include <stdint.h>
+#include <time.h>
 #include "linux_compression.h"
 #include "../../../microstack/ILibParsers.h"
 
@@ -30,13 +33,86 @@ static unsigned char *jpegOut = NULL;
 static size_t jpegOutSize = 0;
 static int jpegOutLength = 0;
 
+// Optimized tables cost encode time for fewer bytes. They are turned off while the CPU work fills more than half of the frame period,
+// and back on once it stays under a quarter. A frame that waits long on its writes is limited by the link, where fewer bytes help, so they stay on.
+static int jpegOptimizeTables = 1;
+static int jpegBusyFrames = 0;
+static int jpegIdleFrames = 0;
+static uint64_t jpegFrameStart = 0;
+static uint64_t jpegWriteStart = 0;
+static uint64_t jpegFrameBlocked = 0;
+
+static uint64_t jpeg_now_ms(void)
+{
+	struct timespec t;
+	if (clock_gettime(CLOCK_MONOTONIC, &t) != 0) { return 0; }
+	return (uint64_t)t.tv_sec * 1000u + (uint64_t)t.tv_nsec / 1000000u;
+}
+
+void jpeg_frame_begin(void)
+{
+	jpegFrameStart = jpeg_now_ms();
+	jpegFrameBlocked = 0;
+}
+
+void jpeg_frame_write_begin(void)
+{
+	jpegWriteStart = jpeg_now_ms();
+}
+
+void jpeg_frame_write_end(void)
+{
+	uint64_t now = jpeg_now_ms();
+	if (now >= jpegWriteStart) { jpegFrameBlocked += now - jpegWriteStart; }
+}
+
+void jpeg_frame_end(int periodMs)
+{
+	uint64_t now = jpeg_now_ms(), work, cpu;
+	if (jpegFrameStart == 0 || now < jpegFrameStart || periodMs <= 0) { return; }
+	work = now - jpegFrameStart;
+	cpu = (work > jpegFrameBlocked) ? work - jpegFrameBlocked : 0;
+
+	if (jpegFrameBlocked * 4 > (uint64_t)periodMs)
+	{
+		jpegOptimizeTables = 1;
+		jpegBusyFrames = 0;
+		jpegIdleFrames = 0;
+	}
+	else if (cpu * 2 > (uint64_t)periodMs)
+	{
+		jpegIdleFrames = 0;
+		if (++jpegBusyFrames >= 3) { jpegOptimizeTables = 0; }
+	}
+	else if (cpu * 4 < (uint64_t)periodMs)
+	{
+		jpegBusyFrames = 0;
+		if (++jpegIdleFrames >= 25) { jpegOptimizeTables = 1; }
+	}
+	else
+	{
+		jpegBusyFrames = 0;
+		jpegIdleFrames = 0;
+	}
+}
+
+struct jpeg_error_jmp
+{
+	struct jpeg_error_mgr pub;
+	jmp_buf jump;
+};
+static int jpegErrorReported = 0;
+
+// Returns to write_JPEG_rect(), which gives up on this rectangle. It ended the process with exit(1) before, and with it the KVM session.
 void jpeg_error_handler(j_common_ptr ptr)
 {
 	// Build the error string
 	(*(ptr->err->format_message)) (ptr, jpegLastError);
 
-	if (default_JPEG_error_handler != NULL) { default_JPEG_error_handler(jpegLastError); }
-	exit(1);
+	// A rectangle that fails is tried again with every frame, so only the first failure in a row is reported
+	if (default_JPEG_error_handler != NULL && jpegErrorReported == 0) { default_JPEG_error_handler(jpegLastError); }
+	jpegErrorReported = 1;
+	longjmp(((struct jpeg_error_jmp*)ptr->err)->jump, 1);
 }
 
 void init_destination(j_compress_ptr cinfo)
@@ -77,15 +153,23 @@ void jpeg_output_free(void)
 	jpegOutLength = 0;
 }
 
-unsigned char *write_JPEG_rect(const unsigned char *pixels, size_t stride, int image_width, int image_height, int components, J_COLOR_SPACE format, int quality, int *length)
+unsigned char *write_JPEG_rect(const unsigned char *pixels, ptrdiff_t stride, int image_width, int image_height, int components, J_COLOR_SPACE format, int quality, int *length)
 {
 	struct jpeg_compress_struct cinfo;
-	struct jpeg_error_mgr jerr;
+	struct jpeg_error_jmp jerr;
 	struct jpeg_destination_mgr dest;
 	JSAMPROW row_pointer[1];
 
-	cinfo.err = jpeg_std_error(&jerr);
-	if (default_JPEG_error_handler != NULL) { jerr.error_exit = jpeg_error_handler; }
+	// Zeroed first, because an error inside jpeg_create_compress() comes back here before libjpeg has cleared the structure
+	memset(&cinfo, 0, sizeof(cinfo));
+	cinfo.err = jpeg_std_error(&jerr.pub);
+	jerr.pub.error_exit = jpeg_error_handler;
+	if (setjmp(jerr.jump))
+	{
+		jpeg_destroy_compress(&cinfo);
+		*length = 0;
+		return NULL;
+	}
 
 	jpeg_create_compress(&cinfo);
 	dest.init_destination = &init_destination;
@@ -110,19 +194,20 @@ unsigned char *write_JPEG_rect(const unsigned char *pixels, size_t stride, int i
 
 	jpeg_set_quality(&cinfo, quality, TRUE);
 	// Huffman tables built for each rectangle up to 128x128, where the standard tables are a large share of a small JPEG. Larger rectangles gain less for the second pass over the data.
-	if ((long)image_width * image_height <= TILE_JPEG_OPTIMIZE_MAX_AREA) { cinfo.optimize_coding = TRUE; }
+	if (jpegOptimizeTables && (long)image_width * image_height <= TILE_JPEG_OPTIMIZE_MAX_AREA) { cinfo.optimize_coding = TRUE; }
 	jpeg_start_compress(&cinfo, TRUE);
 
 	// The rows are read where they lie in the caller's frame, so no copy of the rectangle is made
 	while (cinfo.next_scanline < cinfo.image_height)
 	{
-		row_pointer[0] = (JSAMPROW)(pixels + (size_t)cinfo.next_scanline * stride);
+		row_pointer[0] = (JSAMPROW)(pixels + (ptrdiff_t)cinfo.next_scanline * stride);
 		(void)jpeg_write_scanlines(&cinfo, row_pointer, 1);
 	}
 
 	jpeg_finish_compress(&cinfo);
 	jpeg_destroy_compress(&cinfo);
 
+	jpegErrorReported = 0;
 	*length = jpegOutLength;
 	return jpegOut + JPEG_HEADER_ROOM;
 }
@@ -130,9 +215,10 @@ unsigned char *write_JPEG_rect(const unsigned char *pixels, size_t stride, int i
 // The RGB24 entry point with the older contract, which macOS uses: the JPEG is a copy in jpeg_buffer that the caller frees
 int write_JPEG_buffer(JSAMPLE * image_buffer, int image_width, int image_height, int quality)
 {
-	unsigned char *jpeg = write_JPEG_rect(image_buffer, (size_t)image_width * 3, image_width, image_height, 3, JCS_RGB, quality, &jpeg_buffer_length);
+	unsigned char *jpeg = write_JPEG_rect(image_buffer, (ptrdiff_t)image_width * 3, image_width, image_height, 3, JCS_RGB, quality, &jpeg_buffer_length);
 
 	if (jpeg_buffer != NULL) { free(jpeg_buffer); jpeg_buffer = NULL; }
+	if (jpeg == NULL) { jpeg_buffer_length = 0; return 0; }
 	if ((jpeg_buffer = (unsigned char *)malloc(jpeg_buffer_length)) == NULL) { ILIBCRITICALEXIT(254); }
 	memcpy(jpeg_buffer, jpeg, jpeg_buffer_length);
 	return 0;
