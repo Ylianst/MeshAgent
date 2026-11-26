@@ -241,6 +241,10 @@ CFLAGS ?= -std=gnu99 -g -Wall -D_POSIX -D_FILE_OFFSET_BITS=64 -DMICROSTACK_PROXY
 LDFLAGS ?= -L. -lpthread -lutil -lm
 CEXTRA = -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -fstack-protector -fno-strict-aliasing
 LDEXTRA = 
+# Every function and data item gets its own section, so the linker can drop the ones nothing references
+CSECTIONS = -ffunction-sections -fdata-sections
+LDSECTIONS = -Wl,--gc-sections
+MACOSLDSECTIONS = -Wl,-dead_strip
 
 WatchDog = 120000
 KVMMaxTile = 0
@@ -605,6 +609,14 @@ $(info MeshAgent: system libjpeg is v$(JPEG_HDR_VERSION) (jpeg8); auto-selecting
             endif
         endif
     endif
+    # The default archive is used with the headers it was built from (lib-jpeg-turbo/includes), so the
+    # two always match. The system headers can be IJG 6b, which has no 4 byte pixel formats
+    # (JCS_EXTENSIONS), and the KVM then leaves out every path that needs them.
+    ifeq ($(JPEGVER),)
+        ifneq ($(NOTURBOJPEG),1)
+            CFLAGS += -DKVM_BUNDLED_JPEG_HEADERS
+        endif
+    endif
 endif
     ifneq ($(JPEGVER),)
         ifeq ($(LEGACY_LD),1)
@@ -855,12 +867,12 @@ pi:
 	strip meshagent_pi
 
 linux:
-	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" AID="$(ARCHID)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)" ADDITIONALFLAGS="-lrt -z noexecstack -z relro -z now $(DRMLIBS)" CFLAGS="-DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(LINUXSSL) $(LINUXFLAGS) $(LDFLAGS) $(LDEXTRA) -ldl"
+	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" AID="$(ARCHID)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)" ADDITIONALFLAGS="-lrt -z noexecstack -z relro -z now $(DRMLIBS)" CFLAGS="-DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) $(CFLAGS) $(CEXTRA) $(CSECTIONS)" LDFLAGS="$(LINUXSSL) $(LINUXFLAGS) $(LDFLAGS) $(LDEXTRA) -ldl $(LDSECTIONS)"
 	$(SYMBOLCP)
 	$(STRIP)
 
 macos:
-	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES)" CFLAGS="$(MACOSARCH) -std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACSSL) $(MACOSFLAGS) -L. -lpthread -ldl -lz -lutil -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreServices -framework CoreGraphics -framework CoreFoundation -framework Security -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"
+	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES)" CFLAGS="$(MACOSARCH) -std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA) $(CSECTIONS)" LDFLAGS="$(MACSSL) $(MACOSFLAGS) -L. -lpthread -ldl -lz -lutil -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreServices -framework CoreGraphics -framework CoreFoundation -framework Security -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA) $(MACOSLDSECTIONS)"
 	$(SYMBOLCP)
 	$(STRIP)
 

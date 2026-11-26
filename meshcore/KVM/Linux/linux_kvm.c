@@ -31,6 +31,7 @@ limitations under the License.
 
 #include <sys/ipc.h>
 #include <sys/shm.h>
+#include <poll.h>
 #include <X11/extensions/XShm.h>
 #include <X11/extensions/Xrandr.h>
 #include <X11/keysym.h>
@@ -107,7 +108,8 @@ typedef struct _XkbStateNotifyEvent
 	char 			req_minor;			/* Minor opcode of request */
 } XkbStateNotifyEvent;
 
-int curcursor = KVM_MouseCursor_HELP;
+int curcursor = KVM_MouseCursor_ARROW;
+static int sentCursor = -1;	// Last cursor type sent to the master, -1 so the next one always goes out
 int SLAVELOG = 0;
 
 int SCREEN_NUM = 0;
@@ -118,7 +120,6 @@ int TILE_WIDTH = 0;
 int TILE_HEIGHT = 0;
 int TILE_WIDTH_COUNT = 0;
 int TILE_HEIGHT_COUNT = 0;
-int COMPRESSION_RATIO = 0;
 int SCALING_FACTOR = 1024;		// Scaling factor, 1024 = 100%
 int SCALING_FACTOR_NEW = 1024;	// Desired scaling factor, 1024 = 100%
 int FRAME_RATE_TIMER = 0;
@@ -168,8 +169,8 @@ static void kvm_slave_send(const void *buffer, size_t len)
 }
 
 int remoteMouseX = 0, remoteMouseY = 0;
+static int remoteMouseInjected = 0;	// Set when this pass injected a mouse event, so the local-move check skips a pointer the X server may not have moved yet
 
-extern void* tilebuffer;
 extern char **environ;
 struct timespec inputtime;
 uint32_t inputcounter = 0;
@@ -196,6 +197,34 @@ typedef struct xfixes_struct
 	void*(*XFixesGetCursorImageAndName)(Display *d);
 }xfixes_struct;
 xfixes_struct *xfixes_exports = NULL;
+
+// XDamage, loaded like the other X libraries. Declared here, because Xdamage.h is not installed on every build host.
+typedef XID kvm_Damage;
+typedef struct
+{
+	int type;
+	unsigned long serial;
+	Bool send_event;
+	Display *display;
+	Drawable drawable;
+	kvm_Damage damage;
+	int level;
+	Bool more;
+	Time timestamp;
+	XRectangle area;
+	XRectangle geometry;
+} kvm_XDamageNotifyEvent;
+typedef struct xdamage_struct
+{
+	void *xdamage_lib;
+	Bool(*XDamageQueryExtension)(Display *d, int *event_base, int *error_base);
+	kvm_Damage(*XDamageCreate)(Display *d, Drawable drawable, int level);
+} xdamage_struct;
+xdamage_struct *xdamage_exports = NULL;
+#define KVM_XDAMAGE_REPORT_RAW_RECTANGLES 0
+#define KVM_XDAMAGE_NOTIFY 0
+// Damage can miss content, direct-rendered OpenGL for one, so every so many frames the whole screen is compared as before
+#define KVM_XDAMAGE_FULL_EVERY 10
 xkb_struct *xkb_exports = NULL;
 
 typedef struct xrandr_struct
@@ -323,25 +352,40 @@ void kvm_send_error(char *msg)
 	kvm_slave_send(buffer, msgLen + 4);
 }
 
-KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
+KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay, int animated)
 {
-	// Name was NULL, so as a last ditch effort, lets try to look at the XFixesCursorImage
+	// Identify the cursor from its image: the all-transparent check, the animated busy pointer, then the alpha CRC table
 	char *cursor_image = (char*)xfixes_exports->XFixesGetCursorImage(cursordisplay);
-	KVM_MouseCursors ret = KVM_MouseCursor_HELP;
+	KVM_MouseCursors ret = KVM_MouseCursor_ARROW;	// Standard arrow when the cursor is unknown
+	if (cursor_image == NULL) { return(ret); }	// XFixesGetCursorImage() returns NULL when the request fails, and every read below goes through it
 
 	unsigned short w = ((unsigned short*)(cursor_image + 4))[0];
 	unsigned short h = ((unsigned short*)(cursor_image + 6))[0];
-	char *pixels = cursor_image + (sizeof(void*) == 8 ? 24 : 16);
-	char alpha[65535];
+	unsigned char alpha[65535];
 	int i;
+
+	// GTK hides the pointer while typing with a nameless 1x1 cursor whose alpha is 0, so it goes out as NONE instead of a visible pointer
+	// Offset 24 (16 on 32-bit) is the pixels pointer of XFixesCursorImage, so this reads the real alpha where the CRC loop below still walks the struct tail
+	unsigned long *argb = ((unsigned long**)(cursor_image + (sizeof(void*) == 8 ? 24 : 16)))[0];
+	for (i = 0; i < (w*h) && (argb[i] >> 24) == 0; ++i);
+	if (i == (w*h)) { x11_exports->XFree(cursor_image); return(KVM_MouseCursor_NONE); }
+
+	if (animated)
+	{
+		// A hotspot in the top-left third is an arrow with a busy indicator, a central one is the watch.
+		// A third fits every theme measured: the arrows sit at 4,4 of 32 (Breeze), 3,1 of 24 (Adwaita) and 6,4 of 24 (DMZ), the watches at 16,15, 11,11 and 12,12.
+		unsigned short xhot = ((unsigned short*)(cursor_image + 8))[0];
+		unsigned short yhot = ((unsigned short*)(cursor_image + 10))[0];
+		x11_exports->XFree(cursor_image);
+		return((xhot < w / 3 && yhot < h / 3) ? KVM_MouseCursor_APPSTARTING : KVM_MouseCursor_WAIT);
+	}
 
 	if (((size_t)(w*h) <= sizeof(alpha)) && ((size_t)(w*h) > 6))
 	{
-		for (i = 0; i < (w*h); ++i)
-		{
-			alpha[i] = pixels[(sizeof(void*)==8?(3 + (i * 8)):(3 + (i * 4)))];
-		}
-		switch (crc32c(0, (unsigned char*)alpha+6, (uint32_t)((w*h)-6)))
+		// The alpha from the pixels pointer. The old walk read the struct tail as its first three pixels, and the table was computed
+		// over pixels 3 to w*h-4 of that walk, so the same window of real pixels is kept.
+		for (i = 0; i < (w*h); ++i) { alpha[i] = (unsigned char)(argb[i] >> 24); }
+		switch (crc32c(0, alpha + 3, (uint32_t)((w*h) - 6)))
 		{
 			case 2788757291:			// Ubuntu 20
 			case 1722092522:			// Ubuntu 9/10 (Top)
@@ -669,7 +713,6 @@ void kvm_set_x11_locations(char *libx11, char *libx11tst, char *libx11ext, char 
 int kvm_init(int displayNo)
 {
 	if (logFile) { fprintf(logFile, "kvm_init(%d) called\n", displayNo); fflush(logFile); }
-	int old_height_count = TILE_HEIGHT_COUNT;
 	int dummy1, dummy2, dummy3;
 
 	if (clock_gettime(CLOCK_MONOTONIC, &inputtime) != 0) { memset(&inputtime, 0, sizeof(inputtime)); }
@@ -742,6 +785,16 @@ int kvm_init(int displayNo)
 			((void**)xfixes_exports)[4] = (void*)dlsym(xfixes_exports->xfixes_lib, "XFixesGetCursorImageAndName");
 		}
 	}
+	if (xdamage_exports == NULL)
+	{
+		xdamage_exports = ILibMemory_SmartAllocate(sizeof(xdamage_struct));
+		xdamage_exports->xdamage_lib = dlopen("libXdamage.so.1", RTLD_NOW);
+		if (xdamage_exports->xdamage_lib)
+		{
+			xdamage_exports->XDamageQueryExtension = (Bool(*)(Display*, int*, int*))dlsym(xdamage_exports->xdamage_lib, "XDamageQueryExtension");
+			xdamage_exports->XDamageCreate = (kvm_Damage(*)(Display*, Drawable, int))dlsym(xdamage_exports->xdamage_lib, "XDamageCreate");
+		}
+	}
 	if (xkb_exports == NULL)
 	{
 		xkb_exports = ILibMemory_SmartAllocate(sizeof(xkb_struct));
@@ -804,7 +857,6 @@ int kvm_init(int displayNo)
 	// Some magic numbers.
 	TILE_WIDTH = 32;
 	TILE_HEIGHT = 32;
-	COMPRESSION_RATIO = 50;
 	FRAME_RATE_TIMER = 100;
 
 	TILE_HEIGHT_COUNT = SCREEN_HEIGHT / TILE_HEIGHT;
@@ -814,7 +866,7 @@ int kvm_init(int displayNo)
 
 	kvm_send_resolution();
 	kvm_send_display();
-	reset_tile_info(old_height_count);
+	tile_info_alloc();
 
 	if (xkb_exports != NULL)
 	{
@@ -844,7 +896,6 @@ void CheckDesktopSwitch(int checkres)
 	if (change_display)
 	{
 		if (logFile) { fprintf(logFile, "CheckDesktopSwitch: SCREEN_SEL_TARGET=%d CURRENT_DISPLAY_ID=%d\n", SCREEN_SEL_TARGET, CURRENT_DISPLAY_ID); fflush(logFile); }
-		int old_height_count = TILE_HEIGHT_COUNT;
 		change_display = 0;
 
 		if (g_monitor_count > 0)
@@ -887,7 +938,7 @@ void CheckDesktopSwitch(int checkres)
 		kvm_send_resolution();
 		kvm_send_display();
 		kvm_send_display_list(); // re-send list with updated current selection so the UI highlights the right icon
-		reset_tile_info(old_height_count);
+		tile_info_alloc();
 	}
 }
 
@@ -900,6 +951,9 @@ int kvm_server_inputdata(char* block, int blocklen)
 	if (blocklen < 4) return 0;
 	type = ntohs(ILibUnaligned_Read16(block));
 	size = ntohs(ILibUnaligned_Read16(block + 2));
+	// A command is at least its 4 byte header, so a smaller size can never be completed and the callers waited on it until their buffer was full.
+	// The stream cannot be read past such a header, so what is in the buffer is dropped and reading starts again with the next data.
+	if (size < 4) return blocklen;
 	if (size > blocklen) return 0;
 
 	switch (type)
@@ -936,6 +990,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 				if (g_enableEvents)
 				{
 					remoteMouseX = x, remoteMouseY = y;
+					remoteMouseInjected = 1;
 					MouseAction(x, y, (int)(unsigned char)(block[5]), w, eventdisplay);
 				}
 			}
@@ -946,27 +1001,15 @@ int kvm_server_inputdata(char* block, int blocklen)
 			if (size >= 10) { int fr = ((int)ntohs(ILibUnaligned_Read16(block + 8))); if (fr >= 20 && fr <= 5000) FRAME_RATE_TIMER = fr; }
 			if (size >= 8) { int ns = ((int)ntohs(ILibUnaligned_Read16(block + 6))); if (ns >= 64 && ns <= 4096) SCALING_FACTOR_NEW = ns; }
 			if (size >= 6) { set_tile_compression((int)block[4], (int)block[5]); }
-			COMPRESSION_RATIO = 100;
 			break;
 		}
 	case MNG_KVM_REFRESH: // Refresh
 		{
 			kvm_send_resolution();
+			sentCursor = -1;	// Sent on every viewer join, so the current cursor type goes out again on the next frame
 
-			int row, col;
 			if (size != 4) break;
-			if (g_tileInfo == NULL) {
-				if ((g_tileInfo = (struct tileInfo_t **) malloc(TILE_HEIGHT_COUNT * sizeof(struct tileInfo_t *))) == NULL) ILIBCRITICALEXIT(254);
-				for (row = 0; row < TILE_HEIGHT_COUNT; row++) {
-					if ((g_tileInfo[row] = (struct tileInfo_t *) malloc(TILE_WIDTH_COUNT * sizeof(struct tileInfo_t))) == NULL) ILIBCRITICALEXIT(254);
-				}
-			}
-			for (row = 0; row < TILE_HEIGHT_COUNT; row++) {
-				for (col = 0; col < TILE_WIDTH_COUNT; col++) {
-					g_tileInfo[row][col].crc = 0xFF;
-					g_tileInfo[row][col].flag = 0;
-				}
-			}
+			tile_request_refresh();
 			break;
 		}
 	case MNG_KVM_PAUSE: // Pause
@@ -1015,20 +1058,24 @@ int kvm_server_inputdata(char* block, int blocklen)
 int kvm_relay_feeddata(char* buf, int len)
 {
 	ssize_t written = 0;
+	int total = 0;
 	if (g_slavekvm <= 0 || master2slave[1] < 0) { return 0; }
 
-	// Write the reply to the pipe.
-	//fprintf(logFile, "Writing to slave in kvm_relay_feeddata\n");
-	written = write(
-		master2slave[1],			// handle to pipe
-		buf,			// buffer to write from
-		len);
-	fsync(master2slave[1]);
-	//fprintf(logFile, "Written %d bytes to slave in kvm_relay_feeddata\n", written);
-
-	if (written == -1) return 0;
-	if (len != (int)written) return written;
-	return len;
+	// The pipe blocks, so a write ends early only when a signal interrupts it, and the rest of the input was lost then.
+	// fsync() did nothing on a pipe and is gone.
+	while (len > 0)
+	{
+		written = write(master2slave[1], buf, (size_t)len);
+		if (written < 0)
+		{
+			if (errno == EINTR) { continue; }
+			return 0;
+		}
+		buf += written;
+		len -= (int)written;
+		total += (int)written;
+	}
+	return total;
 }
 
 // Set the KVM pause state
@@ -1166,11 +1213,16 @@ void bitblt(char *sourcebitmap, int source_width, int source_height, int sx, int
 	{
 		for (x = 0; x < rw; ++x)
 		{
-			if (((bitmapdata2**)srect)[y][x].a > 128)
+			// XFixes cursor pixels are premultiplied ARGB, so the cursor colour is added as is and the frame only fades by the remaining alpha.
+			// This used to write 255 minus the cursor colour, which drew a black I-beam as a white outline that vanished over a text area.
+			int a = ((bitmapdata2**)srect)[y][x].a;
+			if (a != 0)
 			{
-				((bitmapdata2**)drect)[y][x].r = (255 - ((bitmapdata2**)srect)[y][x].r);
-				((bitmapdata2**)drect)[y][x].g = (255 - ((bitmapdata2**)srect)[y][x].g);
-				((bitmapdata2**)drect)[y][x].b = (255 - ((bitmapdata2**)srect)[y][x].b);
+				bitmapdata2 *s = &((bitmapdata2**)srect)[y][x];
+				bitmapdata2 *d = &((bitmapdata2**)drect)[y][x];
+				d->r = (unsigned char)(s->r + (d->r * (255 - a)) / 255);
+				d->g = (unsigned char)(s->g + (d->g * (255 - a)) / 255);
+				d->b = (unsigned char)(s->b + (d->b * (255 - a)) / 255);
 			}
 		}
 	}
@@ -1184,21 +1236,86 @@ void kvm_server_sighandler(int signum, siginfo_t *info, void *context)
 	g_shutdown = 1;
 }
 
+static uint64_t kvm_relay_now_ms(void)
+{
+	struct timespec ts;
+	if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) { return 0; }
+	return (((uint64_t)ts.tv_sec) * 1000ULL) + (((uint64_t)ts.tv_nsec) / 1000000ULL);
+}
+
+// A write() to the pipe can take only a part of a large picture, or be interrupted, and the rest of the picture was lost then
+static int kvm_write_all(int fd, const char *buffer, size_t len)
+{
+	while (len > 0)
+	{
+		ssize_t n = write(fd, buffer, len);
+		if (n < 0)
+		{
+			if (g_shutdown) { return -1; }
+			if (errno == EINTR) { continue; }
+			if (errno == EAGAIN || errno == EWOULDBLOCK)
+			{
+				struct pollfd pfd;
+				pfd.fd = fd;
+				pfd.events = POLLOUT;
+				pfd.revents = 0;
+				poll(&pfd, 1, 1000);
+				continue;
+			}
+			return -1;
+		}
+		buffer += n;
+		len -= (size_t)n;
+	}
+	return 0;
+}
+
+// Marks the tiles a rectangle of the captured screen touches
+static void kvm_x11_mark_tiles(unsigned char *tiles, int x, int y, int w, int h)
+{
+	int c0, c1, r0, r1, r;
+	if (x < 0) { w += x; x = 0; }
+	if (y < 0) { h += y; y = 0; }
+	if (w <= 0 || h <= 0 || x >= SCREEN_WIDTH || y >= SCREEN_HEIGHT) { return; }
+	c0 = x / TILE_WIDTH; c1 = (x + w - 1) / TILE_WIDTH; r0 = y / TILE_HEIGHT; r1 = (y + h - 1) / TILE_HEIGHT;
+	if (c1 >= TILE_WIDTH_COUNT) { c1 = TILE_WIDTH_COUNT - 1; }
+	if (r1 >= TILE_HEIGHT_COUNT) { r1 = TILE_HEIGHT_COUNT - 1; }
+	for (r = r0; r <= r1; r++) { memset(tiles + (size_t)r * TILE_WIDTH_COUNT + c0, 1, (size_t)(c1 - c0 + 1)); }
+}
+
+// Detaches and frees the shared memory image of the capture
+static void kvm_x11_image_release(Display *display, XImage **image, XShmSegmentInfo *shminfo)
+{
+	if (*image == NULL) { return; }
+	x11ext_exports->XShmDetach(display, shminfo);
+	XDestroyImage(*image);
+	*image = NULL;
+	shmdt(shminfo->shmaddr);
+}
+
 void* kvm_server_mainloop_x11(void* parm)
 {
 	int sessionUid = (int)(intptr_t)parm;
-	int maxsleep;
+	uint64_t frameStartMs = 0;
 	Window rr, cr;
 	int rx, ry, wx, wy, rs;
 	unsigned int mr;
 	char *cimage;
 
-	int x, y, height, width, r, c;
+	int x, y, height, width;
 	int sentHideCursor = 0;
 	long long desktopsize = 0;
 	long long tilesize = 0;
 
 	void *desktop = NULL;
+	struct tileFrame_t frame;
+	// XDamage on the capture connection: the changed tiles of a frame, the pointer drawn into the last frame, and where the pointer was
+	kvm_Damage xdamage = 0;
+	int damageEventBase = 0, damageErrorBase = 0, framesSinceFull = 0;
+	unsigned char *damagedTiles = NULL;
+	size_t damagedTilesSize = 0;
+	int drawnX = 0, drawnY = 0, drawnW = 0, drawnH = 0, lastPointerX = -1, lastPointerY = -1, cursorChanged = 0;
+	int pointerWanted = 0;	// Whether the last captured frame was to have the pointer drawn into it
 	XImage *image = NULL;
 	eventdisplay = NULL;
 	Display *imagedisplay = NULL, *cursordisplay = NULL;
@@ -1272,33 +1389,86 @@ void* kvm_server_mainloop_x11(void* parm)
 	int ptr = 0;
 	int ptr2 = 0;
 	int len = 0;
-	char pchRequest2[30000];
+	// The size field of a command is 16 bit, so this holds any command. With 30000 bytes a larger one could never complete, the buffer filled up and the KVM shut down.
+	static char pchRequest2[65536];
 	ssize_t cbBytesRead = 0;
 
 	while (!g_shutdown) 
 	{
-		for (r = 0; r < TILE_HEIGHT_COUNT; r++) 
+		// FRAME_RATE_TIMER is the time from one frame start to the next, not a sleep after the work, so the work no longer adds to it.
+		// Input is handled while waiting, so it no longer waits for the next frame.
+		for (;;)
 		{
-			for (c = 0; c < TILE_WIDTH_COUNT; c++) 
+			uint64_t nowMs = kvm_relay_now_ms();
+			uint64_t waitMs = 0;
+			int selectResult;
+
+			if (nowMs == 0) { waitMs = (uint64_t)FRAME_RATE_TIMER; }
+			else if (frameStartMs != 0 && nowMs - frameStartMs < (uint64_t)FRAME_RATE_TIMER) { waitMs = (uint64_t)FRAME_RATE_TIMER - (nowMs - frameStartMs); }
+
+			FD_ZERO(&readset);
+			FD_ZERO(&errorset);
+			FD_ZERO(&writeset);
+			tv.tv_sec = (time_t)(waitMs / 1000);
+			tv.tv_usec = (suseconds_t)((waitMs % 1000) * 1000);
+			FD_SET(master2slave[0], &readset);
+			selectResult = select(FD_SETSIZE, &readset, &writeset, &errorset, &tv);
+			if (selectResult < 0 && errno == EINTR && !g_shutdown) { continue; }
+			if (selectResult <= 0 || !FD_ISSET(master2slave[0], &readset)) { break; }
+
+			cbBytesRead = read(master2slave[0], pchRequest2 + len, sizeof(pchRequest2) - len);
+			if (cbBytesRead == -1 || cbBytesRead == 0 || g_shutdown)
 			{
-				g_tileInfo[r][c].flag = TILE_TODO;
-#ifdef KVM_ALL_TILES
-				g_tileInfo[r][c].crc = 0xFF;
-#endif
+				g_shutdown = 1;
+				break;
 			}
+			len += cbBytesRead;
+			// Every complete command in the buffer is handled, and the start of an incomplete one moves to the front for the next read.
+			// The length passed was that of the last read, so a command split over two reads was never completed and input stopped.
+			ptr = 0;
+			while (ptr < len && (ptr2 = kvm_server_inputdata((char*)pchRequest2 + ptr, len - ptr)) != 0) { ptr += ptr2; }
+			if (ptr > 0 && ptr < len) { memmove(pchRequest2, pchRequest2 + ptr, (size_t)(len - ptr)); }
+			len -= ptr;
+			ptr = 0;
+
+			// A frame that is already due reads input once, as before, so a busy input pipe cannot hold it back
+			if (waitMs == 0) { break; }
 		}
+		if (g_shutdown) { break; }
+		frameStartMs = kvm_relay_now_ms();
+		jpeg_frame_begin();
 		//fprintf(logFile, "Before CheckDesktopSwitch.\n"); fflush(logFile);
 		CheckDesktopSwitch(1);
 		//fprintf(logFile, "After CheckDesktopSwitch.\n"); fflush(logFile);
 
-		imagedisplay = x11_exports->XOpenDisplay(CURRENT_XDISPLAY);
+		// The capture connection is kept between frames, where a new one was opened for every frame.
+		// DisplayWidth() and DisplayHeight() give the size at connect time, so the root window is asked, and after a resize the connection is opened again.
+		if (imagedisplay != NULL)
+		{
+			XWindowAttributes rootAttr;
+			if (x11_exports->XGetWindowAttributes(imagedisplay, RootWindowOfScreen(ScreenOfDisplay(imagedisplay, CURRENT_DISPLAY_ID)), &rootAttr) == 0 ||
+				rootAttr.width != DisplayWidth(imagedisplay, CURRENT_DISPLAY_ID) || rootAttr.height != DisplayHeight(imagedisplay, CURRENT_DISPLAY_ID))
+			{
+				kvm_x11_image_release(imagedisplay, &image, &shminfo);
+				x11_exports->XCloseDisplay(imagedisplay);
+				imagedisplay = NULL;
+				xdamage = 0;
+			}
+		}
+		if (imagedisplay == NULL) { imagedisplay = x11_exports->XOpenDisplay(CURRENT_XDISPLAY); }
 		if (imagedisplay == NULL) { g_shutdown = 1; break; }
+		if (xdamage == 0 && xdamage_exports->XDamageQueryExtension != NULL && xdamage_exports->XDamageCreate != NULL &&
+			xdamage_exports->XDamageQueryExtension(imagedisplay, &damageEventBase, &damageErrorBase))
+		{
+			// Damage events arrive on this connection, so the next frame starts with a whole compare
+			xdamage = xdamage_exports->XDamageCreate(imagedisplay, RootWindowOfScreen(ScreenOfDisplay(imagedisplay, CURRENT_DISPLAY_ID)), KVM_XDAMAGE_REPORT_RAW_RECTANGLES);
+			framesSinceFull = KVM_XDAMAGE_FULL_EVERY;
+		}
 
 		if (DisplayWidth(imagedisplay, CURRENT_DISPLAY_ID) != VSCREEN_WIDTH ||
 			DisplayHeight(imagedisplay, CURRENT_DISPLAY_ID) != VSCREEN_HEIGHT ||
 			DefaultDepth(eventdisplay, CURRENT_DISPLAY_ID) != SCREEN_DEPTH)
 		{
-			int old = TILE_HEIGHT_COUNT;
 			VSCREEN_WIDTH  = DisplayWidth(imagedisplay, CURRENT_DISPLAY_ID);
 			VSCREEN_HEIGHT = DisplayHeight(imagedisplay, CURRENT_DISPLAY_ID);
 			SCREEN_DEPTH   = DefaultDepth(imagedisplay, CURRENT_DISPLAY_ID);
@@ -1314,33 +1484,10 @@ void* kvm_server_mainloop_x11(void* parm)
 
 			kvm_send_resolution();
 			kvm_send_display_list();
-			reset_tile_info(old);
+			tile_info_alloc();
 		}
 
-
-		FD_ZERO(&readset);
-		FD_ZERO(&errorset);
-		FD_ZERO(&writeset);
-		tv.tv_sec = 0;
-		tv.tv_usec = 0;
-		FD_SET(master2slave[0], &readset);
-		if (select(FD_SETSIZE, &readset, &writeset, &errorset, &tv) > 0 && FD_ISSET(master2slave[0], &readset))
-		{
-
-			//fprintf(logFile, "Reading from master in kvm_mainloopinput\n");
-			cbBytesRead = read(master2slave[0], pchRequest2 + len, 30000 - len);
-			//fprintf(logFile, "Read %d bytes from master in kvm_mainloopinput\n", cbBytesRead);
-			if (cbBytesRead == -1 || cbBytesRead == 0 || g_shutdown)
-			{
-				g_shutdown = 1;
-				break;
-			}
-			len += cbBytesRead;
-			ptr2 = 0;
-			while ((ptr2 = kvm_server_inputdata((char*)pchRequest2 + ptr, cbBytesRead - ptr)) != 0) { ptr += ptr2; }
-			if (ptr == len) { len = 0; ptr = 0; }
-		}
-
+		cursorChanged = 0;
 		if (cursordisplay == NULL)
 		{
 			if ((cursordisplay = x11_exports->XOpenDisplay(CURRENT_XDISPLAY)))
@@ -1350,9 +1497,9 @@ void* kvm_server_mainloop_x11(void* parm)
 				{
 					xfixes_exports->XFixesSelectCursorInput(cursordisplay, rootwin, 1); // Register for Cursor Change Notifications
 					x11_exports->XSync(cursordisplay, 0);								// Sync with XServer
-					cursor_descriptor = x11_exports->XConnectionNumber(cursordisplay);	// Get the FD to use in select
+					cursor_descriptor = x11_exports->XConnectionNumber(cursordisplay);	// Set only when XFixes answered, which enables the cursor event block below
 				}
-				curcursor = kvm_fetch_currentCursor(cursordisplay);						// Cursor Type
+				curcursor = kvm_fetch_currentCursor(cursordisplay, 0);					// Cursor Type
 
 				if (xkb_exports != NULL)
 				{
@@ -1366,72 +1513,85 @@ void* kvm_server_mainloop_x11(void* parm)
 		}
 		else if (cursor_descriptor > 0)
 		{
-			FD_ZERO(&readset);
-			FD_ZERO(&errorset);
-			FD_ZERO(&writeset);
-			tv.tv_sec = 0;
-			tv.tv_usec = 0;
-			FD_SET(cursor_descriptor, &readset);
-			if (select(FD_SETSIZE, &readset, &writeset, &errorset, &tv) > 0 && FD_ISSET(cursor_descriptor, &readset))
+			// Only the events queued now, so notifies that arrive while the lookup below runs wait for the next frame
+			int pending = x11_exports->XPending(cursordisplay);
+			XEvent cursorXE;
+			memset(&cursorXE, 0, sizeof(cursorXE));
+			int cursorNotified = 0;
+			int animFrames = 0;				// Nameless notifies with a new serial in this pass
+			unsigned long lastSerial = 0;
+			if (pending > 0)
 			{
 				// We have a waiting event
-				while (x11_exports->XPending(cursordisplay))
-				{					
+				while (pending-- > 0)
+				{
 					x11_exports->XNextEvent(cursordisplay, &XE);
 					if (XE.type == (event_base + 1))
 					{
-						char buffer[8];
+						cursorXE = XE; cursorNotified = 1; cursorChanged = 1;
+						// cursor_serial and cursor_name of XFixesCursorNotifyEvent, at 48 and 64 on 64-bit and 24 and 32 on 32-bit
+						unsigned long serial = ((unsigned long*)((char*)&XE + (sizeof(void*) == 8 ? 48 : 24)))[0];
+						unsigned long atom = ((unsigned long*)((char*)&XE + (sizeof(void*) == 8 ? 64 : 32)))[0];
+						if (atom == 0 && serial != lastSerial) { ++animFrames; lastSerial = serial; } else if (atom != 0) { animFrames = 0; }
+					}
+
+					// Looked up once, from the last notify, because every lookup is an X round trip and an animated cursor queues one notify per frame.
+					// One lookup per notify took 30 to 250 ms each on a Plasma X11 VM, so a screen pass grew to 3.3 s while a busy cursor animated.
+					if (pending == 0 && cursorNotified != 0)
+					{
 						char *name = NULL;
 
 						if (sizeof(void*) == 8)
 						{
 							// 64bit
-							if (((uint64_t*)((char*)&XE + 64))[0] != 0)
+							if (((uint64_t*)((char*)&cursorXE + 64))[0] != 0)
 							{
-								name = x11_exports->XGetAtomName(cursordisplay, ((Atom*)((char*)&XE + 64))[0]);
+								name = x11_exports->XGetAtomName(cursordisplay, ((Atom*)((char*)&cursorXE + 64))[0]);
 							}
 						}
 						else
 						{
 							// 32bit
-							if (((uint32_t*)((char*)&XE + 32))[0] != 0)
+							if (((uint32_t*)((char*)&cursorXE + 32))[0] != 0)
 							{
-								name = x11_exports->XGetAtomName(cursordisplay, ((Atom*)((char*)&XE + 32))[0]);
+								name = x11_exports->XGetAtomName(cursordisplay, ((Atom*)((char*)&cursorXE + 32))[0]);
 							}
 						}
 					
 						if (name != NULL)
 						{
+							if (strcmp(name, "blank") == 0) { curcursor = KVM_MouseCursor_NONE; }
 							if (strcmp(name, "bottom_left_corner") == 0 || strcmp(name, "sw-resize") == 0) { curcursor = KVM_MouseCursor_SIZENESW; }
 							if (strcmp(name, "bottom_right_corner") == 0 || strcmp(name, "se-resize") == 0) { curcursor = KVM_MouseCursor_SIZENWSE; }
 							if (strcmp(name, "bottom_side") == 0) { curcursor = KVM_MouseCursor_SIZENS; }
-							if (strcmp(name, "fleur") == 0) { curcursor = KVM_MouseCursor_SIZEALL; }
-							if (strcmp(name, "hand1") == 0 || strcmp(name, "pointer")==0) { curcursor = KVM_MouseCursor_HAND; }
+							if (strcmp(name, "col-resize") == 0 || strcmp(name, "ew-resize") == 0 || strcmp(name, "sb_h_double_arrow") == 0 || strcmp(name, "size_hor") == 0 || strcmp(name, "split_h") == 0 || strcmp(name, "h_double_arrow") == 0) { curcursor = KVM_MouseCursor_SIZEWE; }
+							if (strcmp(name, "crosshair") == 0 || strcmp(name, "cross") == 0 || strcmp(name, "tcross") == 0 || strcmp(name, "cell") == 0) { curcursor = KVM_MouseCursor_CROSS; }
+							if (strcmp(name, "fleur") == 0 || strcmp(name, "move") == 0 || strcmp(name, "all-scroll") == 0 || strcmp(name, "size_all") == 0) { curcursor = KVM_MouseCursor_SIZEALL; }
+							if (strcmp(name, "hand1") == 0 || strcmp(name, "pointer")==0 || strcmp(name, "pointing_hand") == 0 || strcmp(name, "hand") == 0) { curcursor = KVM_MouseCursor_HAND; }
 							if (strcmp(name, "hand2") == 0) { curcursor = KVM_MouseCursor_HAND; }
-							if (strcmp(name, "left_ptr") == 0) { curcursor = KVM_MouseCursor_ARROW; }
+							if (strcmp(name, "help") == 0 || strcmp(name, "question_arrow") == 0 || strcmp(name, "whats_this") == 0) { curcursor = KVM_MouseCursor_HELP; }
+							if (strcmp(name, "left_ptr") == 0 || strcmp(name, "default") == 0 || strcmp(name, "arrow") == 0 || strcmp(name, "context-menu") == 0 || strcmp(name, "top_left_arrow") == 0 || strcmp(name, "left_arrow") == 0) { curcursor = KVM_MouseCursor_ARROW; }
 							if (strcmp(name, "left_side") == 0 || strcmp(name, "w-resize") == 0 || strcmp(name, "e-resize") == 0) { curcursor = KVM_MouseCursor_SIZEWE; }
+							if (strcmp(name, "nesw-resize") == 0 || strcmp(name, "fd_double_arrow") == 0 || strcmp(name, "size_bdiag") == 0) { curcursor = KVM_MouseCursor_SIZENESW; }
+							if (strcmp(name, "no-drop") == 0 || strcmp(name, "dnd-none") == 0) { curcursor = KVM_MouseCursor_NO; }
+							if (strcmp(name, "not-allowed") == 0 || strcmp(name, "crossed_circle") == 0 || strcmp(name, "forbidden") == 0 || strcmp(name, "circle") == 0) { curcursor = KVM_MouseCursor_NOTALLOWED; }
+							if (strcmp(name, "nwse-resize") == 0 || strcmp(name, "bd_double_arrow") == 0 || strcmp(name, "size_fdiag") == 0) { curcursor = KVM_MouseCursor_SIZENWSE; }
+							if (strcmp(name, "progress") == 0 || strcmp(name, "left_ptr_watch") == 0 || strcmp(name, "half-busy") == 0) { curcursor = KVM_MouseCursor_APPSTARTING; }
 							if (strcmp(name, "right_side") == 0) { curcursor = KVM_MouseCursor_SIZEWE; }
+							if (strcmp(name, "row-resize") == 0 || strcmp(name, "ns-resize") == 0 || strcmp(name, "sb_v_double_arrow") == 0 || strcmp(name, "size_ver") == 0 || strcmp(name, "split_v") == 0 || strcmp(name, "v_double_arrow") == 0) { curcursor = KVM_MouseCursor_SIZENS; }
 							if (strcmp(name, "top_left_corner") == 0 || strcmp(name, "nw-resize") == 0) { curcursor = KVM_MouseCursor_SIZENWSE; }
 							if (strcmp(name, "top_right_corner") == 0 || strcmp(name, "ne-resize") == 0) { curcursor = KVM_MouseCursor_SIZENESW; }
 							if (strcmp(name, "top_side") == 0) { curcursor = KVM_MouseCursor_SIZENS; }
-							if (strcmp(name, "watch") == 0) { curcursor = KVM_MouseCursor_WAIT; }
+							if (strcmp(name, "watch") == 0 || strcmp(name, "wait") == 0) { curcursor = KVM_MouseCursor_WAIT; }
 							if (strcmp(name, "top_side") == 0 || strcmp(name, "n-resize") == 0 || strcmp(name, "s-resize") == 0) { curcursor = KVM_MouseCursor_SIZENS; }
-							if (strcmp(name, "xterm") == 0 || strcmp(name, "ibeam") == 0 || strcmp(name, "text") == 0) { curcursor = KVM_MouseCursor_IBEAM; }
+							if (strcmp(name, "xterm") == 0 || strcmp(name, "ibeam") == 0 || strcmp(name, "text") == 0 || strcmp(name, "vertical-text") == 0) { curcursor = KVM_MouseCursor_IBEAM; }
 							x11_exports->XFree(name);
 						}
 						else
 						{
-							// Name was NULL, so as a last ditch effort, lets try to look at the XFixesCursorImage
-							curcursor = kvm_fetch_currentCursor(cursordisplay);
-						}
-
-						if (sentHideCursor == 0)
-						{
-							((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
-							((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
-							buffer[4] = (char)curcursor;																// Cursor Type
-							written = write(slave2master[1], buffer, 5);
-							fsync(slave2master[1]);
+							// Animated cursors never carry a name: the server shows them frame by frame and libXcursor only named the container cursor.
+							// Three or more nameless frames in one pass means an animation, so this is the busy pointer and not an unknown image.
+							curcursor = kvm_fetch_currentCursor(cursordisplay, animFrames >= 3);
 						}
 					}
 					if (kbevent_base != 0 && XE.type == kbevent_base)
@@ -1450,30 +1610,103 @@ void* kvm_server_mainloop_x11(void* parm)
 					}
 				}
 			}
+
+			// Sent after the loop and only when the type changed, so a refresh resends the current cursor to a joining viewer
+			if (sentHideCursor == 0 && curcursor != sentCursor)
+			{
+				char buffer[8];
+				((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
+				((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
+				buffer[4] = (char)curcursor;																// Cursor Type
+				written = write(slave2master[1], buffer, 5);
+				sentCursor = curcursor;
+			}
 		}
 
-		image = x11ext_exports->XShmCreateImage(imagedisplay,
-			DefaultVisual(imagedisplay, SCREEN_NUM), // Use a correct visual. Omitted for brevity     
-			SCREEN_DEPTH,
-			ZPixmap, NULL, &shminfo, SCREEN_WIDTH, SCREEN_HEIGHT);
-		shminfo.shmid = shmget(IPC_PRIVATE,
-			image->bytes_per_line * image->height,
-			IPC_CREAT | 0777);
-		shminfo.shmaddr = image->data = shmat(shminfo.shmid, 0, 0);
-		shminfo.readOnly = False;
-		x11ext_exports->XShmAttach(imagedisplay, &shminfo);
-		
-		x11ext_exports->XShmGetImage(imagedisplay,
-			RootWindowOfScreen(ScreenOfDisplay(imagedisplay, CURRENT_DISPLAY_ID)),
-			image,
-			CAPTURE_X,
-			CAPTURE_Y,
-			AllPlanes);
+		// The shared memory image is kept too, and made again when the captured size or depth changes
+		if (image != NULL && (image->width != SCREEN_WIDTH || image->height != SCREEN_HEIGHT || image->depth != SCREEN_DEPTH))
+		{
+			kvm_x11_image_release(imagedisplay, &image, &shminfo);
+		}
+		if (image == NULL)
+		{
+			image = x11ext_exports->XShmCreateImage(imagedisplay,
+				DefaultVisual(imagedisplay, SCREEN_NUM), // Use a correct visual. Omitted for brevity     
+				SCREEN_DEPTH,
+				ZPixmap, NULL, &shminfo, SCREEN_WIDTH, SCREEN_HEIGHT);
+			if (image != NULL)
+			{
+				shminfo.shmid = shmget(IPC_PRIVATE, (size_t)image->bytes_per_line * (size_t)image->height, IPC_CREAT | 0777);
+				shminfo.shmaddr = image->data = (shminfo.shmid < 0) ? (char*)-1 : (char*)shmat(shminfo.shmid, 0, 0);
+				shminfo.readOnly = False;
+				if (image->data == (char*)-1)
+				{
+					if (shminfo.shmid >= 0) { shmctl(shminfo.shmid, IPC_RMID, 0); }
+					image->data = NULL;
+					XDestroyImage(image);
+					image = NULL;
+				}
+				else
+				{
+					// Marked for removal once the server has attached it, so the segment goes away with its last user, also when this process dies
+					x11ext_exports->XShmAttach(imagedisplay, &shminfo);
+					x11_exports->XSync(imagedisplay, 0);
+					shmctl(shminfo.shmid, IPC_RMID, 0);
+				}
+			}
+		}
 
-		//image = XGetImage(imagedisplay,
-		//		RootWindowOfScreen(DefaultScreenOfDisplay(imagedisplay))
-		//		, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, AllPlanes, ZPixmap);
+		// The tiles the X server reports as changed since the last frame. With nothing changed, nothing to send and the pointer still, the frame is skipped.
+		if (xdamage != 0 && image != NULL)
+		{
+			size_t tiles = (size_t)TILE_WIDTH_COUNT * (size_t)TILE_HEIGHT_COUNT;
+			int damaged = 0;
+			if (damagedTilesSize != tiles)
+			{
+				free(damagedTiles);
+				damagedTiles = (unsigned char *)malloc(tiles);
+				damagedTilesSize = (damagedTiles != NULL) ? tiles : 0;
+				framesSinceFull = KVM_XDAMAGE_FULL_EVERY;
+			}
+			if (damagedTiles != NULL) { memset(damagedTiles, 0, tiles); }
+			while (x11_exports->XPending(imagedisplay) > 0)
+			{
+				XEvent de;
+				x11_exports->XNextEvent(imagedisplay, &de);
+				if (de.type == damageEventBase + KVM_XDAMAGE_NOTIFY && damagedTiles != NULL)
+				{
+					XRectangle *a = &((kvm_XDamageNotifyEvent*)&de)->area;
+					kvm_x11_mark_tiles(damagedTiles, a->x - CAPTURE_X, a->y - CAPTURE_Y, a->width, a->height);
+					damaged = 1;
+				}
+			}
+			if (damagedTiles != NULL && drawnW > 0) { kvm_x11_mark_tiles(damagedTiles, drawnX, drawnY, drawnW, drawnH); }
+			// A pointer drawn into the last frame is in the reference already. While it stays where it is, with the same image and
+			// the same decision to draw it, the frame is skipped as well, so a session that only views does not capture every period.
+			if (damagedTiles != NULL && !damaged && !cursorChanged && framesSinceFull < KVM_XDAMAGE_FULL_EVERY && !tile_pass_needed())
+			{
+				Window qr, qc;
+				int qx, qy, qwx, qwy;
+				unsigned int qm;
+				if (x11_exports->XQueryPointer(imagedisplay, RootWindowOfScreen(ScreenOfDisplay(imagedisplay, CURRENT_DISPLAY_ID)), &qr, &qc, &qx, &qy, &qwx, &qwy, &qm) &&
+					qx == lastPointerX && qy == lastPointerY &&
+					pointerWanted == (cursordisplay != NULL && (gRemoteMouseRenderDefault != 0 || (remoteMouseInjected == 0 && (remoteMouseX != qx || remoteMouseY != qy)))))
+				{
+					framesSinceFull++;
+					continue;
+				}
+			}
+		}
 
+		if (image != NULL)
+		{
+			x11ext_exports->XShmGetImage(imagedisplay,
+				RootWindowOfScreen(ScreenOfDisplay(imagedisplay, CURRENT_DISPLAY_ID)),
+				image,
+				CAPTURE_X,
+				CAPTURE_Y,
+				AllPlanes);
+		}
 
 		if (image == NULL) {
 			g_shutdown = 1;
@@ -1482,11 +1715,20 @@ void* kvm_server_mainloop_x11(void* parm)
 		{
 			rs = x11_exports->XQueryPointer(imagedisplay, RootWindowOfScreen(ScreenOfDisplay(imagedisplay, CURRENT_DISPLAY_ID)),
 				&rr, &cr, &rx, &ry, &wx, &wy, &mr);
+			if (rs == 1) { lastPointerX = rx; lastPointerY = ry; }
+			drawnW = 0;
+			pointerWanted = 0;
 			if (rs == 1 && cursordisplay != NULL)
 			{
-				if (gRemoteMouseRenderDefault != 0 || (remoteMouseX != rx && remoteMouseY != ry))
+				// XTest moves the pointer on eventdisplay and XQueryPointer reads it on imagedisplay, so in a pass with injected input rx and ry can still be the old position.
+				// Without this check a browser drag counted as a local move every other pass, and the viewer pointer flipped between its own and the one drawn into the frame.
+				int localMove = (remoteMouseInjected == 0 && (remoteMouseX != rx || remoteMouseY != ry));
+				remoteMouseInjected = 0;
+				pointerWanted = (gRemoteMouseRenderDefault != 0 || localMove);
+				cimage = pointerWanted ? (char*)xfixes_exports->XFixesGetCursorImage(cursordisplay) : NULL;
+				// A failed fetch draws no pointer into the frame, so it takes the unhide branch and the viewer keeps its own pointer
+				if (cimage != NULL)
 				{
-					cimage = (char*)xfixes_exports->XFixesGetCursorImage(cursordisplay);
 					unsigned short w = ((unsigned short*)(cimage + 4))[0];
 					unsigned short h = ((unsigned short*)(cimage + 6))[0];
 					unsigned short xhot = ((unsigned short*)(cimage + 8))[0];
@@ -1496,7 +1738,9 @@ void* kvm_server_mainloop_x11(void* parm)
 					int localRy = ry - CAPTURE_Y;
 					unsigned short mx = (localRx > (int)xhot) ? (unsigned short)(localRx - xhot) : 0;
 					unsigned short my = (localRy > (int)yhot) ? (unsigned short)(localRy - yhot) : 0;
-					char *pixels = cimage + (sizeof(void*) == 8 ? 24 : 16);
+					// Offset 24 (16 on 32-bit) holds the pixels pointer of XFixesCursorImage, the data itself follows the struct.
+					// Reading from the offset itself took the pixels, atom and name fields as the first three pixels and shifted the image.
+					char *pixels = (char*)((unsigned long**)(cimage + (sizeof(void*) == 8 ? 24 : 16)))[0];
 
 					if ((mx + w) > (unsigned short)SCREEN_WIDTH)  { mx = (unsigned short)(SCREEN_WIDTH  - w); }
 					if ((my + h) > (unsigned short)SCREEN_HEIGHT) { my = (unsigned short)(SCREEN_HEIGHT - h); }
@@ -1505,36 +1749,46 @@ void* kvm_server_mainloop_x11(void* parm)
 					if (localRx >= 0 && localRx < SCREEN_WIDTH && localRy >= 0 && localRy < SCREEN_HEIGHT)
 					{
 						bitblt(pixels, (int)w, (int)h, 0, 0, (int)w, (int)h, image->data, SCREEN_WIDTH, SCREEN_HEIGHT, mx, my, 1);
+						// The drawn pointer is no damage the X server knows of, so its tiles count as changed in this frame and the next one
+						drawnX = mx; drawnY = my; drawnW = w; drawnH = h;
+						if (xdamage != 0 && damagedTiles != NULL) { kvm_x11_mark_tiles(damagedTiles, drawnX, drawnY, drawnW, drawnH); }
 					}
 
-					if (sentHideCursor == 0)
+					// Gated on sentCursor, not sentHideCursor, so a refresh from a joining viewer resends the hide as well
+					sentHideCursor = 1;
+					if (sentCursor != KVM_MouseCursor_NONE)
 					{
 						char tmpbuffer[8];
-						sentHideCursor = 1;
 						((unsigned short*)tmpbuffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
 						((unsigned short*)tmpbuffer)[1] = (unsigned short)htons((unsigned short)5);						// Write the size
 						tmpbuffer[4] = (char)KVM_MouseCursor_NONE;														// Cursor Type
 						written = write(slave2master[1], tmpbuffer, 5);
-						fsync(slave2master[1]);
+						sentCursor = KVM_MouseCursor_NONE;
 					}
 					x11_exports->XFree(cimage);
 				}
 				else
 				{
-					if (sentHideCursor != 0)
-					{
-						char tmpbuffer[8];
-						sentHideCursor = 1;
-						((unsigned short*)tmpbuffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
-						((unsigned short*)tmpbuffer)[1] = (unsigned short)htons((unsigned short)5);						// Write the size
-						tmpbuffer[4] = (char)curcursor;																	// Cursor Type
-						written = write(slave2master[1], tmpbuffer, 5);
-						fsync(slave2master[1]);
-					}
+					// After a hide, the event block sends curcursor on the next frame, because the hide path left sentCursor at NONE
 					sentHideCursor = 0;
 				}
 			}
-			getScreenBuffer((char **)&desktop, &desktopsize, image);
+			// A 32 bpp capture is compared and encoded where it lies, every other depth goes through the RGB24 copy
+			if (tile_frame_from_ximage(&frame, image) == 0)
+			{
+				getScreenBuffer((char **)&desktop, &desktopsize, image);
+				tile_frame_from_rgb24(&frame, (const unsigned char *)desktop, (ptrdiff_t)adjust_screen_size(SCREEN_WIDTH) * 3, image->width, image->height);
+			}
+			if (xdamage != 0 && damagedTiles != NULL && framesSinceFull < KVM_XDAMAGE_FULL_EVERY)
+			{
+				frame.changed = damagedTiles;
+				framesSinceFull++;
+			}
+			else
+			{
+				framesSinceFull = 0;
+			}
+			tile_start_pass(&frame);
 
 			for (y = 0; y < TILE_HEIGHT_COUNT; y++) {
 				for (x = 0; x < TILE_WIDTH_COUNT; x++) {
@@ -1543,57 +1797,34 @@ void* kvm_server_mainloop_x11(void* parm)
 
 					if (g_shutdown) { x = TILE_WIDTH_COUNT; y = TILE_HEIGHT_COUNT; break; }
 
-					if (g_tileInfo[y][x].flag == TILE_SENT || g_tileInfo[y][x].flag == TILE_DONT_SEND) {
+					if (g_tileInfo[y][x].flag != TILE_CHANGED) {
 						continue;
 					}
 
-					getTileAt(width, height, &buf, &tilesize, desktop, desktopsize, y, x);
+					getTileAt(width, height, &buf, &tilesize, &frame, y, x);
 
 					if (buf && !g_shutdown)
 					{
-						// Write the reply to the pipe.
-						//fprintf(logFile, "Writing to master in kvm_server_mainloop\n");
-						written = write(slave2master[1], buf, tilesize);
-						fsync(slave2master[1]);
-						//fprintf(logFile, "Wrote %d bytes to master in kvm_server_mainloop\n", written);
-						free(buf);
+						jpeg_frame_write_begin();
+						written = kvm_write_all(slave2master[1], (char*)buf, (size_t)tilesize);
+						jpeg_frame_write_end();
 						if (written == -1) { /*ILIBMESSAGE("KVMBREAK-K2\r\n");*/ g_shutdown = 1; height = SCREEN_HEIGHT; width = SCREEN_WIDTH; break; }
 					}
 				}
 			}
-		}
-		
-		x11ext_exports->XShmDetach(imagedisplay, &shminfo);
-		XDestroyImage(image); image = NULL;
-		shmdt(shminfo.shmaddr);
-		shmctl(shminfo.shmid, IPC_RMID, 0);
-		
-		if (imagedisplay != NULL) 
-		{
-			x11_exports->XCloseDisplay(imagedisplay);
-			imagedisplay = NULL;
-		}
-
-		// We can't go full speed here, we need to slow this down.
-		height = FRAME_RATE_TIMER;
-		while (!g_shutdown && height > 0)
-		{
-			if (height > 50)
-			{
-				height -= 50;
-				maxsleep = 50000;
-			}
-			else 
-			{
-				maxsleep = height * 1000;
-				height = 0;
-			}
-
-			usleep(maxsleep);
+			jpeg_frame_end(FRAME_RATE_TIMER);
 		}
 	}
 
+	if (imagedisplay != NULL)
+	{
+		kvm_x11_image_release(imagedisplay, &image, &shminfo);
+		x11_exports->XCloseDisplay(imagedisplay);
+		imagedisplay = NULL;
+	}
+
 	if (desktop != NULL) { free(desktop); desktop = NULL; }
+	free(damagedTiles);
 	close(slave2master[1]);
 	close(master2slave[0]);
 	slave2master[1] = 0;
@@ -1611,13 +1842,8 @@ void* kvm_server_mainloop_x11(void* parm)
 		cursordisplay = NULL;
 	}
 
-	if (g_tileInfo != NULL)
-	{
-		for (r = 0; r < TILE_HEIGHT_COUNT; r++) { free(g_tileInfo[r]); }
-		free(g_tileInfo);
-		g_tileInfo = NULL;
-	}
-	if(tilebuffer != NULL) { free(tilebuffer); tilebuffer = NULL; }
+	tile_info_free();
+	jpeg_output_free();
 	return (void*)0;
 }
 
@@ -1689,13 +1915,6 @@ static int g_kvmForkRetryDispatch = 0;
 // Implemented in agentcore.c: re-derive consoleUid()/X env and re-fork the capture child (reuses the
 // same path as a live user-sessions 'changed' event).
 extern void ILibDuktape_MeshAgent_RemoteDesktop_KvmAutoRecover(void *reservedPtrs);
-
-static uint64_t kvm_relay_now_ms(void)
-{
-	struct timespec ts;
-	if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) { return 0; }
-	return (((uint64_t)ts.tv_sec) * 1000ULL) + (((uint64_t)ts.tv_nsec) / 1000000ULL);
-}
 
 typedef struct kvm_child_reaper
 {

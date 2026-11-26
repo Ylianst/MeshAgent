@@ -18,156 +18,21 @@ limitations under the License.
 #include "meshcore/meshdefines.h"
 #include "microstack/ILibParsers.h"
 
-#if defined(JPEGMAXBUF)
-	#define MAX_TILE_SIZE JPEGMAXBUF
-#else
-	#define MAX_TILE_SIZE 65500
-#endif
-
-extern int SCREEN_NUM;
 extern int SCREEN_WIDTH;
 extern int SCREEN_HEIGHT;
-extern int SCREEN_DEPTH;
 extern int TILE_WIDTH;
 extern int TILE_HEIGHT;
 extern int TILE_WIDTH_COUNT;
 extern int TILE_HEIGHT_COUNT;
-extern int COMPRESSION_RATIO;
 extern struct tileInfo_t **g_tileInfo;
-extern unsigned char *jpeg_buffer;
-extern int jpeg_buffer_length;
 
-int tilebuffersize = 0;
-void* tilebuffer = NULL;
 int COMPRESSION_QUALITY = 50;
 
-/******************************************************************************
- * INTERNAL FUNCTIONS
- ******************************************************************************/
-
-//Extracts the required tile buffer from the desktop buffer
-int get_tile_buffer(int x, int y, void **buffer, long long bufferSize, void *desktop, long long desktopsize, int tilewidth, int tileheight)
-{
-	char *target = *buffer;
-	int height = 0;
-
-	for (height = y; height < y + tileheight; height++) {
-		memcpy_s(target, (size_t)bufferSize, (const void *)(((char *)desktop) + (3 * ((height * adjust_screen_size(SCREEN_WIDTH)) + x))), (size_t)(tilewidth * 3));
-		target = (char *) (target + (3 * tilewidth));
-	}
-
-	return 0;
-}
-
-//This function returns 0 and *buffer != NULL if everything was good. retval = jpegsize if the captured image was too large.
-int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void* desktop, long long desktopsize, void ** buffer, long long *bufferSize)
-{
-
-	*buffer = NULL;
-	*bufferSize = 0;
-
-	// Make sure a tile buffer is available. Most of the time, this is skipped.
-	if (tilebuffersize != captureWidth * captureHeight * 3)
-	{
-		if (tilebuffer != NULL) free(tilebuffer);
-		tilebuffersize = captureWidth * captureHeight * 3;
-		if ((tilebuffer = malloc(tilebuffersize)) == NULL) return 0;
-	}
-
-	//Get the final coalesced tile
-	get_tile_buffer(x, y, &tilebuffer, tilebuffersize, desktop, desktopsize, captureWidth, captureHeight);
-
-	write_JPEG_buffer(tilebuffer, captureWidth, captureHeight, COMPRESSION_QUALITY);
-
-#if MAX_TILE_SIZE > 0
-	if (jpeg_buffer_length > MAX_TILE_SIZE)
-	{
-		return jpeg_buffer_length;
-	}
-	else 
-#endif
-	{
-		return 0;
-	}
-}
-
-#if 0
-void dump32bit (const XImage * input)
-{
-    int row, col;
-    static char head[256];
-
-    static FILE *fp2 = NULL;
-    char *ptr2, *output;
-    long size;
-
-    register unsigned int
-	rm = input->red_mask,
-	gm = input->green_mask,
-	bm = input->blue_mask,
-	rs = 16,
-	gs = 8,
-	bs = 0, *p32 = (unsigned int *) input->data;
-
-
-    sprintf (head, "P6\n%d %d\n%d\n", input->width, input->height, 255);
-    size = ((input->bytes_per_line * input->height) / 4) * 3;
-    output = malloc (size);
-    ptr2 = output;
-
-    for (row = 0; row < input->height; row++) {
-		for (col = 0; col < input->width; col++) {
-			*output++ = ((*p32 & rm) >> rs);
-			*output++ = ((*p32 & gm) >> gs);
-			*output++ = ((*p32 & bm) >> bs);
-			p32++;		     // ignore alpha values
-		}
-		//
-		// eat padded bytes, for better speed we use shifting,
-		// (bytes_per_line - bits_per_pixel / 8 * width ) / 4
-		//
-		p32 += (input->bytes_per_line - (input->bits_per_pixel >> 3)
-			* input->width) >> 2;
-    }
-
-    fp2 = fopen ("/tmp/pic.rgb.pnm", "w");
-    fwrite (head, strlen (head), 1, fp2);
-
-    fwrite (ptr2, size, 1, fp2);
-    fclose (fp2);
-    free (ptr2);
-}
-#endif
-
-// Really fast CRC-like method. Used for the KVM.
-int util_crc(int x, int y, long long bufferSize, void *desktop, long long desktopsize, int tilewidth, int tileheight)
-{
-    int hval = 0;
-    char *bp = NULL;
-    char *be = NULL;
-    int height = 0;
-
-    // Walked as bytes: the row stride is 3 bytes per pixel, so these 32 bit reads land on
-    // arbitrary addresses and must not be issued through an int* (SIGBUS on MIPS/ARMv5).
-    for (height = y; height < y + tileheight; height++) {
-    	bp = ((char *)desktop) + (3 * ((height * adjust_screen_size(SCREEN_WIDTH)) + x));
-    	be = ((char *)desktop) + (3 * ((height * adjust_screen_size(SCREEN_WIDTH)) + x + tilewidth));
-    	while ((bp + 4) <= be)
-		{
-			// hval *= 0x01000193;
-			hval += (hval << 1) + (hval << 4) + (hval << 7) + (hval << 8) + (hval << 24);
-			hval ^= (int)ILibUnaligned_Read32(bp);
-			bp += 4;
-		}
-
-    	if (be - bp >= 0) {
-    		hval += (hval << 1) + (hval << 4) + (hval << 7) + (hval << 8) + (hval << 24);
-    		hval ^= (int)ILibUnaligned_Read32(be - 3);
-    	}
-    }
-
-    return hval;
-}
+static unsigned char *refFrame = NULL;
+static int refWidth = 0;
+static int refHeight = 0;
+static int refBytesPerPixel = 0;
+static int tileRefreshPending = 1;
 
 /******************************************************************************
  * EXTERNAL FUNCTIONS
@@ -183,308 +48,332 @@ int adjust_screen_size(int pixles)
 	return pixles;
 }
 
-// Reset the tile info structure
-int reset_tile_info(int old_height_count) {
-	int row, col;
+void tile_info_free(void)
+{
+	free(g_tileInfo);
+	g_tileInfo = NULL;
+	free(refFrame);
+	refFrame = NULL;
+	refWidth = refHeight = refBytesPerPixel = 0;
+}
 
-	if (g_tileInfo != NULL) {
-		for (row = 0; row < old_height_count; row++) {
-			free(g_tileInfo[row]);
-		}
-		free(g_tileInfo);
-		g_tileInfo = NULL;
+// One block for the row pointers and the tiles. Every tile starts stale, so the next pass sends the whole screen.
+void tile_info_alloc(void)
+{
+	int r, c;
+	size_t rows = (size_t)TILE_HEIGHT_COUNT * sizeof(struct tileInfo_t *);
+	struct tileInfo_t *tiles;
+
+	free(g_tileInfo);
+	if ((g_tileInfo = (struct tileInfo_t **)malloc(rows + (size_t)TILE_HEIGHT_COUNT * TILE_WIDTH_COUNT * sizeof(struct tileInfo_t))) == NULL) { ILIBCRITICALEXIT(254); }
+	tiles = (struct tileInfo_t *)((char *)g_tileInfo + rows);
+	for (r = 0; r < TILE_HEIGHT_COUNT; r++)
+	{
+		g_tileInfo[r] = tiles + (size_t)r * TILE_WIDTH_COUNT;
+		for (c = 0; c < TILE_WIDTH_COUNT; c++) { g_tileInfo[r][c].stale = 1; g_tileInfo[r][c].flag = TILE_DONE; }
+	}
+}
+
+// Input is read in the frame loop thread, on X11 and on DRM, so a plain flag is enough
+void tile_request_refresh(void)
+{
+	tileRefreshPending = 1;
+}
+
+// True when the next pass must run although nothing changed on the screen: a refresh was asked for, or a tile still has to be sent
+int tile_pass_needed(void)
+{
+	int r, c;
+	if (tileRefreshPending || g_tileInfo == NULL) { return 1; }
+	for (r = 0; r < TILE_HEIGHT_COUNT; r++) { for (c = 0; c < TILE_WIDTH_COUNT; c++) { if (g_tileInfo[r][c].stale) { return 1; } } }
+	return 0;
+}
+
+void tile_frame_from_rgb24(struct tileFrame_t *frame, const unsigned char *pixels, ptrdiff_t stride, int width, int height)
+{
+	frame->pixels = pixels;
+	frame->stride = stride;
+	frame->bytesPerPixel = 3;
+	frame->width = width;
+	frame->height = height;
+	frame->format = JCS_RGB;
+	frame->changed = NULL;
+}
+
+// Describes a 32 bpp capture with 8 bit channels, so it is compared and encoded without the RGB24 copy of getScreenBuffer().
+// Returns 0 for every other layout, and when jpeglib.h is not libjpeg-turbo's, which has no 4 byte pixel formats.
+int tile_frame_from_ximage(struct tileFrame_t *frame, XImage *image)
+{
+#ifdef JCS_EXTENSIONS
+	int lsb = (image->byte_order == LSBFirst);
+
+	if (image->bits_per_pixel != 32 || image->green_mask != 0xFF00) { return 0; }
+	if (image->red_mask == 0xFF0000 && image->blue_mask == 0xFF) { frame->format = lsb ? JCS_EXT_BGRX : JCS_EXT_XRGB; }
+	else if (image->red_mask == 0xFF && image->blue_mask == 0xFF0000) { frame->format = lsb ? JCS_EXT_RGBX : JCS_EXT_XBGR; }
+	else { return 0; }
+
+	frame->pixels = (const unsigned char *)image->data;
+	frame->stride = (ptrdiff_t)image->bytes_per_line;
+	frame->bytesPerPixel = 4;
+	frame->width = image->width;
+	frame->height = image->height;
+	frame->changed = NULL;
+	return 1;
+#else
+	return 0;
+#endif
+}
+
+// Marks the tiles that differ from the reference frame, and copies the parts that differ, so the reference holds the frame afterwards.
+// Compared a pixel row at a time in memory order because tile by tile measured 6.2 against 1.05 ms per 1080p frame on a Cortex-A76.
+// Exact, where the hash it replaces could miss a change.
+// Compares two runs of 4 byte pixels without the byte at unusedByte, which holds no colour
+static int tile_colours_equal(const unsigned char *a, const unsigned char *b, size_t n, int unusedByte)
+{
+	size_t i;
+	for (i = 0; i + 4 <= n; i += 4)
+	{
+		if ((unusedByte != 0 && a[i] != b[i]) || (unusedByte != 1 && a[i + 1] != b[i + 1]) ||
+			(unusedByte != 2 && a[i + 2] != b[i + 2]) || (unusedByte != 3 && a[i + 3] != b[i + 3])) { return 0; }
+	}
+	return 1;
+}
+
+void tile_start_pass(const struct tileFrame_t *frame)
+{
+	int all = tileRefreshPending;
+	size_t bpp = (size_t)frame->bytesPerPixel;
+	// The reference is as wide and high as the tile grid, so a rectangle on the right or bottom edge can be sent as whole tiles
+	size_t refStride = (size_t)TILE_WIDTH_COUNT * (size_t)TILE_WIDTH * bpp;
+	size_t len = (size_t)TILE_WIDTH * bpp;
+	size_t lastLen = (size_t)frame->width * bpp - (size_t)(TILE_WIDTH_COUNT - 1) * len;
+	int row, col, r, rows;
+	// The byte of a 4 byte pixel that holds no colour. A change there alone, which some X servers and compositors make, is no change of the picture.
+	int unusedByte = -1, colourSame;
+
+	if (frame->bytesPerPixel == 4)
+	{
+#ifdef JCS_EXTENSIONS
+		unusedByte = (frame->format == JCS_EXT_XRGB || frame->format == JCS_EXT_XBGR) ? 0 : 3;
+#else
+		unusedByte = 3;
+#endif
 	}
 
-	if ((g_tileInfo = (struct tileInfo_t **) malloc (sizeof(struct tileInfo_t *) * TILE_HEIGHT_COUNT)) == NULL) ILIBCRITICALEXIT(254);
+	// A frame that does not match the tile grid sends nothing now, and the whole screen once it does
+	if (frame->pixels == NULL || frame->width <= 0 || frame->height <= 0 ||
+		(frame->width + TILE_WIDTH - 1) / TILE_WIDTH != TILE_WIDTH_COUNT || (frame->height + TILE_HEIGHT - 1) / TILE_HEIGHT != TILE_HEIGHT_COUNT)
+	{
+		tileRefreshPending = 1;
+		return;
+	}
 
-	for (row = 0; row < TILE_HEIGHT_COUNT; row++) {
-		if ((g_tileInfo[row] = (struct tileInfo_t *)calloc(TILE_WIDTH_COUNT, sizeof(struct tileInfo_t))) == NULL) ILIBCRITICALEXIT(254);
-		for (col = 0; col < TILE_WIDTH_COUNT; col++) {
-			g_tileInfo[row][col].crc = 0xff;
+	tileRefreshPending = 0;
+#ifdef KVM_ALL_TILES
+	all = 1;
+#endif
+	if (refFrame == NULL || refWidth != frame->width || refHeight != frame->height || refBytesPerPixel != frame->bytesPerPixel)
+	{
+		free(refFrame);
+		// Zeroed, because the part beyond the frame edge is never written and is sent as black
+		refFrame = (unsigned char *)calloc((size_t)TILE_HEIGHT_COUNT * (size_t)TILE_HEIGHT, refStride);
+		refWidth = frame->width;
+		refHeight = frame->height;
+		refBytesPerPixel = frame->bytesPerPixel;
+		all = 1;
+	}
+
+	for (row = 0; row < TILE_HEIGHT_COUNT; row++)
+	{
+		struct tileInfo_t *tiles = g_tileInfo[row];
+		const unsigned char *cur = frame->pixels + (ptrdiff_t)row * TILE_HEIGHT * frame->stride;
+		const unsigned char *hint = (frame->changed != NULL) ? frame->changed + (size_t)row * TILE_WIDTH_COUNT : NULL;
+		unsigned char *ref;
+		int work = (hint == NULL);
+
+		for (col = 0; col < TILE_WIDTH_COUNT; col++)
+		{
+			if (all) { tiles[col].stale = 1; }
+			tiles[col].flag = tiles[col].stale ? TILE_CHANGED : TILE_DONE;
+			if (tiles[col].stale || (hint != NULL && hint[col])) { work = 1; }
+		}
+		if (refFrame == NULL) { continue; } // Without a reference every tile stays stale and is sent, which costs data but loses nothing
+		if (!work) { continue; } // The capture found no change in this tile row and no tile of it is stale
+
+		ref = refFrame + (size_t)row * TILE_HEIGHT * refStride;
+		rows = frame->height - row * TILE_HEIGHT;
+		if (rows > TILE_HEIGHT) { rows = TILE_HEIGHT; }
+
+		for (r = 0; r < rows; r++, cur += frame->stride, ref += refStride)
+		{
+			for (col = 0; col < TILE_WIDTH_COUNT; col++)
+			{
+				// The last tile of a row ends at the frame edge
+				size_t n = (col == TILE_WIDTH_COUNT - 1) ? lastLen : len;
+				if (!tiles[col].stale && ((hint != NULL && !hint[col]) || memcmp(cur + col * len, ref + col * len, n) == 0)) { continue; }
+				colourSame = (!tiles[col].stale && unusedByte >= 0 && tile_colours_equal(cur + col * len, ref + col * len, n, unusedByte));
+				// Copied also when only the unused byte changed, so the next frame finds the row equal with the plain compare again
+				memcpy(ref + col * len, cur + col * len, n);
+				if (colourSame) { continue; }
+				tiles[col].flag = TILE_CHANGED;
+			}
+		}
+		for (col = 0; col < TILE_WIDTH_COUNT; col++) { tiles[col].stale = 0; }
+	}
+}
+
+//Fetches the encoded jpeg tile at the given location. The neighboring changed tiles are coalesced to form a larger jpeg before returning.
+// *buffer is the packet inside the encoder's buffer. It holds until the next call and the caller does not free it.
+int getTileAt(int x, int y, void** buffer, long long *bufferSize, const struct tileFrame_t *frame, int row, int col)
+{
+	int rcol, r, c;
+	int rightcol = col; //Used in coalescing. Indicates the rightmost column to be coalesced.
+	int botrow = row; //Used in coalescing. Indicates the bottom most row to be coalesced.
+	int captureWidth = TILE_WIDTH;
+	int captureHeight = TILE_HEIGHT;
+	unsigned char *tileJpeg;
+	int tileJpegLength = 0;
+
+	*buffer = NULL; // If anything fails, this will be the indication.
+	*bufferSize = 0;
+
+	if (g_tileInfo[row][col].flag != TILE_CHANGED) { return 0; }
+
+	// First go to the right most changed tile
+	while (rightcol + 1 < TILE_WIDTH_COUNT && g_tileInfo[row][rightcol + 1].flag == TILE_CHANGED)
+	{
+		rightcol++;
+		captureWidth += TILE_WIDTH;
+	}
+
+	// Now go to the bottom tiles, a row of them is added when all of its tiles in the range have changed
+	while (botrow + 1 < TILE_HEIGHT_COUNT)
+	{
+		rcol = col;
+		while (rcol <= rightcol && g_tileInfo[botrow + 1][rcol].flag == TILE_CHANGED) { rcol++; }
+		if (rcol <= rightcol) { break; }
+		botrow++;
+		captureHeight += TILE_HEIGHT;
+	}
+
+	// Encoded from the reference frame, which tile_start_pass() just brought up to date for every changed tile.
+	// A DRM frame is the live scanout buffer and can change after the compare, and then the picture sent would differ from the reference.
+	if (refFrame != NULL && refWidth == frame->width && refHeight == frame->height && refBytesPerPixel == frame->bytesPerPixel)
+	{
+		// Whole tiles also on the right and bottom edge, out of the padded reference. The server's desktop multiplexer counts a picture
+		// in 16 pixel slots, and a picture cut off at the screen edge left its count wrong, so it was kept for good or dropped too early.
+		ptrdiff_t refStride = (ptrdiff_t)TILE_WIDTH_COUNT * TILE_WIDTH * refBytesPerPixel;
+		tileJpeg = write_JPEG_rect(refFrame + (ptrdiff_t)y * refStride + (ptrdiff_t)x * refBytesPerPixel, refStride, captureWidth, captureHeight, refBytesPerPixel, frame->format, COMPRESSION_QUALITY, &tileJpegLength);
+	}
+	else
+	{
+		// Without a reference the frame itself is encoded, and it ends at the screen edge
+		if (x + captureWidth > frame->width) { captureWidth = frame->width - x; }
+		if (y + captureHeight > frame->height) { captureHeight = frame->height - y; }
+		tileJpeg = write_JPEG_rect(frame->pixels + (ptrdiff_t)y * frame->stride + (ptrdiff_t)x * frame->bytesPerPixel, frame->stride, captureWidth, captureHeight, frame->bytesPerPixel, frame->format, COMPRESSION_QUALITY, &tileJpegLength);
+	}
+
+	// The packet header is written into the room in front of the JPEG, so the packet is sent from the encoder's buffer without a copy
+	if (tileJpeg != NULL)
+	{
+		if (tileJpegLength > 65500)
+		{
+			*buffer = tileJpeg - 16;
+			*bufferSize = tileJpegLength + 16;
+			((unsigned short*)*buffer)[0] = (unsigned short)htons((unsigned short)MNG_JUMBO);		// Write the type
+			((unsigned short*)*buffer)[1] = (unsigned short)htons((unsigned short)8);				// Write the size
+			((unsigned int*)*buffer)[1] = (unsigned int)htonl(tileJpegLength + 8);					// Size of the Next Packet
+			((unsigned short*)*buffer)[4] = (unsigned short)htons((unsigned short)MNG_KVM_PICTURE);	// Write the type
+			((unsigned short*)*buffer)[5] = 0;														// RESERVED
+			((unsigned short*)*buffer)[6] = (unsigned short)htons((unsigned short)x);				// X position
+			((unsigned short*)*buffer)[7] = (unsigned short)htons((unsigned short)y);				// Y position
+		}
+		else
+		{
+			*buffer = tileJpeg - 8;
+			*bufferSize = tileJpegLength + 8;
+			((unsigned short*)*buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_PICTURE);	// Write the type
+			((unsigned short*)*buffer)[1] = (unsigned short)htons((unsigned short)*bufferSize);		// Write the size
+			((unsigned short*)*buffer)[2] = (unsigned short)htons((unsigned short)x);				// X position
+			((unsigned short*)*buffer)[3] = (unsigned short)htons((unsigned short)y);				// Y position
+		}
+	}
+
+	// The region is done for this pass either way, and a failed encode leaves it stale so the next pass sends it again
+	for (r = row; r <= botrow; r++)
+	{
+		for (c = col; c <= rightcol; c++)
+		{
+			g_tileInfo[r][c].flag = TILE_DONE;
+			if (*buffer == NULL) { g_tileInfo[r][c].stale = 1; }
 		}
 	}
 
 	return 0;
 }
 
-//Fetches the encoded jpeg tile at the given location. The neighboring tiles are coalesced to form a larger jpeg before returning.
-int getTileAt(int x, int y, void** buffer, long long *bufferSize, void *desktop, long long desktopsize, int row, int col)
+
+// Shift and width of one colour channel, from its mask
+static void tile_mask_layout(unsigned long mask, int *shift, int *bits)
 {
-	int CRC, rcol, i, r, c;
-	int rightcol = col; //Used in coalescing. Indicates the rightmost column to be coalesced.
-	int botrow = row; //Used in coalescing. Indicates the bottom most row to be coalesced.
-	int r_x = x;
-	int r_y = y;
-	int captureWidth = TILE_WIDTH;
-	int captureHeight = TILE_HEIGHT;
-
-	*buffer = NULL; // If anything fails, this will be the indication.
-	*bufferSize = 0;
-
-	if (g_tileInfo[row][col].flag == TILE_TODO) { //First check whether the tile-crc needs to be calculated or not.
-		if ((CRC = util_crc(x, y, TILE_HEIGHT * TILE_WIDTH * 3, desktop, desktopsize, TILE_WIDTH, TILE_HEIGHT)) == g_tileInfo[row][col].crc) return 0;
-		g_tileInfo[row][col].crc = CRC; //Update the tile CRC in the global data structure.
-	}
-
-	g_tileInfo[row][col].flag = TILE_MARKED_NOT_SENT;
-
-	//COALESCING SECTION
-
-	// First got to the right most changed tile and record it
-	while (rightcol + 1 < TILE_WIDTH_COUNT) {
-		rightcol++;
-		r_x = rightcol * TILE_WIDTH;
-
-		CRC = g_tileInfo[row][rightcol].crc;
-
-		if (g_tileInfo[row][rightcol].flag == TILE_TODO) {
-			CRC = util_crc(r_x, y, TILE_HEIGHT * TILE_WIDTH * 3, desktop, desktopsize, TILE_WIDTH, TILE_HEIGHT);
-		}
-
-		if (CRC != g_tileInfo[row][rightcol].crc || g_tileInfo[row][rightcol].flag == TILE_MARKED_NOT_SENT) { //If the tile has changed, increment the capturewidth.
-			g_tileInfo[row][rightcol].crc = CRC;
-
-#if MAX_TILE_SIZE > 0
-			//Here we check whether the size of the coalesced bitmap is greater than the threshold (MAX_TILE_SIZE)
-			if ((captureWidth + TILE_WIDTH) * TILE_HEIGHT * 3 / COMPRESSION_RATIO > MAX_TILE_SIZE)
-			{
-				g_tileInfo[row][rightcol].flag = TILE_MARKED_NOT_SENT;
-				--rightcol;
-				break;
-			}
-#endif
-
-			g_tileInfo[row][rightcol].flag = TILE_MARKED_NOT_SENT;
-			captureWidth += TILE_WIDTH;
-		}
-		else {
-			g_tileInfo[row][rightcol].flag = TILE_DONT_SEND;
-			--rightcol;
-			break;
-		}
-	}
-
-	//int TOLERANCE = (rightcol - col) / 3;
-
-	// Now go to the bottom tiles, check if they have changed and record them
-#if MAX_TILE_SIZE > 0
-	while ((botrow + 1 < TILE_HEIGHT_COUNT) && ((captureHeight + TILE_HEIGHT) * captureWidth * 3 / COMPRESSION_RATIO <= MAX_TILE_SIZE))
-#else
-	while ((botrow + 1 < TILE_HEIGHT_COUNT))
-#endif
-	{
-		botrow++;
-		r_y = botrow * TILE_HEIGHT;
-		int fail = 0;
-		r_x = x;
-
-		//int missCount = 0;
-
-		for (rcol = col; rcol <= rightcol; rcol++) {
-
-			CRC = g_tileInfo[botrow][rcol].crc;
-			if (g_tileInfo[botrow][rcol].flag == TILE_TODO) {
-				CRC = util_crc(r_x, r_y, TILE_HEIGHT * TILE_WIDTH * 3, desktop, desktopsize, TILE_WIDTH, TILE_HEIGHT);
-			}
-
-			if (CRC != g_tileInfo[botrow][rcol].crc || g_tileInfo[botrow][rcol].flag == TILE_MARKED_NOT_SENT) {
-				g_tileInfo[botrow][rcol].flag = TILE_MARKED_NOT_SENT;
-				g_tileInfo[botrow][rcol].crc = CRC;
-				r_x += TILE_WIDTH;
-			}
-			else {
-				/*//Keep this part commented. Adding tolerance adds to the complexity of this code.
-				missCount++;
-
-				if (missCount > TOLERANCE) {
-					fail = 1;
-					for (int i = col; i < rcol; i++) {
-						if (g_tileInfo[botrow][i].flag == TILE_SKIPPED) {
-							g_tileInfo[botrow][i].flag = TILE_DONT_SEND;
-						}
-						else {
-							g_tileInfo[botrow][i].flag = TILE_MARKED_NOT_SENT;
-						}
-					}
-					g_tileInfo[botrow][rcol].flag = TILE_DONT_SEND;
-					botrow--;
-					break;
-				}
-				else {
-					g_tileInfo[botrow][rcol].flag = TILE_SKIPPED;
-					g_tileInfo[botrow][rcol].crc = CRC;
-					r_x += TILE_WIDTH;
-				}*/
-				fail = 1;
-				for (i = col; i < rcol; i++) {
-					g_tileInfo[botrow][i].flag = TILE_MARKED_NOT_SENT;
-				}
-				g_tileInfo[botrow][rcol].flag = TILE_DONT_SEND;
-				botrow--;
-				break;
-			}
-		}
-
-		if (!fail) {
-			captureHeight += TILE_HEIGHT;
-		}
-		else {
-			break;
-		}
-	}
-
-	int retval = 0;
-#if MAX_TILE_SIZE == 0
-	retval = calc_opt_compr_send(x, y, captureWidth, captureHeight, desktop, desktopsize, buffer, bufferSize);
-#else
-	int firstTime = 1;
-
-	//This loop is used to adjust the COMPRESSION_RATIO. This loop runs only once most of the time.
-	do {
-		//retval here is 0 if everything was good. It is > 0 if it contains the size of the jpeg that was created and not sent.
-		retval = calc_opt_compr_send(x, y, captureWidth, captureHeight, desktop, desktopsize, buffer, bufferSize);
-		if (retval != 0) {
-			if (firstTime) {
-				// Re-adjust the compression ratio.
-				COMPRESSION_RATIO = (int)(((double)COMPRESSION_RATIO/(double)retval) * (0.92 * MAX_TILE_SIZE)); //Magic number: 92% of MAX_TILE_SIZE
-				if (COMPRESSION_RATIO <= 1) { COMPRESSION_RATIO = 2; }
-				firstTime = 0;
-			}
-
-			if (botrow > row) { //First time, try reducing the height.
-				botrow = row + ((botrow - row + 1) / 2);
-				captureHeight = (botrow - row + 1) * TILE_HEIGHT;
-			}
-			else if (rightcol > col){ //If it is not possible, reduce the width
-				rightcol = col + ((rightcol - col + 1) / 2);
-				captureWidth = (rightcol - col + 1) * TILE_WIDTH;
-			}
-			else { //This never happens in any case.
-				retval = 0;
-				break;
-			}
-
-		}
-	} while (retval != 0);
-#endif
-
-	//Set the flags to TILE_SENT
-	if (jpeg_buffer != NULL) 
-	{
-		*bufferSize = jpeg_buffer_length + (jpeg_buffer_length > 65500 ? 16 : 8);
-		*buffer = malloc(*bufferSize);
-
-		if (jpeg_buffer_length > 65500)
-		{
-			((unsigned short*)*buffer)[0] = (unsigned short)htons((unsigned short)MNG_JUMBO);		// Write the type
-			((unsigned short*)*buffer)[1] = (unsigned short)htons((unsigned short)8);				// Write the size
-			((unsigned int*)*buffer)[1] = (unsigned int)htonl(jpeg_buffer_length + 8);				// Size of the Next Packet
-			((unsigned short*)*buffer)[4] = (unsigned short)htons((unsigned short)MNG_KVM_PICTURE);	// Write the type
-			((unsigned short*)*buffer)[5] = 0;														// RESERVED
-			((unsigned short*)*buffer)[6] = (unsigned short)htons((unsigned short)x);				// X position
-			((unsigned short*)*buffer)[7] = (unsigned short)htons((unsigned short)y);				// Y position
-			memcpy_s((char *)(*buffer) + 16, *bufferSize -16, jpeg_buffer, jpeg_buffer_length);
-		}
-		else
-		{
-			((unsigned short*)*buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_PICTURE);	// Write the type
-			((unsigned short*)*buffer)[1] = (unsigned short)htons((unsigned short)*bufferSize);		// Write the size
-			((unsigned short*)*buffer)[2] = (unsigned short)htons((unsigned short)x);				// X position
-			((unsigned short*)*buffer)[3] = (unsigned short)htons((unsigned short)y);				// Y position
-			memcpy_s((char *)(*buffer) + 8, *bufferSize -8, jpeg_buffer, jpeg_buffer_length);
-		}
-
-		free(jpeg_buffer);
-		jpeg_buffer = NULL;
-		jpeg_buffer_length = 0;
-
-		for (r = row; r <= botrow; r++) {
-			for (c = col; c <= rightcol; c++) {
-				g_tileInfo[r][c].flag = TILE_SENT;
-			}
-		}
-	}
-
-	return retval;
+	*shift = 0;
+	*bits = 0;
+	if (mask == 0) { return; }
+	while ((mask & 1) == 0) { mask >>= 1; (*shift)++; }
+	while ((mask & 1) != 0) { mask >>= 1; (*bits)++; }
 }
 
+static unsigned char tile_channel(unsigned long pixel, unsigned long mask, int shift, int bits)
+{
+	unsigned long v = (pixel & mask) >> shift;
+	return (unsigned char)(bits >= 8 ? (v >> (bits - 8)) : (v << (8 - bits)));
+}
 
-// Get screen buffer from the XImage structure
+// Get screen buffer from the XImage structure, as RGB24 with rows and height padded to whole tiles.
+// The channels come from the image's masks and byte order and the rows from bytes_per_line. Before, the shifts were fixed and
+// 16 and 24 bpp rows were read as packed, so a visual with other masks got wrong colours and a padded row a skewed picture.
 int getScreenBuffer(char **desktop, long long *desktopsize, XImage *image)
 {
-	long long size = adjust_screen_size(SCREEN_WIDTH) * adjust_screen_size(SCREEN_HEIGHT) * 3;
-	int row, col, i, width_padding_size = 0, height_padding_size = 0;
-	char *output;
-	register unsigned char* tmpPtr2 = (unsigned char *)image->data;
-	register unsigned short* tmpPtr3 = (unsigned short *)image->data;
-	register unsigned int
-		rm = image->red_mask,
-		gm = image->green_mask,
-		bm = image->blue_mask,
-		rs = 16,
-		gs = 8,
-		bs = 0, *tmpPtr = (unsigned int *) image->data;
-	int bpp = image->bits_per_pixel;
+	size_t stride = (size_t)adjust_screen_size(SCREEN_WIDTH) * 3;
+	size_t rows = (size_t)adjust_screen_size(SCREEN_HEIGHT);
+	long long size = (long long)(stride * rows);
+	int bytes = image->bits_per_pixel >> 3;
+	int width = image->width;
+	int height = image->height;
+	int rs, rb, gs, gb, bs, bb;
+	int row, col, i;
 
-	if (*desktopsize != size) {
+	if (*desktopsize != size || *desktop == NULL) {
 		if (*desktop != NULL) { free(*desktop); }
 		*desktopsize = size;
-		if ((*desktop = (char *) malloc (*desktopsize + 4)) == NULL) ILIBCRITICALEXIT(254);
+		if ((*desktop = (char *) malloc ((size_t)size)) == NULL) ILIBCRITICALEXIT(254);
 	}
 
-	if (bpp == 16) {
-		rs = 11;
-		gs = 5;
-	}
-	output = *desktop;
+	if (width > adjust_screen_size(SCREEN_WIDTH)) { width = adjust_screen_size(SCREEN_WIDTH); }
+	if (height > (int)rows) { height = (int)rows; }
+	if (bytes < 1 || bytes > 4) { memset(*desktop, 0, (size_t)size); return 0; }
 
-	for (row = 0; row < image->height; row++) {
-		for (col = 0; col < image->width; col++) {
-			if (bpp == 16) {
-				*output++ = ((*tmpPtr3 >> rs) & 0x01f) << 3;
-				*output++ = ((*tmpPtr3 >> gs) & 0x03f) << 2;
-				*output++ = ((*tmpPtr3 >> bs) & 0x01f) << 3;
-				tmpPtr3++;
-			}
-			else if (bpp == 24) {
-				*output++ = *(tmpPtr2 + 2);
-				*output++ = *(tmpPtr2 + 1);
-				*output++ = *tmpPtr2;
-				tmpPtr2 += 3;
-			}
-			else {
-				*output++ = ((*tmpPtr & rm) >> rs);
-				*output++ = ((*tmpPtr & gm) >> gs);
-				*output++ = ((*tmpPtr & bm) >> bs);
-				tmpPtr = (unsigned int *) (((char *)tmpPtr) + (image->bits_per_pixel >> 3));
-				//tmpPtr++;		     // ignore alpha values
-			}
+	tile_mask_layout(image->red_mask, &rs, &rb);
+	tile_mask_layout(image->green_mask, &gs, &gb);
+	tile_mask_layout(image->blue_mask, &bs, &bb);
+
+	for (row = 0; row < height; row++) {
+		const unsigned char *src = (const unsigned char *)image->data + (size_t)row * image->bytes_per_line;
+		unsigned char *output = (unsigned char *)*desktop + (size_t)row * stride;
+
+		for (col = 0; col < width; col++) {
+			unsigned long pixel = 0;
+			if (image->byte_order == LSBFirst) { for (i = bytes - 1; i >= 0; i--) { pixel = (pixel << 8) | src[i]; } }
+			else { for (i = 0; i < bytes; i++) { pixel = (pixel << 8) | src[i]; } }
+			src += bytes;
+
+			*output++ = tile_channel(pixel, image->red_mask, rs, rb);
+			*output++ = tile_channel(pixel, image->green_mask, gs, gb);
+			*output++ = tile_channel(pixel, image->blue_mask, bs, bb);
 		}
-		//
-		// eat padded bytes, for better speed we use shifting,
-		// (bytes_per_line - bits_per_pixel / 8 * width ) / 4
-
-		tmpPtr += (image->bytes_per_line - (image->bits_per_pixel >> 3)
-			* image->width) >> 2;
-
-		width_padding_size = (adjust_screen_size(SCREEN_WIDTH) - image->width) * 3;
-
-		if (width_padding_size != 0) {
-			for (i = 0; i < width_padding_size; i++) {
-				*output++ = 0;
-			}
-		}
+		memset(output, 0, stride - (size_t)width * 3);
 	}
-
-	height_padding_size = adjust_screen_size(SCREEN_HEIGHT) - image->height;
-
-	if (height_padding_size != 0) {
-		for (row = 0; row < height_padding_size; row++) {
-			for (col = 0; col < (image->width * 3) + width_padding_size; col++) {
-				*output++ = 0;
-			}
-		}
-	}
+	memset(*desktop + (size_t)height * stride, 0, (rows - (size_t)height) * stride);
 
 	return 0;
 }
@@ -499,6 +388,4 @@ void set_tile_compression(int type, int level)
 	else {
 		COMPRESSION_QUALITY = 60;
 	}
-
-	//  TODO Make sure the all the types are handled. We ignore the type variable for now.
 }

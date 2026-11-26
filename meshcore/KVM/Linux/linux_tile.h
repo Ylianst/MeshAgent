@@ -25,21 +25,35 @@ limitations under the License.
 #include "linux_compression.h"
 
 enum TILE_FLAGS_ENUM {
-	TILE_TODO,						//The tile CRC needs to be calculated.
-	TILE_SENT,						//CRC has been calculated and the tile has been sent.
-	TILE_MARKED_NOT_SENT,   		//CRC has been calculated, but the tile was not sent.
-	TILE_DONT_SEND		  //CRC has been calculated, tile need not be sent.
-	//TILE_SKIPPED		  //CRC has been calculated, tile need not be sent, but was skipped to include a greater region
+	TILE_DONE = 0,			// Nothing to send, the tile is unchanged or was sent in this pass
+	TILE_CHANGED			// The tile differs from the reference and was not sent yet
 };
 
 struct tileInfo_t {
-	int crc;
-	enum TILE_FLAGS_ENUM flag;
+	unsigned char stale;	// 1 when the reference frame does not hold this tile, so it counts as changed
+	unsigned char flag;
 };
 
-extern int reset_tile_info(int old_height_count);
+// The frame of one pass, compared and encoded where it lies. width and height are the real size, not rounded up to whole tiles.
+struct tileFrame_t {
+	const unsigned char *pixels;
+	ptrdiff_t stride;		// Bytes from one row to the next, negative for a bottom-up frame
+	int bytesPerPixel;
+	int width;
+	int height;
+	J_COLOR_SPACE format;
+	const unsigned char *changed;	// NULL, or one byte per tile, row by row: 0 where the capture already found the tile equal to the previous frame
+};
+
+extern void tile_info_alloc(void);
+extern void tile_info_free(void);
+extern void tile_request_refresh(void);
+extern int tile_pass_needed(void);
+extern void tile_frame_from_rgb24(struct tileFrame_t *frame, const unsigned char *pixels, ptrdiff_t stride, int width, int height);
+extern int tile_frame_from_ximage(struct tileFrame_t *frame, XImage *image);
+extern void tile_start_pass(const struct tileFrame_t *frame);
 extern int adjust_screen_size(int pixles);
-extern int getTileAt(int x, int y, void** buffer, long long *bufferSize, void *desktop, long long desktopsize, int row, int col);
+extern int getTileAt(int x, int y, void** buffer, long long *bufferSize, const struct tileFrame_t *frame, int row, int col);
 extern int getScreenBuffer(char **desktop, long long *desktopsize, XImage *image);
 extern void set_tile_compression(int type, int level);
 
