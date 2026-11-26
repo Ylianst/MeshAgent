@@ -1442,7 +1442,15 @@ void kvm_cleanup()
 int kvm_permissions(void)
 {
 	int ret = AXIsProcessTrusted() ? KVM_PERM_INPUT : 0;
-	if (CGPreflightScreenCaptureAccess()) { ret |= KVM_PERM_SCREEN; }
+	// Screen Recording permission exists from macOS 10.15, so an older macOS lets any process capture the screen
+	if (__builtin_available(macOS 10.15, *))
+	{
+		if (CGPreflightScreenCaptureAccess()) { ret |= KVM_PERM_SCREEN; }
+	}
+	else
+	{
+		ret |= KVM_PERM_SCREEN;
+	}
 	return(ret);
 }
 
@@ -1750,7 +1758,7 @@ static int kvm_permission_step(int bit, const char *name, const char *paneUrl, i
 
 	if (bit == KVM_PERM_SCREEN)
 	{
-		CGRequestScreenCaptureAccess();
+		if (__builtin_available(macOS 10.15, *)) { CGRequestScreenCaptureAccess(); }
 	}
 	else if ((axOptions = CFDictionaryCreate(NULL, axKeys, axValues, 1, &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks)) != NULL)
 	{
