@@ -124,7 +124,7 @@ static int kvm_cursor_init(void)
 	};
 	void *objc, *appkit, *pool;
 	id *deviceRGB, app;
-	SEL frameSel;
+	SEL frameSel, respondsSel, sel;
 	size_t i;
 	long direction;
 
@@ -149,10 +149,16 @@ static int kvm_cursor_init(void)
 	app = KVM_MSG(id)(p_getClass("NSApplication"), p_sel("sharedApplication"));
 	if (app != NULL) { KVM_MSG(BOOL, long)(app, p_sel("setActivationPolicy:"), 2); }
 
-	for (i = 0; i < sizeof(standard) / sizeof(standard[0]); ++i) { kvm_cursor_learn(KVM_MSG(id)(p_NSCursor, p_sel(standard[i].selector)), standard[i].viewer); }
+	// An older macOS lacks some of these, the zoom and window edge pointers came with macOS 15, and sending an unknown selector aborts the process
+	respondsSel = p_sel("respondsToSelector:");
+	for (i = 0; i < sizeof(standard) / sizeof(standard[0]); ++i)
+	{
+		sel = p_sel(standard[i].selector);
+		if (KVM_MSG(BOOL, SEL)(p_NSCursor, respondsSel, sel)) { kvm_cursor_learn(KVM_MSG(id)(p_NSCursor, sel), standard[i].viewer); }
+	}
 	// Directions inward 1, outward 2, both 3, the edge shows one or two arrows depending on whether the window can still shrink or grow
 	frameSel = p_sel("frameResizeCursorFromPosition:inDirections:");
-	for (i = 0; i < sizeof(frame) / sizeof(frame[0]); ++i)
+	for (i = 0; i < sizeof(frame) / sizeof(frame[0]) && KVM_MSG(BOOL, SEL)(p_NSCursor, respondsSel, frameSel); ++i)
 	{
 		for (direction = 1; direction <= 3; ++direction) { kvm_cursor_learn(KVM_MSG(id, long, long)(p_NSCursor, frameSel, frame[i].position, direction), frame[i].viewer); }
 	}
