@@ -1409,8 +1409,40 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 // An install from before that LaunchAgent has the -kvm1 helper at the login window and a -kvm0 child for a user, and no such socket.
 int kvm_login_window_agent(void)
 {
+	return(kvm_agent_socket(0));
+}
+
+// 1 when the agent of the uid has a socket in /tmp, which can be a stale one that an agent left behind when it ended
+int kvm_agent_socket(int uid)
+{
 	char socketPath[128];
-	return(kvm_find_socket(socketPath, sizeof(socketPath), 0));
+	return(kvm_find_socket(socketPath, sizeof(socketPath), (unsigned int)uid));
+}
+
+// Asks launchd to start the LaunchAgent in the session of the uid. During a new user's first-login setup macOS 11.7 held every LaunchAgent back (state waiting, runs 0), so no agent listened until the setup was done.
+// launchctl took up to 1.6 s on a 2013 MacBook Air, so nothing waits for it: it runs in a grandchild that launchd reaps. After fork() only async-signal-safe calls are made, the daemon has other threads.
+void kvm_agent_kickstart(int uid)
+{
+	char target[160];
+	char *args[] = { "/bin/launchctl", "kickstart", target, NULL };
+	const char *label = kvm_service_label();
+	pid_t pid;
+	int status, fd, maxFd;
+
+	if (label == NULL || uid == 0) { return; }
+	snprintf(target, sizeof(target), "gui/%u/%s-launchagent", (unsigned int)uid, label);
+	maxFd = getdtablesize();
+	if ((pid = fork()) == 0)
+	{
+		if (fork() == 0)
+		{
+			// launchctl gets none of the daemon's sockets and files
+			for (fd = 3; fd < maxFd; ++fd) { close(fd); }
+			execv(args[0], args);
+		}
+		_exit(0);
+	}
+	if (pid > 0) { while (waitpid(pid, &status, 0) < 0 && errno == EINTR) { } }
 }
 
 // One attempt to reach the agent that has the screen: the agent of the user who owns /dev/console, or the login window agent when root owns it.

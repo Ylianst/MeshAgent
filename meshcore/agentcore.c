@@ -1144,6 +1144,7 @@ int ILibDuktape_MeshAgent_remoteDesktop_unshiftSink(ILibDuktape_DuplexStream *se
 #ifdef __APPLE__
 #define KVM_RECONNECT_MS 500
 #define KVM_RECONNECT_TICKS 60
+#define KVM_RECONNECT_KICK_TICKS 10
 #define KVM_RECONNECT_STABLE_MS 5000
 
 // At a login macOS ends the login window agent, and the user's agent listened 8 s later on an M2 MacBook Air. One try of 4 s gave up before that and left the viewer on a dead session.
@@ -1171,6 +1172,8 @@ void ILibDuktape_MeshAgent_RemoteDesktop_Reconnect(void *obj)
 	}
 	else if (++ptrs->reconnectTicks < KVM_RECONNECT_TICKS)
 	{
+		// After a normal login the user's agent comes by itself. Still without one after 5 s, launchd is asked once to start it, for a session where macOS holds it back
+		if (ptrs->reconnectTicks == KVM_RECONNECT_KICK_TICKS) { kvm_agent_kickstart(uid); }
 		ILibLifeTime_AddEx(ILibGetBaseTimer(duk_ctx_chain(ptrs->ctx)), ptrs, KVM_RECONNECT_MS, ILibDuktape_MeshAgent_RemoteDesktop_Reconnect, NULL);
 	}
 	else
@@ -1500,8 +1503,21 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		}
 		else
 		{
-			ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
-			if (ptrs->kvmPipe == NULL)
+			// On an install with the LaunchAgent a user without a socket gets no -kvm0 child: started by the daemon it sent the screen size and no picture (macOS 11.7)
+			int hasLaunchAgent = kvm_login_window_agent();
+			if (!hasLaunchAgent || kvm_agent_socket(console_uid))
+			{
+				ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+			}
+			if (ptrs->kvmPipe == NULL && hasLaunchAgent)
+			{
+				// The user's agent does not listen: macOS holds it back during a first-login setup, or it was stopped. launchd is asked to start it and the session waits for it
+				MeshAgent_sendConsoleText(ctx, "KVM: the agent of uid %d does not listen, asking launchd to start it", console_uid);
+				kvm_agent_kickstart(console_uid);
+				ptrs->reconnectTicks = KVM_RECONNECT_KICK_TICKS;
+				ILibLifeTime_AddEx(ILibGetBaseTimer(duk_ctx_chain(ctx)), ptrs, KVM_RECONNECT_MS, ILibDuktape_MeshAgent_RemoteDesktop_Reconnect, NULL);
+			}
+			else if (ptrs->kvmPipe == NULL)
 			{
 				// Only report the failure here. kvm_relay_setup() returns NULL when the KVM socket of the uid is still on disk but the user LaunchAgent is stopped, so nothing accepts on it.
 				// The session object stays cached on purpose. The end sink already deletes REMOTE_DESKTOP_STREAM when the tunnel closes, and deleting it here makes that same end sink read a property off undefined and kill the agent the same way.

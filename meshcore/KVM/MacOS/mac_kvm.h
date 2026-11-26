@@ -38,6 +38,8 @@ void kvm_pause(int pause);
 void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid);
 void* kvm_relay_connect_console(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int *uid);
 int kvm_login_window_agent(void);
+int kvm_agent_socket(int uid);
+void kvm_agent_kickstart(int uid);
 void kvm_set_listener_path(const char *path);
 void kvm_socket_path(char *buf, size_t bufLen, unsigned int uid, int legacy);
 void kvm_relay_reset();
