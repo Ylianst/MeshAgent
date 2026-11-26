@@ -31,6 +31,7 @@ limitations under the License.
 
 #include <sys/ipc.h>
 #include <sys/shm.h>
+#include <sys/socket.h>
 #include <X11/extensions/XShm.h>
 #include <X11/extensions/Xrandr.h>
 #include <X11/keysym.h>
@@ -1184,6 +1185,28 @@ void kvm_server_sighandler(int signum, siginfo_t *info, void *context)
 	g_shutdown = 1;
 }
 
+// The X server attaches the capture segment as its own user, which is not us when a greeter is captured as root,
+// so the segment goes to that user and we keep access as its creator.
+static void kvm_x11_shm_owner(Display *display, int shmid)
+{
+	uid_t serverUid;
+	struct shmid_ds ds;
+#if !defined(_FREEBSD)
+	struct { pid_t pid; uid_t uid; gid_t gid; } peer;	// struct ucred, which glibc only declares with _GNU_SOURCE
+	socklen_t len = sizeof(peer);
+
+	if (getsockopt(x11_exports->XConnectionNumber(display), SOL_SOCKET, SO_PEERCRED, &peer, &len) != 0) { return; }
+	serverUid = peer.uid;
+#else
+	gid_t serverGid;
+
+	if (getpeereid(x11_exports->XConnectionNumber(display), &serverUid, &serverGid) != 0) { return; }
+#endif
+	if (serverUid == 0 || serverUid == geteuid() || shmctl(shmid, IPC_STAT, &ds) != 0) { return; }
+	ds.shm_perm.uid = serverUid;
+	shmctl(shmid, IPC_SET, &ds);
+}
+
 void* kvm_server_mainloop_x11(void* parm)
 {
 	int sessionUid = (int)(intptr_t)parm;
@@ -1458,7 +1481,8 @@ void* kvm_server_mainloop_x11(void* parm)
 			ZPixmap, NULL, &shminfo, SCREEN_WIDTH, SCREEN_HEIGHT);
 		shminfo.shmid = shmget(IPC_PRIVATE,
 			image->bytes_per_line * image->height,
-			IPC_CREAT | 0777);
+			IPC_CREAT | 0600);
+		kvm_x11_shm_owner(imagedisplay, shminfo.shmid);
 		shminfo.shmaddr = image->data = shmat(shminfo.shmid, 0, 0);
 		shminfo.readOnly = False;
 		x11ext_exports->XShmAttach(imagedisplay, &shminfo);
