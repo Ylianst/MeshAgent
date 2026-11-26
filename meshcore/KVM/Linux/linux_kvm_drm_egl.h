@@ -92,7 +92,7 @@ typedef struct kvm_drm_egl_context
 	GLint diff_u_prev;
 	GLint diff_u_size;
 	GLint diff_u_tile;
-	// Render targets per output, because the previous frame of each output stays on the GPU. Target 0 also serves the RGB24 path.
+	// Render targets per output, because the previous frame of each output stays on the GPU and outputs differ in size
 	kvm_drm_egl_target targets[KVM_DRM_EGL_TARGETS];
 	// A GBM device on the DRM node, for render targets in linear buffers. linear_off is set when that does not work on this driver.
 	int drm_fd;
@@ -103,9 +103,9 @@ typedef struct kvm_drm_egl_context
 	uint8_t *rgba_readback;
 	size_t rgba_readback_cap;
 
-	// Set by the caller for a call without an RGB24 buffer. The frame is read back into direct_dest, a 4 byte per pixel buffer
-	// with the bottom row first that can hold several outputs: direct_dest_row_length pixels per row, this output at
-	// column direct_dest_x, its bottom row in buffer row direct_dest_row0.
+	// direct_target is the output's index and is set for every call, it selects the render target. The other fields are set for a call
+	// without an RGB24 buffer: the frame is read back into direct_dest, 4 bytes per pixel, bottom row first, direct_dest_row_length
+	// pixels per row, with this output at column direct_dest_x and its bottom row in buffer row direct_dest_row0.
 	int direct_target;
 	uint8_t *direct_dest;
 	int direct_dest_row_length;

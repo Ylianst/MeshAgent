@@ -3541,9 +3541,10 @@ void *kvm_server_mainloop_drm(void *parm)
 					break;
 				}
 
+				// On both paths, so every output has a render target of its own size
+				dev->eglCtx.direct_target = outputIndex;
 				if (gpuOk)
 				{
-					dev->eglCtx.direct_target = outputIndex;
 					dev->eglCtx.direct_dest = desktopRgbaBuffer;
 					dev->eglCtx.direct_dest_row_length = SCREEN_WIDTH;
 					dev->eglCtx.direct_dest_x = dx;

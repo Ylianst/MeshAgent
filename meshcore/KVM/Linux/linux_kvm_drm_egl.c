@@ -953,8 +953,9 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 		kvm_drm_egl_format_egl_error(out_error, out_error_size, "eglMakeCurrent failed", eglGetError());
 		return false;
 	}
-	// A call without an RGB24 buffer uses the caller's target, so each output keeps its own previous frame. The RGB24 path uses target 0.
-	kvm_drm_egl_target *t = &ctx->targets[(rgb == NULL && ctx->direct_target > 0 && ctx->direct_target < KVM_DRM_EGL_TARGETS) ? ctx->direct_target : 0];
+	// Each output has its own target, so it keeps its own previous frame, and outputs of different sizes do not make one target
+	// free and allocate its buffers again for every output in every frame.
+	kvm_drm_egl_target *t = &ctx->targets[(ctx->direct_target > 0 && ctx->direct_target < KVM_DRM_EGL_TARGETS) ? ctx->direct_target : 0];
 	if (rgb == NULL && (ctx->direct_dest == NULL || ctx->direct_dest_row_length < (int)width || (!ctx->es3 && ctx->direct_dest_row_length != (int)width)))
 	{
 		kvm_drm_egl_copy_error_message(out_error, out_error_size, "No usable destination for the GPU readback");
