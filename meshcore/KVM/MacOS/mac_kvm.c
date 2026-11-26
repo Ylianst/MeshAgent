@@ -115,6 +115,7 @@ void kvm_socket_path(char *buf, size_t bufLen, unsigned int uid, int legacy)
 
 // Writes the socket the daemon should connect to for the uid: the service socket, or the shared one a LaunchAgent started before the update still listens on.
 // Returns 1 when a socket owned by the uid is there. Anybody can bind a name in /tmp while the agent is not listening, so another owner is not the agent.
+// lstat() and the single link because a user can also put a symbolic or hard link to another root daemon's socket there, and stat() saw its owner, root.
 static int kvm_find_socket(char *buf, size_t bufLen, unsigned int uid)
 {
 	struct stat s;
@@ -122,7 +123,7 @@ static int kvm_find_socket(char *buf, size_t bufLen, unsigned int uid)
 	for (legacy = 0; legacy < 2; ++legacy)
 	{
 		kvm_socket_path(buf, bufLen, uid, legacy);
-		if (stat(buf, &s) == 0 && S_ISSOCK(s.st_mode) && s.st_uid == uid) { return(1); }
+		if (lstat(buf, &s) == 0 && S_ISSOCK(s.st_mode) && s.st_uid == uid && s.st_nlink == 1) { return(1); }
 	}
 	return(0);
 }
