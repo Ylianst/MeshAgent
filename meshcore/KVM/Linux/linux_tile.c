@@ -143,9 +143,10 @@ void tile_start_pass(const struct tileFrame_t *frame)
 {
 	int all = tileRefreshPending;
 	size_t bpp = (size_t)frame->bytesPerPixel;
-	size_t refStride = (size_t)frame->width * bpp;
+	// The reference is as wide and high as the tile grid, so a rectangle on the right or bottom edge can be sent as whole tiles
+	size_t refStride = (size_t)TILE_WIDTH_COUNT * (size_t)TILE_WIDTH * bpp;
 	size_t len = (size_t)TILE_WIDTH * bpp;
-	size_t lastLen = refStride - (size_t)(TILE_WIDTH_COUNT - 1) * len;
+	size_t lastLen = (size_t)frame->width * bpp - (size_t)(TILE_WIDTH_COUNT - 1) * len;
 	int row, col, r, rows;
 	// The byte of a 4 byte pixel that holds no colour. A change there alone, which some X servers and compositors make, is no change of the picture.
 	int unusedByte = -1, colourSame;
@@ -174,7 +175,8 @@ void tile_start_pass(const struct tileFrame_t *frame)
 	if (refFrame == NULL || refWidth != frame->width || refHeight != frame->height || refBytesPerPixel != frame->bytesPerPixel)
 	{
 		free(refFrame);
-		refFrame = (unsigned char *)malloc(refStride * (size_t)frame->height);
+		// Zeroed, because the part beyond the frame edge is never written and is sent as black
+		refFrame = (unsigned char *)calloc((size_t)TILE_HEIGHT_COUNT * (size_t)TILE_HEIGHT, refStride);
 		refWidth = frame->width;
 		refHeight = frame->height;
 		refBytesPerPixel = frame->bytesPerPixel;
@@ -254,19 +256,20 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, const struct t
 		captureHeight += TILE_HEIGHT;
 	}
 
-	// The tile grid is rounded up to whole tiles, so a rectangle on the right or bottom edge ends at the frame edge
-	if (x + captureWidth > frame->width) { captureWidth = frame->width - x; }
-	if (y + captureHeight > frame->height) { captureHeight = frame->height - y; }
-
 	// Encoded from the reference frame, which tile_start_pass() just brought up to date for every changed tile.
 	// A DRM frame is the live scanout buffer and can change after the compare, and then the picture sent would differ from the reference.
 	if (refFrame != NULL && refWidth == frame->width && refHeight == frame->height && refBytesPerPixel == frame->bytesPerPixel)
 	{
-		ptrdiff_t refStride = (ptrdiff_t)refWidth * refBytesPerPixel;
+		// Whole tiles also on the right and bottom edge, out of the padded reference. The server's desktop multiplexer counts a picture
+		// in 16 pixel slots, and a picture cut off at the screen edge left its count wrong, so it was kept for good or dropped too early.
+		ptrdiff_t refStride = (ptrdiff_t)TILE_WIDTH_COUNT * TILE_WIDTH * refBytesPerPixel;
 		tileJpeg = write_JPEG_rect(refFrame + (ptrdiff_t)y * refStride + (ptrdiff_t)x * refBytesPerPixel, refStride, captureWidth, captureHeight, refBytesPerPixel, frame->format, COMPRESSION_QUALITY, &tileJpegLength);
 	}
 	else
 	{
+		// Without a reference the frame itself is encoded, and it ends at the screen edge
+		if (x + captureWidth > frame->width) { captureWidth = frame->width - x; }
+		if (y + captureHeight > frame->height) { captureHeight = frame->height - y; }
 		tileJpeg = write_JPEG_rect(frame->pixels + (ptrdiff_t)y * frame->stride + (ptrdiff_t)x * frame->bytesPerPixel, frame->stride, captureWidth, captureHeight, frame->bytesPerPixel, frame->format, COMPRESSION_QUALITY, &tileJpegLength);
 	}
 
