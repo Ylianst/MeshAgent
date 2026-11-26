@@ -658,6 +658,7 @@ void get_tile_at(void** buffer, long long *bufferSize, void *desktop, int row, i
 static unsigned char *cursorSave = NULL;
 static size_t cursorSaveSize = 0;
 static int cursorSaveX = 0, cursorSaveY = 0, cursorSaveW = 0, cursorSaveH = 0;
+static int cursorSaveBufW = 0, cursorSaveBufH = 0; // The buffer layout the rectangle was saved in
 static HDC hCursorDC = NULL;
 static HBITMAP hCursorBitmap = NULL;
 static HGDIOBJ hCursorOldBitmap = NULL;
@@ -672,6 +673,9 @@ static unsigned char *capture_row(int y, int bufW, int bufH)
 
 static void dxgi_cursor_restore(int bufW, int bufH)
 {
+	// A portrait and a landscape layout have the same byte size, so the buffer is kept across a rotation or a display switch.
+	// A rectangle saved in the other layout would be put back past the row ends and past the buffer, so it is dropped.
+	if (bufW != cursorSaveBufW || bufH != cursorSaveBufH || cursorSaveX + cursorSaveW > bufW || cursorSaveY + cursorSaveH > bufH) { cursorSaveW = cursorSaveH = 0; }
 	for (int r = 0; r < cursorSaveH; r++)
 	{
 		memcpy(capture_row(cursorSaveY + r, bufW, bufH) + (size_t)cursorSaveX * 4, cursorSave + (size_t)r * cursorSaveW * 4, (size_t)cursorSaveW * 4);
@@ -789,6 +793,8 @@ static void dxgi_cursor_draw(int x, int y, int bufW, int bufH)
 	cursorSaveY = y0;
 	cursorSaveW = x1 - x0;
 	cursorSaveH = y1 - y0;
+	cursorSaveBufW = bufW;
+	cursorSaveBufH = bufH;
 	for (int r = y0; r < y1; r++)
 	{
 		unsigned char *row = capture_row(r, bufW, bufH) + (size_t)x0 * 4;
