@@ -115,6 +115,9 @@
     <ClCompile Include="..\meshcore\KVM\Windows\kvm.c">
       <Filter>Meshcore\KVM</Filter>
     </ClCompile>
+    <ClCompile Include="..\meshcore\KVM\Windows\dxgi_capture.cpp">
+      <Filter>Meshcore\KVM</Filter>
+    </ClCompile>
     <ClCompile Include="..\meshcore\KVM\Windows\tile.cpp">
       <Filter>Meshcore\KVM</Filter>
     </ClCompile>
@@ -274,6 +277,9 @@
       <Filter>Meshcore\KVM</Filter>
     </ClInclude>
     <ClInclude Include="..\meshcore\KVM\Windows\kvm.h">
+      <Filter>Meshcore\KVM</Filter>
+    </ClInclude>
+    <ClInclude Include="..\meshcore\KVM\Windows\dxgi_capture.h">
       <Filter>Meshcore\KVM</Filter>
     </ClInclude>
     <ClInclude Include="..\meshcore\KVM\Windows\tile.h">

@@ -908,6 +908,13 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(char *
 		Duktape_Console_LogEx(ptrs->ctx, ILibDuktape_LogType_Info1, "%s", buffer + 4);
 	}
 
+	// A NULL buffer is the KVM giving up on the session, which ends the viewer's stream
+	if (buffer == NULL)
+	{
+		if (ptrs->stream != NULL) { ILibDuktape_DuplexStream_WriteEnd(ptrs->stream); }
+		return ILibTransport_DoneState_COMPLETE;
+	}
+
 	if (ptrs->stream != NULL)
 	{
 		if (ILibDuktape_DuplexStream_WriteData(ptrs->stream, buffer, bufferLen) != ILibTransport_DoneState_ERROR)

@@ -24,22 +24,19 @@ extern "C"
 {
 #endif
 
-struct tileInfo_t {
-	int crc;
-	char flags; // See TILE_FLAGS_ENUM
-};
-
-enum TILE_FLAGS_ENUM {
-	TILE_TODO,				// The tile CRC needs to be calculated.
-	TILE_SENT,				// CRC has been calculated and the tile has been sent.
-	TILE_MARKED_NOT_SENT,	// CRC has been calculated, but the tile was not sent.
-	TILE_DONT_SEND			// CRC has been calculated, tile need not be sent.
-	//TILE_SKIPPED			// CRC has been calculated, tile need not be sent, but was skipped to include a greater region
-};
+// Owned by tile.cpp, the capture loop in kvm.c only reads them
+extern int TILE_WIDTH;
+extern int TILE_HEIGHT;
+extern int TILE_WIDTH_COUNT;
+extern int TILE_HEIGHT_COUNT;
 
 short initialize_gdiplus();
 void teardown_gdiplus();
-int get_tile_at(int x, int y, void** buffer, long long *bufferSize, void *desktop, int row, int col);
+void get_tile_at(void** buffer, long long *bufferSize, void *desktop, int row, int col);
+void tile_info_alloc(void);			// Sizes the tile table for the current scaled screen
+void tile_info_free(void);
+void tile_start_pass(void *desktop);	// Called by the capture loop before it walks the tiles, marks the changed ones
+void tile_request_refresh(void);	// Safe from any thread
 int get_desktop_buffer(void **buffer, long long *bufferSize, long*);
 BITMAPINFO get_bmp_info(int width, int height);
 void set_tile_compression(int type, int level);

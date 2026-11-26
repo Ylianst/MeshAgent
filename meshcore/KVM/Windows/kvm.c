@@ -20,6 +20,7 @@ limitations under the License.
 #include <stdio.h>
 #include "kvm.h"
 #include "tile.h"
+#include "dxgi_capture.h"
 #include <signal.h>
 #include "input.h"
 #include <Winuser.h>
@@ -92,8 +93,6 @@ void KvmCriticalLog(const char *msg, const char *file, int line, int user1, int 
 #define KVMDEBUG2(...)
 #endif
 
-int TILE_WIDTH = 0;
-int TILE_HEIGHT = 0;
 int SCREEN_COUNT = -1;		// Total number of displays
 int SCREEN_SEL = 0;			// Currently selected display (0 = all)
 int SCREEN_SEL_TARGET = 0;	// Desired selected display (0 = all)
@@ -109,9 +108,6 @@ int VSCREEN_HEIGHT = 0;		// Height of virtual screen
 int SCALED_WIDTH = 0;
 int SCALED_HEIGHT = 0;
 int PIXEL_SIZE = 0;
-int TILE_WIDTH_COUNT = 0;
-int TILE_HEIGHT_COUNT = 0;
-int COMPRESSION_RATIO = 0;
 int SCALING_FACTOR = 1024;	   // Scaling factor, 1024 = 100%
 int SCALING_FACTOR_NEW = 1024; // Desired scaling factor, 1024 = 100%
 int FRAME_RATE_TIMER = 0;
@@ -120,7 +116,9 @@ int g_shutdown = 999;
 int g_pause = 0;
 int g_remotepause = 1;
 int g_restartcount = 0;
-struct tileInfo_t **tileInfo = NULL;
+static long long g_lastKvmSpawn = 0;	// ILibGetUptime() when the current slave was started
+#define KVM_RESTART_MAX_BURST 5			// crashed slaves in a row before the session is ended
+#define KVM_RESTART_RESET_MS 30000		// a slave that ran this long was healthy, so the count starts again
 int g_slavekvm = 0;
 static ILibProcessPipe_Process gChildProcess;
 int kvm_relay_restart(int paused, void *pipeMgr, char *exePath, ILibKVM_WriteHandler writeHandler, void *reserved);
@@ -488,6 +486,10 @@ int kvm_server_inputdata(char *block, int blocklen, ILibKVM_WriteHandler writeHa
 
 	ILibRemoteLogging_printf(gKVMRemoteLogging, ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_2, "KVM [SLAVE]: Handle Input [Len = %d, type = %u, size = %u]", blocklen, type, size);
 
+	// A command is at least its 4 byte header, so a smaller size can never be completed and the callers waited on it for good.
+	// The stream cannot be read past such a header, so what is in the buffer is dropped and reading starts again with the next data.
+	if (size < 4)
+		return blocklen;
 	if (size > blocklen)
 		return 0;
 
@@ -590,12 +592,10 @@ int kvm_server_inputdata(char *block, int blocklen, ILibKVM_WriteHandler writeHa
 		{
 			set_tile_compression((int)block[4], (int)block[5]);
 		}
-		COMPRESSION_RATIO = 100;
 		break;
 	}
 	case MNG_KVM_REFRESH: // Refresh
 	{
-		int row, col;
 		char buffer[8];
 		if (size != 4)
 			break;
@@ -610,25 +610,8 @@ int kvm_server_inputdata(char *block, int blocklen, ILibKVM_WriteHandler writeHa
 		// Send the list of available displays
 		kvm_send_display_list(writeHandler, reserved);
 
-		// Reset all tile information
-		if (tileInfo == NULL)
-		{
-			if ((tileInfo = (struct tileInfo_t **)malloc(TILE_HEIGHT_COUNT * sizeof(struct tileInfo_t *))) == NULL)
-				ILIBCRITICALEXIT(254);
-			for (row = 0; row < TILE_HEIGHT_COUNT; row++)
-			{
-				if ((tileInfo[row] = (struct tileInfo_t *)malloc(TILE_WIDTH_COUNT * sizeof(struct tileInfo_t))) == NULL)
-					ILIBCRITICALEXIT(254);
-			}
-		}
-		for (row = 0; row < TILE_HEIGHT_COUNT; row++)
-		{
-			for (col = 0; col < TILE_WIDTH_COUNT; col++)
-			{
-				tileInfo[row][col].crc = 0xFF;
-				tileInfo[row][col].flags = 0;
-			}
-		}
+		// The next pass sends the whole screen again
+		tile_request_refresh();
 
 		break;
 	}
@@ -726,8 +709,13 @@ typedef struct kvm_data_handler
 	char buffer[];
 } kvm_data_handler;
 
-// Feed network data into the KVM. Return the number of bytes consumed.
-// This method consumes as many input commands as it can.
+// Console mode gets the viewer's data as the stream hands it over, and the caller does not keep what was not used.
+// So a command split over two writes waits here for its rest. Any command fits, its size field is 16 bit.
+static char kvmConsoleInput[65536];
+static int kvmConsoleInputLen = 0;
+
+// Feed network data into the KVM. Return the number of bytes consumed, which is all of it.
+// This method consumes as many input commands as it can and keeps the start of an incomplete one.
 int kvm_relay_feeddata(char *buf, int len, ILibKVM_WriteHandler writeHandler, void *reserved)
 {
 	if (gChildProcess != NULL)
@@ -742,17 +730,26 @@ int kvm_relay_feeddata(char *buf, int len, ILibKVM_WriteHandler writeHandler, vo
 		ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_2, "KVM [Master]: Write Input [Type = %u]", ntohs(((unsigned short *)buf)[0]));
 		return len;
 	}
-	else
+	else if (kvmConsoleMode)
 	{
-		int len2 = 0;
-		int ptr = 0;
-		// while ((len2 = kvm_server_inputdata(buf + ptr, len - ptr, kvm_relay_feeddata_ex, (void*[]) {writeHandler, reserved})) != 0) { ptr += len2; }
-		while ((len2 = kvm_server_inputdata(buf + ptr, len - ptr, writeHandler, reserved)) != 0)
+		int len2, ptr, take, used = 0;
+		while (used < len)
 		{
-			ptr += len2;
+			// An incomplete command is shorter than the buffer, so there is always room for more
+			take = len - used;
+			if (take > (int)sizeof(kvmConsoleInput) - kvmConsoleInputLen) { take = (int)sizeof(kvmConsoleInput) - kvmConsoleInputLen; }
+			memcpy(kvmConsoleInput + kvmConsoleInputLen, buf + used, (size_t)take);
+			kvmConsoleInputLen += take;
+			used += take;
+			ptr = 0;
+			while (ptr < kvmConsoleInputLen && (len2 = kvm_server_inputdata(kvmConsoleInput + ptr, kvmConsoleInputLen - ptr, writeHandler, reserved)) != 0) { ptr += len2; }
+			if (ptr > 0 && ptr < kvmConsoleInputLen) { memmove(kvmConsoleInput, kvmConsoleInput + ptr, (size_t)(kvmConsoleInputLen - ptr)); }
+			kvmConsoleInputLen -= ptr;
 		}
-		return ptr;
+		return len;
 	}
+	// Service mode without a slave: the session gave up or is ending. The input is dropped, it must never be handled in the service's own process
+	return len;
 }
 
 // Set the KVM pause state
@@ -781,33 +778,19 @@ void kvm_pause(int pause)
 void kvm_server_SetResolution(ILibKVM_WriteHandler writeHandler, void *reserved)
 {
 	char buffer[8];
-	int row, col;
 
 	KVMDEBUG("kvm_server_SetResolution", 0);
 
-	// Free the tileInfo before you manipulate the TILE_HEIGHT_COUNT
-	if (tileInfo != NULL)
-	{
-		for (row = 0; row < TILE_HEIGHT_COUNT; row++)
-		{
-			free(tileInfo[row]);
-		}
-		free(tileInfo);
-		tileInfo = NULL;
-	}
+	// Every display, resolution or desktop change starts a new duplication on the next frame
+	dxgi_capture_release();
 
 	// Setup scaling
 	SCALING_FACTOR = SCALING_FACTOR_NEW;
 	SCALED_WIDTH = (SCREEN_WIDTH * SCALING_FACTOR) / 1024;
 	SCALED_HEIGHT = (SCREEN_HEIGHT * SCALING_FACTOR) / 1024;
 
-	// Compute the tile count
-	TILE_WIDTH_COUNT = SCALED_WIDTH / TILE_WIDTH;
-	TILE_HEIGHT_COUNT = SCALED_HEIGHT / TILE_HEIGHT;
-	if (SCALED_WIDTH % TILE_WIDTH)
-		TILE_WIDTH_COUNT++;
-	if (SCALED_HEIGHT % TILE_HEIGHT)
-		TILE_HEIGHT_COUNT++;
+	// A new table of stale tiles, so the next pass sends the whole screen
+	tile_info_alloc();
 
 	((unsigned short *)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_SCREEN); // Write the type
 	((unsigned short *)buffer)[1] = (unsigned short)htons((unsigned short)8);			   // Write the size
@@ -815,22 +798,6 @@ void kvm_server_SetResolution(ILibKVM_WriteHandler writeHandler, void *reserved)
 	((unsigned short *)buffer)[3] = (unsigned short)htons((unsigned short)SCALED_HEIGHT);  // Y position
 
 	writeHandler((char *)buffer, 8, reserved);
-
-	if ((tileInfo = (struct tileInfo_t **)malloc(TILE_HEIGHT_COUNT * sizeof(struct tileInfo_t *))) == NULL)
-		ILIBCRITICALEXIT(254);
-	for (row = 0; row < TILE_HEIGHT_COUNT; row++)
-	{
-		if ((tileInfo[row] = (struct tileInfo_t *)malloc(TILE_WIDTH_COUNT * sizeof(struct tileInfo_t))) == NULL)
-			ILIBCRITICALEXIT(254);
-	}
-	for (row = 0; row < TILE_HEIGHT_COUNT; row++)
-	{
-		for (col = 0; col < TILE_WIDTH_COUNT; col++)
-		{
-			tileInfo[row][col].crc = 0xFF;
-			tileInfo[row][col].flags = 0;
-		}
-	}
 }
 
 #define BUFSIZE 65535
@@ -840,7 +807,8 @@ DWORD WINAPI kvm_mainloopinput_ex(LPVOID Param)
 	int ptr = 0;
 	int ptr2 = 0;
 	int len = 0;
-	char pchRequest2[30000];
+	// The size field of a command is 16 bit, so this holds any command. With 30000 bytes a larger one never completed and the KVM shut down.
+	static char pchRequest2[65536];
 	BOOL fSuccess = FALSE;
 	DWORD cbBytesRead = 0;
 	ILibKVM_WriteHandler writeHandler = (ILibKVM_WriteHandler)((void **)Param)[0];
@@ -852,7 +820,7 @@ DWORD WINAPI kvm_mainloopinput_ex(LPVOID Param)
 
 	while (!g_shutdown)
 	{
-		fSuccess = ReadFile(hStdIn, pchRequest2 + len, 30000 - len, &cbBytesRead, NULL);
+		fSuccess = ReadFile(hStdIn, pchRequest2 + len, (DWORD)(sizeof(pchRequest2) - len), &cbBytesRead, NULL);
 		if (!fSuccess || cbBytesRead == 0 || g_shutdown)
 		{
 			ILibRemoteLogging_printf(gKVMRemoteLogging, ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "KVM [SLAVE]: fSuccess/%d  cbBytesRead/%d  g_shutdown/%d", fSuccess, cbBytesRead, g_shutdown);
@@ -861,17 +829,14 @@ DWORD WINAPI kvm_mainloopinput_ex(LPVOID Param)
 			break;
 		}
 		len += cbBytesRead;
-		ptr2 = 0;
-		while ((ptr2 = kvm_server_inputdata((char *)pchRequest2 + ptr, len - ptr, writeHandler, reserved)) != 0)
+		ptr = 0;
+		while (ptr < len && (ptr2 = kvm_server_inputdata((char *)pchRequest2 + ptr, len - ptr, writeHandler, reserved)) != 0)
 		{
 			ptr += ptr2;
 		}
-		if (ptr == len)
-		{
-			len = 0;
-			ptr = 0;
-		}
-		// TODO: else move the reminder.
+		// A command split over two reads stays in the buffer, moved to its start. Left in place, each one made the buffer fuller until the KVM shut down.
+		if (ptr > 0 && ptr < len) { memmove(pchRequest2, pchRequest2 + ptr, (size_t)(len - ptr)); }
+		len -= ptr;
 	}
 	ILibRemoteLogging_printf(gKVMRemoteLogging, ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "KVM [SLAVE]: (mainloopinput) Exiting...");
 	ILibRemoteLogging_Destroy(gKVMRemoteLogging);
@@ -912,10 +877,9 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	// long prev_timestamp = 0;
 	// long time_diff = 50;
 	long long tilesize;
-	int width, height = 0;
+	int height = 0;
 	void *buf, *desktop;
 	long long desktopsize;
-	BITMAPINFO bmpInfo;
 	int row, col;
 	ILibKVM_WriteHandler writeHandler = (ILibKVM_WriteHandler)((void **)parm)[0];
 	void *reserved = ((void **)parm)[1];
@@ -990,37 +954,23 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	}
 #endif
 
-	// Set all CRCs to 0xFF
-	for (row = 0; row < TILE_HEIGHT_COUNT; row++)
-	{
-		for (col = 0; col < TILE_WIDTH_COUNT; col++)
-		{
-			tileInfo[row][col].crc = 0xFF;
-		}
-	}
-
 	// Send the list of displays
 	kvm_send_display_list(writeHandler, reserved);
 
 	Sleep(100); // Pausing here seems to fix connection issues, especially with WebRTC. TODO: Investigate why.
 	KVMDEBUG("kvm_server_mainloop / start3", (int)GetCurrentThreadId());
 
+	LARGE_INTEGER frameFreq, frameNow;
+	long long frameDeadline, frameMinIdle;
+	QueryPerformanceFrequency(&frameFreq);
+	QueryPerformanceCounter(&frameNow);
+	frameDeadline = frameNow.QuadPart;
+
 	// Loop and send only when a tile changes.
 	while (!g_shutdown)
 	{
 		KVMDEBUG("kvm_server_mainloop / loop1", (int)GetCurrentThreadId());
 
-		// Reset all the flags to TILE_TODO
-		for (row = 0; row < TILE_HEIGHT_COUNT; row++)
-		{
-			for (col = 0; col < TILE_WIDTH_COUNT; col++)
-			{
-				tileInfo[row][col].flags = (char)TILE_TODO;
-#ifdef KVM_ALL_TILES
-				tileInfo[row][col].crc = 0xFF;
-#endif
-			}
-		}
 		CheckDesktopSwitch(1, writeHandler, reserved);
 		if (g_shutdown)
 			break;
@@ -1123,14 +1073,11 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 		else
 		{
 			captureFailedSince = 0;
-			bmpInfo = get_bmp_info(TILE_WIDTH, TILE_HEIGHT);
+			tile_start_pass(desktop);
 			for (row = 0; row < TILE_HEIGHT_COUNT; row++)
 			{
 				for (col = 0; col < TILE_WIDTH_COUNT; col++)
 				{
-					height = TILE_HEIGHT * row;
-					width = TILE_WIDTH * col;
-
 					while (!g_shutdown && (g_pause))
 					{
 						Sleep(50); /*printf(".");*/
@@ -1138,22 +1085,10 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 
 					if (g_shutdown || SCALING_FACTOR != SCALING_FACTOR_NEW)
 					{
-						height = SCALED_HEIGHT;
-						width = SCALED_WIDTH;
 						break;
 					}
 
-					// Skip the tile if it has already been sent or if the CRC is same as before
-					if (tileInfo[row][col].flags == (char)TILE_SENT || tileInfo[row][col].flags == (char)TILE_DONT_SEND)
-					{
-						continue;
-					}
-
-					if (get_tile_at(width, height, &buf, &tilesize, desktop, row, col) == 1)
-					{
-						// GetTileAt failed, lets not send the tile
-						continue;
-					}
+					get_tile_at(&buf, &tilesize, desktop, row, col);
 					if (buf && !g_shutdown)
 					{
 						KVMDEBUG2("Writing JPEG: %llu bytes", tilesize);
@@ -1166,8 +1101,6 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 							break;
 						case ILibTransport_DoneState_ERROR:
 							g_shutdown = 1;
-							height = SCALED_HEIGHT;
-							width = SCALED_WIDTH;
 							KVMDEBUG2("JPEG WRITE resulted in ERROR");
 							break;
 						}
@@ -1178,42 +1111,32 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 
 			KVMDEBUG("kvm_server_mainloop / loop2", (int)GetCurrentThreadId());
 
-			if (desktop)
-				free(desktop);
+			// The capture buffer is kept across frames and freed in teardown_gdiplus()
 			desktop = NULL;
 			desktopsize = 0;
 		}
 
 		KVMDEBUG("kvm_server_mainloop / loop3", (int)GetCurrentThreadId());
 
-		// We can't go full speed here, we need to slow this down.
-		height = FRAME_RATE_TIMER;
-		while (!g_shutdown && height > 0)
+		// The frame timer is the frame period, so the work of this frame comes off the wait and a late Sleep() is made up in the next frame.
+		// At least a quarter of the timer is always slept, for a machine where the work alone takes longer than the timer.
+		QueryPerformanceCounter(&frameNow);
+		frameDeadline += (long long)FRAME_RATE_TIMER * frameFreq.QuadPart / 1000;
+		frameMinIdle = frameNow.QuadPart + (long long)(FRAME_RATE_TIMER / 4) * frameFreq.QuadPart / 1000;
+		if (frameDeadline < frameMinIdle) { frameDeadline = frameMinIdle; }
+		do
 		{
-			if (height > 50)
-			{
-				height -= 50;
-				Sleep(50);
-			}
-			else
-			{
-				Sleep(height);
-				height = 0;
-			}
+			QueryPerformanceCounter(&frameNow);
+			height = (int)((frameDeadline - frameNow.QuadPart) * 1000 / frameFreq.QuadPart);
+			if (height > 0) { Sleep(height > 50 ? 50 : height); }
 			SleepEx(0, TRUE);
-		}
+		} while (!g_shutdown && height > 0);
 	}
 
 	KVMDEBUG("kvm_server_mainloop / end3", (int)GetCurrentThreadId());
 	KVMDEBUG("kvm_server_mainloop / end2", (int)GetCurrentThreadId());
 
-	if (tileInfo != NULL)
-	{
-		for (row = 0; row < TILE_HEIGHT_COUNT; row++)
-			free(tileInfo[row]);
-		free(tileInfo);
-		tileInfo = NULL;
-	}
+	tile_info_free();
 	KVMDEBUG("kvm_server_mainloop / end1", (int)GetCurrentThreadId());
 	teardown_gdiplus();
 
@@ -1269,6 +1192,17 @@ DWORD WINAPI kvm_server_mainloop(LPVOID parm)
 }
 
 #ifdef _WINSERVICE
+// Only crashes count: on a desktop switch the slave exits with 0 and is restarted with the other token, which can happen often.
+// A clean exit, or a slave that ran long enough, starts the count again, so only a slave that keeps crashing ends the session.
+static int kvm_relay_should_restart(int exitCode)
+{
+	if (exitCode == 0 || (g_lastKvmSpawn != 0 && ILibGetUptime() - g_lastKvmSpawn >= KVM_RESTART_RESET_MS)) { g_restartcount = 0; }
+	if (exitCode == 0) { return 1; }
+	if (g_restartcount >= KVM_RESTART_MAX_BURST) { return 0; }
+	g_restartcount++;
+	return 1;
+}
+
 void kvm_relay_ExitHandler(ILibProcessPipe_Process sender, int exitCode, void *user)
 {
 	ILibKVM_WriteHandler writeHandler = (ILibKVM_WriteHandler)((void **)user)[0];
@@ -1276,18 +1210,28 @@ void kvm_relay_ExitHandler(ILibProcessPipe_Process sender, int exitCode, void *u
 	void *pipeMgr = ((void **)user)[2];
 	char *exePath = (char *)((void **)user)[3];
 
-	ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "Agent KVM: KVM Child Process(%d) [EXITED]", g_slavekvm);
-	UNREFERENCED_PARAMETER(exitCode);
-	UNREFERENCED_PARAMETER(sender);
+	ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "Agent KVM: KVM Child Process(%d) [EXITED] code 0x%08X", g_slavekvm, (unsigned int)exitCode);
 
-	if (g_restartcount < 4 && g_shutdown == 0)
+	if (g_shutdown == 0 && kvm_relay_should_restart(exitCode))
 	{
 		kvm_relay_restart(1, pipeMgr, exePath, writeHandler, reserved);
 	}
 	else
 	{
 		ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "Agent KVM: g_restartcount = %d, aborting", g_restartcount);
-		writeHandler(NULL, 0, reserved);
+		// ILibProcessPipe frees the process object after this handler. Left in gChildProcess, the viewer's disconnect used it in kvm_pause() and crashed the service
+		if (gChildProcess == sender) { gChildProcess = NULL; }
+		if (g_shutdown == 0)
+		{
+			// The slave keeps crashing. The viewer gets the reason and its stream is ended, a still picture without a word looks like a hang
+			char msg[] = "KVM Child process keeps exiting unexpectedly, the session is ended";
+			char buffer[128];
+			((unsigned short *)buffer)[0] = (unsigned short)htons((unsigned short)MNG_ERROR);	  // Write the type
+			((unsigned short *)buffer)[1] = (unsigned short)htons((unsigned short)(sizeof(msg) + 3)); // Write the size
+			memcpy_s(buffer + 4, sizeof(buffer) - 4, msg, sizeof(msg) - 1);
+			writeHandler(buffer, (int)sizeof(msg) + 3, reserved);
+			writeHandler(NULL, 0, reserved);
+		}
 	}
 }
 
@@ -1385,6 +1329,7 @@ int kvm_relay_restart(int paused, void *pipeMgr, char *exePath, ILibKVM_WriteHan
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "KVM [Master]: Spawning Slave as %s", gProcessSpawnType == ILibProcessPipe_SpawnTypes_USER ? "USER" : "WIN_LOGON");
 	gChildProcess = ILibProcessPipe_Manager_SpawnProcessEx3(pipeMgr, exePath, paused == 0 ? parms0 : parms1, gProcessSpawnType, (void *)(ULONG_PTR)gProcessTSID, 0);
+	g_lastKvmSpawn = ILibGetUptime();
 	gProcessSpawnType = (gProcessSpawnType == ILibProcessPipe_SpawnTypes_SPECIFIED_USER || gProcessSpawnType == ILibProcessPipe_SpawnTypes_USER) ? ILibProcessPipe_SpawnTypes_WINLOGON : (gProcessTSID < 0 ? ILibProcessPipe_SpawnTypes_USER : ILibProcessPipe_SpawnTypes_SPECIFIED_USER);
 
 	g_slavekvm = ILibProcessPipe_Process_GetPID(gChildProcess);
@@ -1439,6 +1384,8 @@ int kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler wr
 			free(parms);
 			return 0;
 		}
+		// A new session does not continue a command the last one left unfinished
+		kvmConsoleInputLen = 0;
 		kvmthread = CreateThread(NULL, 0, kvm_server_mainloop, (void *)parms, 0, 0);
 		if (kvmthread != 0)
 		{
@@ -1475,196 +1422,5 @@ void kvm_cleanup()
 		ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "KVM.c/kvm_cleanup: gChildProcess = NULL");
 	}
 }
-
-////
-//// Desktop Duplication API KVM
-////
-// #include <d3d11.h>
-// #include <dxgi1_2.h>
-//
-// typedef struct D3D11_Functions
-//{
-//	HRESULT(*D3D11CreateDevice)(
-//		IDXGIAdapter            *pAdapter,
-//		D3D_DRIVER_TYPE         DriverType,
-//		HMODULE                 Software,
-//		UINT                    Flags,
-//		const D3D_FEATURE_LEVEL *pFeatureLevels,
-//		UINT                    FeatureLevels,
-//		UINT                    SDKVersion,
-//		ID3D11Device            **ppDevice,
-//		D3D_FEATURE_LEVEL       *pFeatureLevel,
-//		ID3D11DeviceContext     **ppImmediateContext
-//		);
-// }D3D11_Functions;
-
-// void DD_Init()
-//{
-// int i;
-// HRESULT hr;
-// ID3D11Device* m_Device;
-// ID3D11DeviceContext* m_DeviceContext;
-// IDXGIFactory2* m_Factory;
-// DWORD m_OcclusionCookie;
-// DXGI_OUTDUPL_DESC lOutputDuplDesc;
-// ID3D11Texture2D *lGDIImage;
-// ID3D11Texture2D *desktopImage;
-// ID3D11Texture2D *destinationImage;
-
-// DXGI_OUTDUPL_FRAME_INFO lFrameInfo;
-// IDXGIResource *lDesktopResource;
-
-// D3D11_Functions funcs;
-
-// HMODULE _D3D = NULL;
-// if ((_D3D = LoadLibraryExA((LPCSTR)"D3D11.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32)) != NULL)
-//{
-//	(FARPROC)funcs.D3D11CreateDevice = GetProcAddress(_D3D, "D3D11CreateDevice");
-// }
-
-// D3D_DRIVER_TYPE DriverTypes[] =
-//{
-//	D3D_DRIVER_TYPE_HARDWARE,
-//	D3D_DRIVER_TYPE_WARP,
-//	D3D_DRIVER_TYPE_REFERENCE,
-// };
-// UINT NumDriverTypes = ARRAYSIZE(DriverTypes);
-
-//// Feature levels supported
-// D3D_FEATURE_LEVEL FeatureLevels[] =
-//{
-//	D3D_FEATURE_LEVEL_11_0,
-//	D3D_FEATURE_LEVEL_10_1,
-//	D3D_FEATURE_LEVEL_10_0,
-//	D3D_FEATURE_LEVEL_9_1
-// };
-// UINT NumFeatureLevels = ARRAYSIZE(FeatureLevels);
-// D3D_FEATURE_LEVEL FeatureLevel;
-
-//// Create device
-// for (UINT DriverTypeIndex = 0; DriverTypeIndex < NumDriverTypes; ++DriverTypeIndex)
-//{
-//	hr = funcs.D3D11CreateDevice(NULL, DriverTypes[DriverTypeIndex], NULL, 0, FeatureLevels, NumFeatureLevels, D3D11_SDK_VERSION, &m_Device, &FeatureLevel, &m_DeviceContext);
-//	if (SUCCEEDED(hr))
-//	{
-//		// Device creation succeeded, no need to loop anymore
-//		break;
-//	}
-// }
-// if (FAILED(hr))
-//{
-//	DebugBreak();
-// }
-
-//// Get DXGI factory
-// IDXGIDevice* DxgiDevice = NULL;
-// hr = m_Device->lpVtbl->QueryInterface(m_Device, &IID_IDXGIDevice, (void**)&DxgiDevice);
-// if (FAILED(hr))
-//{
-//	DebugBreak();
-// }
-
-// IDXGIAdapter* DxgiAdapter = NULL;
-// hr = DxgiDevice->lpVtbl->GetParent(DxgiDevice, &IID_IDXGIAdapter, (void**)&DxgiAdapter);
-// DxgiDevice->lpVtbl->Release(DxgiDevice);
-// DxgiDevice = NULL;
-// if (FAILED(hr))
-//{
-//	DebugBreak();
-// }
-
-// hr = DxgiAdapter->lpVtbl->GetParent(DxgiAdapter, &IID_IDXGIFactory2, (void**)&m_Factory);
-// DxgiAdapter->lpVtbl->Release(DxgiAdapter);
-// DxgiAdapter = NULL;
-// if (FAILED(hr))
-//{
-//	DebugBreak();
-//	//return ProcessFailure(m_Device, L"Failed to get parent DXGI Factory", L"Error", hr, SystemTransitionsExpectedErrors);
-// }
-
-// IDXGIOutput1 *DxgiOutput1;
-// hr = m_Device->lpVtbl->QueryInterface(m_Device, &IID_IDXGIOutput, (void**)&DxgiOutput1);
-// if (FAILED(hr))
-//{
-//	DebugBreak();
-// }
-
-// IDXGIOutputDuplication *dupl = NULL;
-// DxgiOutput1->lpVtbl->DuplicateOutput(DxgiOutput1, m_Device, &dupl);
-
-//// Create GUI drawing texture
-// dupl->lpVtbl->GetDesc(dupl, &lOutputDuplDesc);
-
-// D3D11_TEXTURE2D_DESC desc;
-// desc.Width = lOutputDuplDesc.ModeDesc.Width;
-// desc.Height = lOutputDuplDesc.ModeDesc.Height;
-// desc.Format = lOutputDuplDesc.ModeDesc.Format;
-// desc.ArraySize = 1;
-// desc.BindFlags = D3D11_BIND_RENDER_TARGET;
-// desc.MiscFlags = D3D11_RESOURCE_MISC_GDI_COMPATIBLE;
-// desc.SampleDesc.Count = 1;
-// desc.SampleDesc.Quality = 0;
-// desc.MipLevels = 1;
-// desc.CPUAccessFlags = 0;
-// desc.Usage = D3D11_USAGE_DEFAULT;
-
-// hr = m_Device->lpVtbl->CreateTexture2D(m_Device, &desc, NULL, &lGDIImage);
-// hr = m_Device->lpVtbl->CreateTexture2D(m_Device, &desc, NULL, &destinationImage);
-
-// if (FAILED(hr))
-//{
-//	DebugBreak();
-// }
-
-//// Get new frame
-// for (i = 0; i < 5; ++i)
-//{
-//	hr = dupl->lpVtbl->AcquireNextFrame(dupl, 250, &lFrameInfo, &lDesktopResource);
-//	if (hr != DXGI_ERROR_WAIT_TIMEOUT) { break; }
-//	Sleep(100);
-// }
-//
-// hr = lDesktopResource->lpVtbl->QueryInterface(lDesktopResource, &IID_ID3D11Texture2D, &desktopImage);
-
-//// Copy image into GDI drawing texture
-// m_DeviceContext->lpVtbl->CopyResource(m_DeviceContext, lGDIImage, desktopImage);
-
-//// Draw cursor image into GDI drawing texture
-// IDXGISurface1 *surface;
-// hr = lGDIImage->lpVtbl->QueryInterface(lGDIImage, &IID_IDXGISurface1, &surface);
-
-//// Copy from CPU access texture to bitmap buffer
-
-// D3D11_MAPPED_SUBRESOURCE resource;
-// UINT subresource = D3D11CalcSubresource(0, 0, 0);
-// m_DeviceContext->lpVtbl->Map(m_DeviceContext, destinationImage, subresource, D3D11_MAP_READ_WRITE, 0, &resource);
-
-// BITMAPINFO	lBmpInfo;
-
-//// BMP 32 bpp
-
-// ZeroMemory(&lBmpInfo, sizeof(BITMAPINFO));
-// lBmpInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-// lBmpInfo.bmiHeader.biBitCount = 32;
-// lBmpInfo.bmiHeader.biCompression = BI_RGB;
-// lBmpInfo.bmiHeader.biWidth = lOutputDuplDesc.ModeDesc.Width;
-// lBmpInfo.bmiHeader.biHeight = lOutputDuplDesc.ModeDesc.Height;
-// lBmpInfo.bmiHeader.biPlanes = 1;
-// lBmpInfo.bmiHeader.biSizeImage = lOutputDuplDesc.ModeDesc.Width * lOutputDuplDesc.ModeDesc.Height * 4;
-
-// BYTE* pBuf = (BYTE*)ILibMemory_SmartAllocate(lBmpInfo.bmiHeader.biSizeImage);
-// UINT lBmpRowPitch = lOutputDuplDesc.ModeDesc.Width * 4;
-// BYTE* sptr = (BYTE*)resource.pData;
-// BYTE* dptr = pBuf + lBmpInfo.bmiHeader.biSizeImage - lBmpRowPitch;
-// UINT lRowPitch = min(lBmpRowPitch, resource.RowPitch);
-// size_t h;
-
-// for (h = 0; h < lOutputDuplDesc.ModeDesc.Height; ++h)
-//{
-//	memcpy_s(dptr, lBmpRowPitch, sptr, lRowPitch);
-//	sptr += resource.RowPitch;
-//	dptr -= lBmpRowPitch;
-// }
-//}
 
 #endif
