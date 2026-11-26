@@ -245,6 +245,8 @@ LDEXTRA =
 CSECTIONS = -ffunction-sections -fdata-sections
 LDSECTIONS = -Wl,--gc-sections
 MACOSLDSECTIONS = -Wl,-dead_strip
+# Before login macOS only lets a binary with this section connect to the window server. Without it the login window agent's first key event blocked in CGEventCreateKeyboardEvent(), on macOS 11.7 and 26.7.
+MACOSPRELOGIN = -Wl,-sectcreate,__CGPreLoginApp,__cgpreloginapp,/dev/null
 
 WatchDog = 120000
 KVMMaxTile = 0
@@ -868,7 +870,7 @@ linux:
 	$(STRIP)
 
 macos:
-	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES)" CFLAGS="$(MACOSARCH) -std=gnu99 -Wall -DJPEGMAXBUF=0 -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA) $(CSECTIONS)" LDFLAGS="$(MACSSL) $(MACOSFLAGS) -L. -lpthread -ldl -lz -lutil -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreServices -framework CoreGraphics -framework CoreFoundation -framework Security -framework Foundation -weak_framework ScreenCaptureKit -framework CoreMedia -framework CoreVideo -lobjc -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA) $(MACOSLDSECTIONS)"
+	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES)" CFLAGS="$(MACOSARCH) -std=gnu99 -Wall -DJPEGMAXBUF=0 -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA) $(CSECTIONS)" LDFLAGS="$(MACSSL) $(MACOSFLAGS) -L. -lpthread -ldl -lz -lutil -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreServices -framework CoreGraphics -framework CoreFoundation -framework Security -framework Foundation -weak_framework ScreenCaptureKit -framework CoreMedia -framework CoreVideo -lobjc -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA) $(MACOSLDSECTIONS) $(MACOSPRELOGIN)"
 	$(SYMBOLCP)
 	$(STRIP)
 
