@@ -21,7 +21,7 @@ limitations under the License.
 #include "mac_tile.h"
 #include "mac_sck.h"
 
-// The makefile builds for macOS 10.12 and 11, and ScreenCaptureKit is weak-linked: its classes are there from macOS 12.3.
+// The makefile builds for macOS 10.15 and 11, and ScreenCaptureKit is weak-linked: its classes are there from macOS 12.3.
 // On an older macOS they are nil, which kvm_sck_available() reports, so the availability warnings are silenced.
 #pragma clang diagnostic ignored "-Wunguarded-availability-new"
 
