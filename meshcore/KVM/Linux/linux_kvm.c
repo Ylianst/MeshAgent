@@ -1314,7 +1314,8 @@ void* kvm_server_mainloop_x11(void* parm)
 	int damageEventBase = 0, damageErrorBase = 0, framesSinceFull = 0;
 	unsigned char *damagedTiles = NULL;
 	size_t damagedTilesSize = 0;
-	int drawnX = 0, drawnY = 0, drawnW = 0, drawnH = 0, lastPointerX = -1, lastPointerY = -1;
+	int drawnX = 0, drawnY = 0, drawnW = 0, drawnH = 0, lastPointerX = -1, lastPointerY = -1, cursorChanged = 0;
+	int pointerWanted = 0;	// Whether the last captured frame was to have the pointer drawn into it
 	XImage *image = NULL;
 	eventdisplay = NULL;
 	Display *imagedisplay = NULL, *cursordisplay = NULL;
@@ -1486,6 +1487,7 @@ void* kvm_server_mainloop_x11(void* parm)
 			tile_info_alloc();
 		}
 
+		cursorChanged = 0;
 		if (cursordisplay == NULL)
 		{
 			if ((cursordisplay = x11_exports->XOpenDisplay(CURRENT_XDISPLAY)))
@@ -1526,7 +1528,7 @@ void* kvm_server_mainloop_x11(void* parm)
 					x11_exports->XNextEvent(cursordisplay, &XE);
 					if (XE.type == (event_base + 1))
 					{
-						cursorXE = XE; cursorNotified = 1;
+						cursorXE = XE; cursorNotified = 1; cursorChanged = 1;
 						// cursor_serial and cursor_name of XFixesCursorNotifyEvent, at 48 and 64 on 64-bit and 24 and 32 on 32-bit
 						unsigned long serial = ((unsigned long*)((char*)&XE + (sizeof(void*) == 8 ? 48 : 24)))[0];
 						unsigned long atom = ((unsigned long*)((char*)&XE + (sizeof(void*) == 8 ? 64 : 32)))[0];
@@ -1679,13 +1681,16 @@ void* kvm_server_mainloop_x11(void* parm)
 				}
 			}
 			if (damagedTiles != NULL && drawnW > 0) { kvm_x11_mark_tiles(damagedTiles, drawnX, drawnY, drawnW, drawnH); }
-			if (damagedTiles != NULL && !damaged && drawnW == 0 && gRemoteMouseRenderDefault == 0 && framesSinceFull < KVM_XDAMAGE_FULL_EVERY && !tile_pass_needed())
+			// A pointer drawn into the last frame is in the reference already. While it stays where it is, with the same image and
+			// the same decision to draw it, the frame is skipped as well, so a session that only views does not capture every period.
+			if (damagedTiles != NULL && !damaged && !cursorChanged && framesSinceFull < KVM_XDAMAGE_FULL_EVERY && !tile_pass_needed())
 			{
 				Window qr, qc;
 				int qx, qy, qwx, qwy;
 				unsigned int qm;
 				if (x11_exports->XQueryPointer(imagedisplay, RootWindowOfScreen(ScreenOfDisplay(imagedisplay, CURRENT_DISPLAY_ID)), &qr, &qc, &qx, &qy, &qwx, &qwy, &qm) &&
-					qx == lastPointerX && qy == lastPointerY)
+					qx == lastPointerX && qy == lastPointerY &&
+					pointerWanted == (cursordisplay != NULL && (gRemoteMouseRenderDefault != 0 || (remoteMouseInjected == 0 && (remoteMouseX != qx || remoteMouseY != qy)))))
 				{
 					framesSinceFull++;
 					continue;
@@ -1712,13 +1717,15 @@ void* kvm_server_mainloop_x11(void* parm)
 				&rr, &cr, &rx, &ry, &wx, &wy, &mr);
 			if (rs == 1) { lastPointerX = rx; lastPointerY = ry; }
 			drawnW = 0;
+			pointerWanted = 0;
 			if (rs == 1 && cursordisplay != NULL)
 			{
 				// XTest moves the pointer on eventdisplay and XQueryPointer reads it on imagedisplay, so in a pass with injected input rx and ry can still be the old position.
 				// Without this check a browser drag counted as a local move every other pass, and the viewer pointer flipped between its own and the one drawn into the frame.
 				int localMove = (remoteMouseInjected == 0 && (remoteMouseX != rx || remoteMouseY != ry));
 				remoteMouseInjected = 0;
-				cimage = (gRemoteMouseRenderDefault != 0 || localMove) ? (char*)xfixes_exports->XFixesGetCursorImage(cursordisplay) : NULL;
+				pointerWanted = (gRemoteMouseRenderDefault != 0 || localMove);
+				cimage = pointerWanted ? (char*)xfixes_exports->XFixesGetCursorImage(cursordisplay) : NULL;
 				// A failed fetch draws no pointer into the frame, so it takes the unhide branch and the viewer keeps its own pointer
 				if (cimage != NULL)
 				{
