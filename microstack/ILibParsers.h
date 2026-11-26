@@ -496,22 +496,30 @@ int ILibIsRunningOnChainThread(void* chain);
 	// An oversized length would reach malloc uncaught.
 	static inline int ILibMemory_Size_ValidateEx(size_t primaryLen, size_t extraLen)
 	{
-		if (primaryLen >= (UINT32_MAX - extraLen)) { return(0); }
-		if (extraLen >= (UINT32_MAX - primaryLen)) { return(0); }
-		if ((primaryLen + extraLen) >= (UINT32_MAX - sizeof(ILibMemory_Header))) { return(0); }
-		if (extraLen > 0 && ((primaryLen + extraLen + sizeof(ILibMemory_Header)) >= (UINT32_MAX - sizeof(ILibMemory_Header)))) { return(0); }
+		if (extraLen == 0)
+		{
+			return (primaryLen < (UINT32_MAX - sizeof(ILibMemory_Header))) ? 1 : 0;
+		}
+		if (primaryLen > (UINT32_MAX - (sizeof(void *) - 1))) { return(0); }
+		{
+			size_t alignedPrimary = (primaryLen + sizeof(void *) - 1) & ~(sizeof(void *) - 1);
+			if (extraLen >= (UINT32_MAX - (2 * sizeof(ILibMemory_Header)))) { return(0); }
+			if (alignedPrimary >= (UINT32_MAX - (2 * sizeof(ILibMemory_Header)) - extraLen)) { return(0); }
+		}
 		return(1);
 	}
 	// The macro form stays under this name so code outside this tree that still calls it keeps working.
 	#define ILibMemory_Size_Validate(primaryLen, extraLen) ILibMemory_Size_ValidateEx((size_t)(primaryLen), (size_t)(extraLen))
-	#define ILibMemory_Init_Size(primaryLen, extraLen) (primaryLen + extraLen + sizeof(ILibMemory_Header) + (extraLen>0?sizeof(ILibMemory_Header) + (((primaryLen + sizeof(ILibMemory_Header)) + sizeof(void *) - 1) & ~(sizeof(void *) - 1)):0))
-	// Un-macro'd because with non-constant sizes, MSVC x86 LTCG (v143 and v145, v142 verified unaffected) drops the macro's conditional part (extraLen > 0 ? header + roundup : 0).
-	// So the first block with a non-zero extraLen got 44 bytes instead of 88. This gave a 0xC0000374 (STATUS_HEAP_CORRUPTION) error at startup.
+	#define ILibMemory_Init_Size(primaryLen, extraLen) ((extraLen) > 0 ? ((((size_t)(primaryLen) + sizeof(void *) - 1) & ~(sizeof(void *) - 1)) + (size_t)(extraLen) + (2 * sizeof(ILibMemory_Header))) : ((size_t)(primaryLen) + sizeof(ILibMemory_Header)))
+	// Un-macro'd because with non-constant sizes, MSVC x86 LTCG (v143 and v145, v142 verified unaffected) drops the macro's conditional part when extraLen > 0.
 	static inline size_t ILibMemory_Init_SizeEx(size_t primaryLen, size_t extraLen)
 	{
-		size_t total = primaryLen + extraLen + sizeof(ILibMemory_Header);
-		if (extraLen > 0) { total += sizeof(ILibMemory_Header) + (((primaryLen + sizeof(ILibMemory_Header)) + sizeof(void *) - 1) & ~(sizeof(void *) - 1)); }
-		return(total);
+		if (extraLen > 0)
+		{
+			size_t alignedPrimary = (primaryLen + sizeof(void *) - 1) & ~(sizeof(void *) - 1);
+			return(alignedPrimary + extraLen + (2 * sizeof(ILibMemory_Header)));
+		}
+		return(primaryLen + sizeof(ILibMemory_Header));
 	}
 	void* ILibMemory_Init(void *ptr, size_t primarySize, size_t extraSize, ILibMemory_Types memType);
 	#define ILibMemory_SmartAllocate(len) ILibMemory_InitEx(ILibMemory_Size_ValidateEx((size_t)(len),0)?malloc(ILibMemory_Init_Size(len, 0)):NULL, (int)len, 0, ILibMemory_Types_HEAP)
