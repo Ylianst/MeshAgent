@@ -609,6 +609,14 @@ $(info MeshAgent: system libjpeg is v$(JPEG_HDR_VERSION) (jpeg8); auto-selecting
             endif
         endif
     endif
+    # The default archive is used with the headers it was built from (lib-jpeg-turbo/includes), so the
+    # two always match. The system headers can be IJG 6b, which has no 4 byte pixel formats
+    # (JCS_EXTENSIONS), and the KVM then leaves out every path that needs them.
+    ifeq ($(JPEGVER),)
+        ifneq ($(NOTURBOJPEG),1)
+            CFLAGS += -DKVM_BUNDLED_JPEG_HEADERS
+        endif
+    endif
 endif
     ifneq ($(JPEGVER),)
         ifeq ($(LEGACY_LD),1)

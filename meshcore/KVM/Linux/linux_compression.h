@@ -20,7 +20,8 @@ limitations under the License.
 #include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
-#ifdef __APPLE__
+// The makefile sets KVM_BUNDLED_JPEG_HEADERS on Linux when the bundled libjpeg-turbo archive is linked
+#if defined(__APPLE__) || defined(KVM_BUNDLED_JPEG_HEADERS)
 #include "lib-jpeg-turbo/includes/jpeglib.h"
 #include "lib-jpeg-turbo/includes/jerror.h"
 #else
