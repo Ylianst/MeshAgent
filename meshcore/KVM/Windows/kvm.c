@@ -730,7 +730,7 @@ int kvm_relay_feeddata(char *buf, int len, ILibKVM_WriteHandler writeHandler, vo
 		ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_2, "KVM [Master]: Write Input [Type = %u]", ntohs(((unsigned short *)buf)[0]));
 		return len;
 	}
-	else
+	else if (kvmConsoleMode)
 	{
 		int len2, ptr, take, used = 0;
 		while (used < len)
@@ -748,6 +748,8 @@ int kvm_relay_feeddata(char *buf, int len, ILibKVM_WriteHandler writeHandler, vo
 		}
 		return len;
 	}
+	// Service mode without a slave: the session gave up or is ending. The input is dropped, it must never be handled in the service's own process
+	return len;
 }
 
 // Set the KVM pause state
@@ -1209,7 +1211,6 @@ void kvm_relay_ExitHandler(ILibProcessPipe_Process sender, int exitCode, void *u
 	char *exePath = (char *)((void **)user)[3];
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "Agent KVM: KVM Child Process(%d) [EXITED] code 0x%08X", g_slavekvm, (unsigned int)exitCode);
-	UNREFERENCED_PARAMETER(sender);
 
 	if (g_shutdown == 0 && kvm_relay_should_restart(exitCode))
 	{
@@ -1218,7 +1219,19 @@ void kvm_relay_ExitHandler(ILibProcessPipe_Process sender, int exitCode, void *u
 	else
 	{
 		ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "Agent KVM: g_restartcount = %d, aborting", g_restartcount);
-		writeHandler(NULL, 0, reserved);
+		// ILibProcessPipe frees the process object after this handler. Left in gChildProcess, the viewer's disconnect used it in kvm_pause() and crashed the service
+		if (gChildProcess == sender) { gChildProcess = NULL; }
+		if (g_shutdown == 0)
+		{
+			// The slave keeps crashing. The viewer gets the reason and its stream is ended, a still picture without a word looks like a hang
+			char msg[] = "KVM Child process keeps exiting unexpectedly, the session is ended";
+			char buffer[128];
+			((unsigned short *)buffer)[0] = (unsigned short)htons((unsigned short)MNG_ERROR);	  // Write the type
+			((unsigned short *)buffer)[1] = (unsigned short)htons((unsigned short)(sizeof(msg) + 3)); // Write the size
+			memcpy_s(buffer + 4, sizeof(buffer) - 4, msg, sizeof(msg) - 1);
+			writeHandler(buffer, (int)sizeof(msg) + 3, reserved);
+			writeHandler(NULL, 0, reserved);
+		}
 	}
 }
 
