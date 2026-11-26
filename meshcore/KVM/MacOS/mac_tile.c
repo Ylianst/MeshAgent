@@ -76,6 +76,8 @@ void dump32bit (const XImage * input)
 
 // The last frame as it was compared, unpadded, in the frame's own pixel format
 static unsigned char *refFrame = NULL;
+static unsigned char *edgeTile = NULL;	// A rectangle on the right or bottom edge, filled out to whole tiles
+static size_t edgeTileSize = 0;
 static int refWidth = 0, refHeight = 0, refBytesPerPixel = 0;
 static int tileRefreshPending = 1;
 static int tileStalePending = 0; // 1 when an encode failed in the last pass, so its tiles are still to be sent
@@ -101,6 +103,33 @@ void tile_info_free(void)
 	free(refFrame);
 	refFrame = NULL;
 	refWidth = refHeight = refBytesPerPixel = 0;
+	free(edgeTile);
+	edgeTile = NULL;
+	edgeTileSize = 0;
+}
+
+// Copies the part of the rectangle that is on screen and repeats its last column and row up to whole tiles.
+// Returns NULL when the buffer cannot be had.
+static const unsigned char *edge_tile_copy(const struct tileFrame_t *frame, int x, int y, int width, int height, int onWidth, int onHeight)
+{
+	size_t bpp = (size_t)frame->bytesPerPixel, rowLen = (size_t)width * bpp, onLen = (size_t)onWidth * bpp, need = rowLen * (size_t)height;
+	unsigned char *dst;
+	int r, c;
+
+	if (need > edgeTileSize)
+	{
+		free(edgeTile);
+		if ((edgeTile = (unsigned char *)malloc(need)) == NULL) { edgeTileSize = 0; return(NULL); }
+		edgeTileSize = need;
+	}
+	for (r = 0; r < height; r++)
+	{
+		dst = edgeTile + (size_t)r * rowLen;
+		if (r >= onHeight) { memcpy(dst, dst - rowLen, rowLen); continue; }
+		memcpy(dst, frame->pixels + (size_t)(y + r) * frame->stride + (size_t)x * bpp, onLen);
+		for (c = onWidth; c < width; c++) { memcpy(dst + (size_t)c * bpp, dst + (size_t)(onWidth - 1) * bpp, bpp); }
+	}
+	return(edgeTile);
 }
 
 // One block for the row pointers and the tiles. Every tile starts stale, so the next pass sends the whole screen.
@@ -244,11 +273,19 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, const struct t
 		captureHeight += TILE_HEIGHT;
 	}
 
-	// The tile grid is rounded up to whole tiles, so a rectangle on the right or bottom edge ends at the frame edge
-	if (x + captureWidth > frame->width) { captureWidth = frame->width - x; }
-	if (y + captureHeight > frame->height) { captureHeight = frame->height - y; }
-
-	tileJpeg = write_JPEG_rect(frame->pixels + (size_t)y * frame->stride + (size_t)x * frame->bytesPerPixel, frame->stride, captureWidth, captureHeight, frame->bytesPerPixel, frame->format, COMPRESSION_QUALITY, &tileJpegLength);
+	// A rectangle on the right or bottom edge is sent as whole tiles, as master did. MeshCentral's desktop multiplexer counts a picture as (width / 16) * (height / 16) slots
+	// and drops it from the replay only when that count reaches exactly 0, so a picture cut at the edge (1710 % 16 = 14 on a 1710x1112 display) was replayed to every later viewer.
+	if (x + captureWidth > frame->width || y + captureHeight > frame->height)
+	{
+		int onWidth = (x + captureWidth > frame->width) ? frame->width - x : captureWidth;
+		int onHeight = (y + captureHeight > frame->height) ? frame->height - y : captureHeight;
+		const unsigned char *edge = edge_tile_copy(frame, x, y, captureWidth, captureHeight, onWidth, onHeight);
+		tileJpeg = (edge == NULL) ? NULL : write_JPEG_rect(edge, (size_t)captureWidth * frame->bytesPerPixel, captureWidth, captureHeight, frame->bytesPerPixel, frame->format, COMPRESSION_QUALITY, &tileJpegLength);
+	}
+	else
+	{
+		tileJpeg = write_JPEG_rect(frame->pixels + (size_t)y * frame->stride + (size_t)x * frame->bytesPerPixel, frame->stride, captureWidth, captureHeight, frame->bytesPerPixel, frame->format, COMPRESSION_QUALITY, &tileJpegLength);
+	}
 
 	// The packet header is written into the room in front of the JPEG, so the packet is sent from the encoder's buffer without a copy
 	if (tileJpeg != NULL)
