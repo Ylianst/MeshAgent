@@ -36,12 +36,16 @@ void kvm_flags_prepare(void);
 int kvm_relay_feeddata(char* buf, int len);
 void kvm_pause(int pause);
 void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid);
+void* kvm_relay_connect_console(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int *uid);
+int kvm_login_window_agent(void);
 void kvm_set_listener_path(const char *path);
 void kvm_socket_path(char *buf, size_t bufLen, unsigned int uid, int legacy);
 void kvm_relay_reset();
 void kvm_cleanup();
 // In agentcore.c, called when the -kvm0 child of a session exits
 void ILibDuktape_MeshAgent_RemoteDesktop_KVM_Exited(void *reserved);
+// In agentcore.c, called when the socket to a session's agent ends
+void ILibDuktape_MeshAgent_RemoteDesktop_KVM_Lost(void *reserved);
 
 #endif /* LINUX_KVM_H_ */
 

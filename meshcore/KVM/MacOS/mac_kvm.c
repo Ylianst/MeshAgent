@@ -566,6 +566,8 @@ static ILibProcessPipe_Pipe g_kvmSocketPipe = NULL;
 static int                   g_kvmSocketFD   = -1;
 static ILibKVM_WriteHandler  g_kvmSocketWriteHandler = NULL;
 static void                 *g_kvmSocketReserved     = NULL;
+// Set by kvm_relay_connect_console(), whose caller repeats the call from a timer, so kvm_relay_setup() connects once without its sleeps
+static int                   g_kvmSocketOneAttempt   = 0;
 
 static void kvm_relay_socket_ResetState(int closePipe)
 {
@@ -1175,8 +1177,8 @@ static void kvm_relay_socket_BrokenHandler(ILibProcessPipe_Pipe sender)
 	UNREFERENCED_PARAMETER(sender);
 	kvm_relay_socket_ResetState(0);
 	// ProcessPipe frees this pipe right after the handler, and the session kept pausing and freeing it, while the viewer waited on a stream that sent nothing.
-	// The LaunchAgent ends the socket when its user leaves the screen or it restarts after a grant, so the session ends as for an exited -kvm0 child.
-	if (reserved != NULL) { ILibDuktape_MeshAgent_RemoteDesktop_KVM_Exited(reserved); }
+	// The LaunchAgent ends the socket when its user leaves the screen or logs out, or when it restarts after a grant, so the daemon looks for the agent that has the screen now.
+	if (reserved != NULL) { ILibDuktape_MeshAgent_RemoteDesktop_KVM_Lost(reserved); }
 }
 
 // Validate that the connected peer of an AF_UNIX socket really is the
@@ -1243,7 +1245,8 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 	// before attempting a new connection.
 	kvm_relay_socket_ResetState(1);
 
-	if (uid != 0)
+	// kvm_relay_connect_console() also reaches the login window agent, uid 0, over its socket
+	if (uid != 0 || g_kvmSocketOneAttempt)
 	{
 		// macOS Tahoe path: prefer the user-LaunchAgent socket. Agent
 		// registers in gui/<uid> natively → com.apple.replayd reachable
@@ -1265,7 +1268,7 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 		{
 			int fd = -1;
 			int attempt;
-			const int maxRetries = 8;
+			const int maxRetries = g_kvmSocketOneAttempt ? 1 : 8;
 			// Per-attempt backoff in microseconds. Capped at 800ms so
 			// that even at the high end we stay well under one second
 			// per attempt; the previous `50000 << attempt` would have
@@ -1347,14 +1350,17 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 				// Transient failure (ECONNREFUSED on agent re-accept,
 				// or similar). Back off briefly. Capped table above;
 				// total budget across 8 attempts is ~3.65s.
-				usleep((useconds_t)backoffUs[attempt]);
+				if (!g_kvmSocketOneAttempt) { usleep((useconds_t)backoffUs[attempt]); }
 			}
 			// Socket exists but unreachable after retries. Don't fall
 			// back to fork-exec — that path is broken on Tahoe and
 			// would produce black-screen / dead-input. Return NULL
 			// to let the caller surface the error to MeshCentral.
-			fprintf(stderr, "meshagent: kvm-relay: giving up on %s after %d attempts (last errno=%d: %s)\n",
-				socketPath, maxRetries, lastConnectErrno, strerror(lastConnectErrno));
+			if (!g_kvmSocketOneAttempt)
+			{
+				fprintf(stderr, "meshagent: kvm-relay: giving up on %s after %d attempts (last errno=%d: %s)\n",
+					socketPath, maxRetries, lastConnectErrno, strerror(lastConnectErrno));
+			}
 			ILibMemory_Free(user);
 			return(NULL);
 		}
@@ -1397,6 +1403,33 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 		ILibMemory_Free(user);
 		return((void*)(kvm_find_socket(loginWindowPath, sizeof(loginWindowPath), 0) ? loginWindowPath : kvm_listener_path));
 	}
+}
+
+// 1 when this install has the user LaunchAgent: its -kvmagent at the login window leaves a root owned socket in /tmp, also after it ended at a login.
+// An install from before that LaunchAgent has the -kvm1 helper at the login window and a -kvm0 child for a user, and no such socket.
+int kvm_login_window_agent(void)
+{
+	char socketPath[128];
+	return(kvm_find_socket(socketPath, sizeof(socketPath), 0));
+}
+
+// One attempt to reach the agent that has the screen: the agent of the user who owns /dev/console, or the login window agent when root owns it.
+// Returns NULL while that agent does not listen yet. The daemon repeats it every 500 ms, so the owner is read here and not by consoleUid(), which starts a shell.
+void* kvm_relay_connect_console(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int *uid)
+{
+	char socketPath[128];
+	struct stat s;
+	void *ret;
+
+	*uid = 0;
+	if (stat("/dev/console", &s) != 0) { return(NULL); }
+	*uid = (int)s.st_uid;
+	// Without a socket of the uid kvm_relay_setup() would start a -kvm0 child, which is not wanted while the agent is still starting
+	if (!kvm_find_socket(socketPath, sizeof(socketPath), (unsigned int)s.st_uid)) { return(NULL); }
+	g_kvmSocketOneAttempt = 1;
+	ret = kvm_relay_setup(exePath, processPipeMgr, writeHandler, reserved, (int)s.st_uid);
+	g_kvmSocketOneAttempt = 0;
+	return(ret);
 }
 
 // Force a KVM reset & refresh
