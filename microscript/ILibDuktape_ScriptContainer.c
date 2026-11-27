@@ -86,6 +86,7 @@ extern char __agentExecPath[];
 #ifdef _POSIX
 extern char **environ;
 int SignalDescriptors[2] = { 0, 0 };
+pid_t SignalDescriptorsPid = 0;
 #endif
 
 #define SCRIPT_ENGINE_PIPE_BUFFER_SIZE 65535
@@ -1028,6 +1029,7 @@ void ILibDuktape_ScriptContainer_Process_SignalListener_PostSelect(void* object,
 			close(SignalDescriptors[1]);
 			if (pipe(SignalDescriptors) == 0)
 			{
+				SignalDescriptorsPid = getpid();
 				fcntl(SignalDescriptors[0], F_SETFL, O_NONBLOCK);
 				fcntl(SignalDescriptors[1], F_SETFL, O_NONBLOCK);
 			}
@@ -1039,6 +1041,14 @@ void ILibDuktape_ScriptContainer_Process_SignalListener(int signum, siginfo_t *i
 	if (SignalDescriptors[1] != 0)
 	{
 		char tmp[255];
+		if (getpid() != SignalDescriptorsPid)
+		{
+			// Inherited by a fork() that did not exec, like the Linux KVM child before it sets its own handlers. Only
+			// the parent's chain reads this pipe, so forwarding would make the parent act on this process's signal.
+			signal(signum, SIG_DFL);
+			raise(signum);
+			return;
+		}
 		switch (signum)
 		{
 			case SIGCHLD:
@@ -1456,6 +1466,7 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	{
 		if (pipe(SignalDescriptors) == 0)
 		{
+			SignalDescriptorsPid = getpid();
 			fcntl(SignalDescriptors[0], F_SETFL, O_NONBLOCK);
 			fcntl(SignalDescriptors[1], F_SETFL, O_NONBLOCK);
 
